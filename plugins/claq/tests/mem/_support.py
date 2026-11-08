@@ -1,19 +1,42 @@
-"""tests/mem のテストの複数のファイルが使う補助（CLI 実行・repos/knowledge の投入・必ず失敗するスタブ）。"""
+"""tests/mem の複数のファイルが使う補助（CLI 実行・repos/knowledge の投入・失敗スタブ・空 DB の fixture）。"""
 
 from __future__ import annotations
 
 import io
 import json
 import sys
+from collections.abc import Callable, Iterator
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
 
 from claq.mem import cli, cmd_context
+from claq.mem import settings as settings_mod
 from claq.mem.database import Database
 from claq.mem.models import Knowledge
 from claq.mem.repo_identity import resolve_repo
+
+
+@pytest.fixture
+def db(tmp_path: Path) -> Iterator[Database]:
+    """テスト用の空 DB を開いて返す。"""
+    database = Database(tmp_path / "mem.db")
+    yield database
+    database.close()
+
+
+def _raising(error: BaseException) -> Callable[..., None]:
+    """呼ばれると error を送出し、呼び出しを ``calls`` に記録するスタブを返す。"""
+    calls: list[tuple[object, ...]] = []
+
+    def _stub(*args: object, **_kwargs: object) -> None:
+        """呼び出しを記録して error を送出する。"""
+        calls.append(args)
+        raise error
+
+    _stub.calls = calls  # type: ignore[attr-defined]
+    return _stub
 
 
 def _run_cli(
@@ -25,8 +48,6 @@ def _run_cli(
     bg_failure_notice: str = "",
 ) -> tuple[str, str, int]:
     """データディレクトリと cwd を tmp_path に差し替えて cli.main() を実行する。"""
-    import claq.mem.settings as settings_mod
-
     monkeypatch.setattr(settings_mod, "_default_data_dir", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["python", *argv])

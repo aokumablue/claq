@@ -18,13 +18,16 @@ logger = logging.getLogger(__name__)
 _LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
 
 
-def run(server: MCPServer) -> None:
-    """コマンドライン引数でトランスポートを選び、サーバを起動する。
+def _argument_parser(server_name: str) -> argparse.ArgumentParser:
+    """起動の引数のパーサを作る。
 
     Args:
-        server: 起動するサーバ。
+        server_name: ヘルプに出すサーバ名。
+
+    Returns:
+        `--http`・`--host`・`--port` を受け付けるパーサ。
     """
-    parser = argparse.ArgumentParser(description=f"{server.name} MCP server")
+    parser = argparse.ArgumentParser(description=f"{server_name} MCP server")
     parser.add_argument("--http", action="store_true", help="Streamable HTTP で起動する（既定は stdio）")
     parser.add_argument(
         "--host",
@@ -32,6 +35,38 @@ def run(server: MCPServer) -> None:
         help=f"HTTP のバインド先。ループバック（{' / '.join(_LOOPBACK_HOSTS)}）だけを受け付ける（既定は 127.0.0.1）",
     )
     parser.add_argument("--port", type=int, default=8000, help="HTTP ポート")
+    return parser
+
+
+def _http_security(host: str, port: int) -> TransportSecuritySettings:
+    """バインド先に合わせた、DNS リバインディング対策の設定を作る。
+
+    SDK は Host ヘッダと Origin を許可リストとの完全一致で照合する。IPv6 の Host ヘッダは
+    ブラケット付き（[::1]:8000）で届くので、裸のホストとポート付きの両方をその形で挙げる
+    （挙げ忘れると全リクエストが 421 になる）。
+
+    Args:
+        host: バインド先のホスト。
+        port: バインド先のポート。
+
+    Returns:
+        Host ヘッダと Origin をバインド先だけに絞った設定。
+    """
+    authority = f"[{host}]" if ":" in host else host
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[authority, f"{authority}:{port}"],
+        allowed_origins=[f"http://{authority}:{port}"],
+    )
+
+
+def run(server: MCPServer) -> None:
+    """コマンドライン引数でトランスポートを選び、サーバを起動する。
+
+    Args:
+        server: 起動するサーバ。
+    """
+    parser = _argument_parser(server.name)
     args = parser.parse_args()
 
     if not args.http:
@@ -43,15 +78,7 @@ def run(server: MCPServer) -> None:
     # （DNS リバインディング対策）。認証の無いサーバをループバックの外へ公開する手段は置かない。
     if args.host not in _LOOPBACK_HOSTS:
         parser.error(f"--host {args.host} は使えません。認証を実装していないので、ループバック以外には公開しない")
-    # SDK は Host ヘッダと Origin を許可リストとの完全一致で照合する。IPv6 の Host ヘッダは
-    # ブラケット付き（[::1]:8000）で届くので、裸のホストとポート付きの両方をその形で挙げる
-    # （挙げ忘れると全リクエストが 421 になる）。
-    authority = f"[{args.host}]" if ":" in args.host else args.host
-    security = TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=[authority, f"{authority}:{args.port}"],
-        allowed_origins=[f"http://{authority}:{args.port}"],
-    )
+    security = _http_security(args.host, args.port)
     logger.info("starting streamable-http on %s:%s", args.host, args.port)
     server.run(
         transport="streamable-http",

@@ -14,25 +14,25 @@ from claq.hooks.detach import recent_bg_failure_notice
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.env_pointer import ancestor_pointers_supported
 from claq.lib.harness import normalize_user_message
-from claq.mem import logger as mem_logger
-from claq.mem.command_support import CommandArgs, _fit_budget, _session_uid
+from claq.mem.command_support import CommandArgs, fit_budget, session_uid_of
 from claq.mem.database import Database
-from claq.mem.handoff import build_handoff
+from claq.mem.handoff import build_handoff, truncate_handoff
 from claq.mem.knowledge_input import optional_str
 from claq.mem.models import Knowledge, Session, utc_now_iso
 from claq.mem.redaction import redact
 from claq.mem.repo_identity import resolve_repo
 from claq.mem.settings import (
     CONTEXT_GLOBAL_CHAR_BUDGET,
-    CONTEXT_HANDOFF_CHAR_BUDGET,
     CONTEXT_ITEM_CHAR_LIMIT,
     CONTEXT_REPO_CHAR_BUDGET,
     Settings,
 )
-from claq.mem.tag_stripping import keep_allowed_chars, keep_allowed_chars_for_injection, strip_tags
-
-log = mem_logger.get("CLI")
-
+from claq.mem.tag_stripping import (
+    keep_allowed_chars,
+    keep_allowed_chars_for_injection,
+    strip_tags,
+    strip_tags_for_injection,
+)
 
 # --- SessionStart への知識注入 ---
 
@@ -103,7 +103,7 @@ def _format_injected_item(row: Knowledge) -> str:
 
     既定は ``- [kind] title`` のみ。``body`` を足しても ``CONTEXT_ITEM_CHAR_LIMIT``
     文字に収まる場合だけ ``—`` で続け、長い body が節の予算を食い潰すのを防ぐ。
-    title / body は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
+    title / body は信頼境界タグを偽装できるため ``strip_tags_for_injection`` で無害化する。その前に
     ``keep_allowed_chars_for_injection`` で許可した文字だけを残す（後ろに置くと、不可視文字で
     分断したタグが除去で再結合して ``strip_tags`` をすり抜ける）。読み出し側は ``redact`` を
     掛けないため、除去で再結合した鍵だけは同関数が伏せる。
@@ -116,8 +116,8 @@ def _format_injected_item(row: Knowledge) -> str:
     """
     # 入口で畳んでいても、既に DB にある行や将来の別経路を信用しない。返り値が
     # 「改行を含まない 1 行」であることは、この関数が自分で保証する。
-    head = f"- [{row.kind}] {_one_line(strip_tags(keep_allowed_chars_for_injection(row.title)))}"
-    body = _one_line(strip_tags(keep_allowed_chars_for_injection(row.body).strip()))
+    head = f"- [{row.kind}] {_one_line(strip_tags_for_injection(keep_allowed_chars_for_injection(row.title)))}"
+    body = _one_line(strip_tags_for_injection(keep_allowed_chars_for_injection(row.body).strip()))
     if not body:
         return head
     combined = f"{head} — {body}"
@@ -140,13 +140,13 @@ def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
     if not rows:
         return ""
     ordered = sorted(rows, key=lambda row: (row.confidence, row.updated_at, row.id or 0), reverse=True)
-    return "\n".join([f"## {heading}", *_fit_budget([_format_injected_item(row) for row in ordered], budget)])
+    return "\n".join([f"## {heading}", *fit_budget([_format_injected_item(row) for row in ordered], budget)])
 
 
 def _handoff_section(db: Database, repo_id: str) -> str:
     """直近セッションの引き継ぎを ``前回の続き`` 節へ組み立てる。
 
-    handoff 本文は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
+    handoff 本文は信頼境界タグを偽装できるため ``strip_tags_for_injection`` で無害化する。その前に
     ``keep_allowed_chars_for_injection`` で許可した文字だけを残す。行区切りは LF に揃って
     改行として残るので、``_neutralize_handoff_structure`` は全ての論理行を見られる。
 
@@ -160,13 +160,11 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     session = db.get_latest_session(repo_id)
     if session is None:
         return ""
-    handoff = _neutralize_handoff_structure(strip_tags(keep_allowed_chars_for_injection(session.handoff).strip()))
+    handoff = _neutralize_handoff_structure(strip_tags_for_injection(keep_allowed_chars_for_injection(session.handoff).strip()))
     if not handoff:
         return ""
-    if len(handoff) > CONTEXT_HANDOFF_CHAR_BUDGET:
-        handoff = handoff[: CONTEXT_HANDOFF_CHAR_BUDGET - 1] + "…"
     stamp = datetime.fromisoformat(session.ended_at).strftime("%Y-%m-%d %H:%M")
-    return f"## 前回の続き ({stamp})\n{handoff}"
+    return f"## 前回の続き ({stamp})\n{truncate_handoff(handoff)}"
 
 
 # detach 失敗通知の 1 行化に使う。許可リスト処理が行区切りを LF に揃えた後の、LF の連なりを空白 1 つに畳む。
@@ -225,7 +223,7 @@ def _shell_bootstrap_section() -> str:
     )
 
 
-def _handle_context(settings: Settings, args: CommandArgs) -> str:
+def handle_context(settings: Settings, args: CommandArgs) -> str:
     """context コマンド: SessionStart へ注入する ``<claq-memory>`` ブロックを組み立てる。
 
     共通知識・リポジトリ知識・前回の引き継ぎを、いずれも ``status='active'`` に
@@ -245,7 +243,7 @@ def _handle_context(settings: Settings, args: CommandArgs) -> str:
         repo = resolve_repo(optional_str(payload.get("cwd")), db)
         # ここが sessions 行を作る唯一の場所で、SessionEnd の handoff はこの行を
         # 更新する。session_uid は NOT NULL UNIQUE なので空文字では作らない。
-        if session_uid := _session_uid(payload):
+        if session_uid := session_uid_of(payload):
             db.start_session(Session(session_uid=session_uid, repo_id=repo.id))
         sections = [
             _knowledge_section(
@@ -272,7 +270,7 @@ def _handle_context(settings: Settings, args: CommandArgs) -> str:
 # --- SessionEnd の引き継ぎ記録 ---
 
 
-def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
+def handle_handoff(settings: Settings, args: CommandArgs) -> None:
     """handoff コマンド: SessionEnd の引き継ぎ本文を組み立てて ``sessions`` へ書き込む。
 
     既存行があれば更新し、無ければ作る（SessionStart が走らなかったハーネスでも
@@ -289,7 +287,7 @@ def _handle_handoff(settings: Settings, args: CommandArgs) -> None:
         args: コマンド引数と、SessionEnd フックが stdin へ渡した JSON。
     """
     payload = args.stdin_data
-    session_uid = _session_uid(payload)
+    session_uid = session_uid_of(payload)
     if not session_uid:
         return
     handoff = build_handoff(payload)

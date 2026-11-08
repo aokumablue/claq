@@ -7,12 +7,15 @@ deny する。key 集合は `block_no_verify` が `git config` 経由で塞ぐ�
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
-from claq.hooks import bash_config_protection, block_no_verify, config_protection
+from claq.hooks import bash_config_protection, block_no_verify, conditional_protection, config_protection
+
+from ._support import _bash
+from ._support import _run as _run_hook
 
 _REMOTE_SECTION = '[remote "origin"]\n\turl = git@example.com:o/r.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n'
 _HOOKS_PATH_SECTION = "[core]\n\thooksPath = /dev/null\n"
@@ -20,7 +23,7 @@ _ALIAS_CONFIG = "[core]\n\tbare = false\n[alias]\n\tci = commit\n" + _REMOTE_SEC
 _TWO_ALIASES = "[alias]\n\ta = x\n\tb = x\n"
 _USER = "[user]\n\tname = x\n"
 # 走査上限（_FULL_TEXT_MAX_BYTES）を超える長さの本文。
-_OVER_CAP = "# pad\n" * (config_protection._FULL_TEXT_MAX_BYTES // 6 + 10)
+_OVER_CAP = "# pad\n" * (conditional_protection._FULL_TEXT_MAX_BYTES // 6 + 10)
 
 
 @pytest.fixture(autouse=True)
@@ -36,8 +39,7 @@ def _isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 def _run(monkeypatch: pytest.MonkeyPatch, payload: dict) -> int:
     """config_protection.main() を実行し終了コードを返す。"""
-    monkeypatch.setattr(config_protection, "read_raw_stdin_with_truncation", lambda: (json.dumps(payload), False))
-    return config_protection.main()
+    return _run_hook("config_protection", payload, monkeypatch)
 
 
 def _edit(old_string: str, new_string: str, *, file_path: str = ".git/config", replace_all: bool = False) -> dict:
@@ -408,7 +410,7 @@ class TestProtectedPaths:
         """ホームを決められなければ、ホーム側の設定は候補なし。"""
         for name in ("CLAQ_HOME", "HOME", "USERPROFILE"):
             monkeypatch.delenv(name, raising=False)
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("no home"))))
+        monkeypatch.setattr(Path, "home", mock.Mock(side_effect=RuntimeError("no home")))
         assert config_protection.global_git_config_path("~/.gitconfig") is None
         assert config_protection.global_git_config_path(".gitconfig") is None
 
@@ -521,9 +523,7 @@ class TestBashWrite:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """main 経路は exit 2 で、対象の表示名と git config 向けの文言を出す。"""
-        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
-        monkeypatch.setattr(bash_config_protection, "read_raw_stdin_with_truncation", lambda: (payload, False))
-        assert bash_config_protection.main() == 2
+        assert _run_hook("bash_config_protection", _bash(command), monkeypatch) == 2
         stderr = capsys.readouterr().err
         assert (display in stderr, "git config" in stderr, absent in stderr) == (True, True, False)
 

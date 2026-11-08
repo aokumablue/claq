@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from claq.ci.ci_common import (
-    REPO_ROOT,
+    PLUGIN_ROOT,
     emit_error,
     extract_frontmatter,
     parse_validator_args,
@@ -15,7 +15,7 @@ from claq.ci.ci_common import (
     report_missing,
 )
 
-DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
+DEFAULT_SKILLS_DIR = PLUGIN_ROOT / "skills"
 
 # SKILL.md の frontmatter に必須のフィールド。`name` が無いとホストが登録
 # できず、`description` が無いと「いつ呼ぶか」を判断できない。
@@ -75,8 +75,10 @@ def _validate_skill_dir(directory: Path) -> bool:
     return report_errors(_frontmatter_field_errors(label, frontmatter))
 
 
-def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR) -> int:
-    """スキルディレクトリを検証し、JS バリデータと同じメッセージを表示する。
+def validate_skills(skills_dir: str | Path) -> int:
+    """スキルディレクトリを検証する。
+
+    誤りは 1 件ずつ stderr へ書き出し、全件合格なら検証したディレクトリ数を stdout へ表示する。
 
     Args:
         skills_dir: 検証するスキルディレクトリ。
@@ -87,11 +89,12 @@ def validate_skills(skills_dir: str | Path = DEFAULT_SKILLS_DIR) -> int:
     skills_path = Path(skills_dir)
     if not skills_path.exists():
         return report_missing("skills ディレクトリ", skills_path)
-    dirs = [entry for entry in skills_path.iterdir() if entry.is_dir()]
+    skill_dirs = [entry for entry in skills_path.iterdir() if entry.is_dir()]
     # 全ディレクトリの誤りを出し切るため、短絡させずに検証する。
-    if [directory for directory in dirs if _validate_skill_dir(directory)]:
+    failed = [directory for directory in skill_dirs if _validate_skill_dir(directory)]
+    if failed:
         return 1
-    print(f"{len(dirs)} 個のスキルディレクトリを検証しました")
+    print(f"{len(skill_dirs)} 個のスキルディレクトリを検証しました")
     return 0
 
 

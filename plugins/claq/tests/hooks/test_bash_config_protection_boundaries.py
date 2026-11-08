@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from claq.hooks import bash_config_protection, host_guard_targets
+from claq.lib.core_utils import get_plugin_root
 
 from ._support import _EXPECTED_LEADING_SHELL_KEYWORDS, _bash, _run
 from ._support import _home_outside_repo as _home_outside_repo
@@ -241,3 +242,17 @@ def test_argv_array_over_budget_is_blocked_before_scanning_elements(
 
     assert code == 2
     assert elapsed < 2.0, f"{hook} took {elapsed:.3f}s (要素の走査が予算検査より先に積み上がった疑い)"
+
+
+@pytest.mark.parametrize("name", ["hooks", "HOOKS", "Hooks"])
+def test_deleting_any_spelling_of_a_guarded_ancestor_is_denied(name: str) -> None:
+    """保護対象の祖先は綴りの大小によらず当たる（APFS / NTFS では ``HOOKS`` が実体の ``hooks`` に着地する）。"""
+    token = str(get_plugin_root() / name)
+    assert host_guard_targets.find_host_guard_match(token, scope_certain=True) == "hooks/hooks.json/"
+
+
+@pytest.mark.parametrize("relative", ["HOOKSX", "HOOKS/other.txt"])
+def test_only_a_guarded_ancestor_itself_matches_after_folding(relative: str) -> None:
+    """畳んだ比較も要素単位の祖先判定のまま（名前の前方一致や配下の別ファイルへ広がらない）。"""
+    token = str(get_plugin_root() / relative)
+    assert host_guard_targets.find_host_guard_match(token, scope_certain=True) is None

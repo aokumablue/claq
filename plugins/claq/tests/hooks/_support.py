@@ -1,8 +1,9 @@
 """tests/hooks の複数のファイルが使う補助。
 
-- secret scan 予算の deadline 生成・コミットメッセージ検証のスパイ
+- secret scan 予算の deadline 生成・コミットメッセージ検証のスパイ・secret の見本行（`_SECRET_LINE`）
 - 実 git リポジトリでの commit 品質フック評価の土台（`_git` / `_init_git_repo` / `_evaluate_in_repo`）
-- 保護フックの `main()` をインプロセスで呼ぶ土台（`_HOOKS` / `_run` / payload 組み立て / `_repo_scope` / `_home_outside_repo`）
+- 保護フックの `main()` をインプロセスで呼ぶ土台（`_HOOKS` / `_run` / payload 組み立て（`_bash` / `_write` /
+  `_write_content` / `_edit`） / `_repo_scope` / `_home_outside_repo`）
 - 保護語彙の期待値表（`_EXPECTED_*`、`_EXPECTED_VOCABULARIES`、`_EXTERNALLY_PINNED_VOCABULARIES`）。
   保護ファイル名の全数検査（`test_protection_bypass_regressions.py`）と語彙集合の固定
   （`test_protection_vocabulary_declarations.py`）が同じ表を使うため、ここに 1 つだけ置く。
@@ -10,6 +11,8 @@
   `_run_launcher`、hooks.json の宣言列挙 `_iter_declared_commands`）。起動スモーク（`test_hook_cli_launch_smoke.py`）・
   PreToolUse 入力軸のゲート（`test_hook_cli_contract.py`）・stdin 停止の実プロセス検査
   （`test_stdin_unavailable_fail_closed.py`）が共有する。
+- `python -m` で hook を別プロセス起動する土台（`SRC_ROOT` / `_run_module`）。launcher を通らない起動は
+  自分で src を積まないため、この checkout の src を PYTHONPATH で名指す。
 """
 
 from __future__ import annotations
@@ -24,9 +27,17 @@ from typing import Any
 
 import pytest
 
-from claq.hooks import bash_config_protection, block_no_verify, config_protection, hook_common, stdin_io
-from claq.hooks import commit_quality_scanner as commit_quality_scanner
-from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
+from claq.hooks import (
+    bash_config_protection,
+    block_no_verify,
+    commit_quality_scanner,
+    config_protection,
+    hook_common,
+    pre_bash_commit_quality,
+)
+
+# 鍵の形の文字列は連結で組む。完成形を literal で書くと secret の自己走査に掛かる。
+_SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
 
 
 def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -147,6 +158,24 @@ def _write_content(file_path: str, content: str) -> dict[str, Any]:
     return {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": content}}
 
 
+def _edit(file_path: str, old_string: str, new_string: str, tool_name: str = "Edit") -> dict[str, Any]:
+    """Edit 系ツール呼び出しの payload を組み立てる。
+
+    Args:
+        file_path: `file_path` フィールドに載せる値。
+        old_string: 置換前の断片。
+        new_string: 置換後の断片。
+        tool_name: ツール名。
+
+    Returns:
+        フック stdin へ渡す payload dict。
+    """
+    return {
+        "tool_name": tool_name,
+        "tool_input": {"file_path": file_path, "old_string": old_string, "new_string": new_string},
+    }
+
+
 _NO_VERIFY = "git commit --no-verify -m x"
 
 
@@ -171,7 +200,7 @@ def _repo_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     # ディレクトリは git リポジトリではないため、素のままだと「staged を特定
     # できない」の fail-closed で全ケースが exit 2 になり、mutation ガードの
     # 判定軸がまったく効いていなくても表が緑になる。空 staged を与えて、
-    # `_compound_commit_risk` の結論だけが exit code に出る状態にする。
+    # `compound_commit_risk` の結論だけが exit code に出る状態にする。
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: [])
     return tmp_path
 
@@ -217,11 +246,7 @@ def _run(hook: str, payload: dict[str, Any], monkeypatch: pytest.MonkeyPatch) ->
         return json.dumps(payload), False
 
     module = _HOOKS[hook]
-    # `pre_bash_commit_quality.main()` は `stdin_io` から関数内 import する
-    # ため、モジュール束縛の差し替えだけでは効かない。両方を差し替える。
-    monkeypatch.setattr(stdin_io, "read_raw_stdin_with_truncation", _read)
-    if hasattr(module, "read_raw_stdin_with_truncation"):
-        monkeypatch.setattr(module, "read_raw_stdin_with_truncation", _read)
+    monkeypatch.setattr(module, "read_raw_stdin_with_truncation", _read)
     return module.main()
 
 
@@ -278,14 +303,14 @@ _EXPECTED_CONDITIONALLY_PROTECTED_FILES = frozenset({
     "settings.local.json",
 })
 
-# `bash_config_protection._DIRECTORY_CHANGE_COMMANDS` の期待内容（層2）。
+# `hook_common.DIRECTORY_CHANGE_COMMANDS` の期待内容（層2）。
 _EXPECTED_DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 # `bash_config_protection._LEADING_SHELL_KEYWORDS` の期待内容（ディレクトリ移動の前に読み飛ばす語）。
 _EXPECTED_LEADING_SHELL_KEYWORDS = frozenset(
     {"{", "(", "!", "if", "then", "elif", "else", "while", "until", "do", "builtin"}
 )
 
-# `config_protection._LINT_SECTION_HEADERS` の期待内容（層2）。順序も含めて固定する
+# `conditional_protection._LINT_SECTION_HEADERS` の期待内容（層2）。順序も含めて固定する
 # （前方一致で判定するため、要素の順序は結果に影響しないが定義の差分を見やすくする）。
 _EXPECTED_LINT_SECTION_HEADERS = (
     "[tool.ruff",
@@ -297,7 +322,7 @@ _EXPECTED_LINT_SECTION_HEADERS = (
     "[testenv",
 )
 
-# `config_protection._LINT_KEYS` の期待内容（層2）。
+# `conditional_protection._LINT_KEYS` の期待内容（層2）。
 _EXPECTED_LINT_KEYS = ("ignore", "select", "per-file-ignores", "exclude", "fail_under", "addopts")
 
 
@@ -363,9 +388,6 @@ def _folded(names: frozenset[str]) -> frozenset[str]:
 _EXPECTED_VOCABULARIES: dict[str, Any] = {
     # --- bash_config_protection ---
     "bash_config_protection._BASH_TOOL_NAMES": frozenset({"bash"}),
-    "bash_config_protection._REDIRECT_OPERATORS": frozenset(
-        {">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"}
-    ),
     "bash_config_protection._LAST_ARG_WRITE_COMMANDS": frozenset(
         {"copy", "copy-item", "cp", "cpi", "install", "mi", "move", "move-item", "mv"}
     ),
@@ -378,7 +400,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "bash_config_protection._LN_COMMANDS": frozenset({"ln"}),
     "bash_config_protection._DD_COMMANDS": frozenset({"dd"}),
     "bash_config_protection._TOUCH_COMMANDS": _EXPECTED_TOUCH_COMMANDS,
-    "bash_config_protection._DIRECTORY_CHANGE_COMMANDS": _EXPECTED_DIRECTORY_CHANGE_COMMANDS,
     "bash_config_protection._LEADING_SHELL_KEYWORDS": _EXPECTED_LEADING_SHELL_KEYWORDS,
     "bash_config_protection._COMMAND_POSITION_WRAPPERS": frozenset(
         {
@@ -511,10 +532,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": _folded(
         _EXPECTED_CONDITIONALLY_PROTECTED_FILES
     ),
-    # ホスト設定（settings.json / settings.local.json）で置換前後の全文を比べる部分木と env のキー。
-    # env のキーは大小無視で照合する（Windows の環境変数名は大小を区別しない）。
-    "config_protection._SETTINGS_GUARDED_SUBTREES": ("hooks", "enabledPlugins", "disabledPlugins", "disableAllHooks"),
-    "config_protection._SETTINGS_GUARDED_ENV_NAMES": ("CLAQ_PYTHON", "PATH", "PYTHONPATH", "PYTHONHOME"),
     "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": _EXPECTED_RUNNING_PLUGIN_GUARDED_DIRS,
     # 派生: 上の表示名（`blocked_message_for_file` が文言を選ぶ鍵）。
     "config_protection.RUNNING_PLUGIN_DISPLAY_NAMES": frozenset(
@@ -534,18 +551,31 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection.GIT_CONFIG_DISPLAY_NAMES": frozenset("/".join(segments) for segments in _EXPECTED_GIT_CONFIG_REPO_SEGMENTS)
     | _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,
     "git_config_text.GLOBAL_GIT_CONFIG_DISPLAY_NAMES": _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,
-    "config_protection._LINT_SECTION_HEADERS": _EXPECTED_LINT_SECTION_HEADERS,
-    "config_protection._LINT_KEYS": _EXPECTED_LINT_KEYS,
-    "config_protection._PACKAGE_JSON_LINT_KEYS": ("eslintConfig", "prettier"),
-    "config_protection._TOX_COMMAND_KEYS": ("commands", "commands_pre", "commands_post"),
+    # --- conditional_protection ---
+    "conditional_protection._LINT_SECTION_HEADERS": _EXPECTED_LINT_SECTION_HEADERS,
+    "conditional_protection._LINT_KEYS": _EXPECTED_LINT_KEYS,
+    "conditional_protection._PACKAGE_JSON_LINT_KEYS": ("eslintConfig", "prettier"),
+    "conditional_protection._TOX_COMMAND_KEYS": ("commands", "commands_pre", "commands_post"),
+    # ホスト設定（settings.json / settings.local.json）で置換前後の全文を比べる部分木と env のキー。
+    # env のキーは大小無視で照合する（Windows の環境変数名は大小を区別しない）。
+    "conditional_protection._SETTINGS_GUARDED_SUBTREES": ("hooks", "enabledPlugins", "disabledPlugins", "disableAllHooks"),
+    "conditional_protection._SETTINGS_GUARDED_ENV_NAMES": ("CLAQ_PYTHON", "PATH", "PYTHONPATH", "PYTHONHOME"),
     # --- shell_tokens ---
-    "shell_tokens._SHELL_SEPARATORS": frozenset({"&&", "||", ";", "|", "&", "(", ")"}),
+    "shell_tokens.SHELL_SEPARATORS": frozenset({"&&", "||", ";", "|", "&", "(", ")"}),
     "shell_tokens.SHELL_WRAPPER_EXECUTABLES": frozenset({"sh", "bash", "zsh", "dash"}),
-    "shell_tokens._BODY_EXECUTING_BUILTINS": frozenset({".", "source", "eval"}),
-    "shell_tokens._COMMENT_PRECEDING_CHARS": frozenset(" \t\n;|&()<>"),
-    "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&"),
+    "heredoc._BODY_EXECUTING_BUILTINS": frozenset({".", "source", "eval"}),
+    "shell_tokens.COMMENT_PRECEDING_CHARS": frozenset(" \t\n;|&()<>"),
+    "heredoc._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&", "{", "("),
+    "heredoc._GROUP_OPENERS": frozenset({"{", "if", "case", "for", "while", "until", "select"}),
+    "heredoc._GROUP_CLOSERS": frozenset({"}", "fi", "esac", "done"}),
+    "heredoc._COMMAND_POSITION_KEYWORDS": frozenset({"{", "then", "do", "else", "elif", "!"}),
+    "heredoc._STATEMENT_SEPARATORS": frozenset({";", "&&", "||", "&"}),
+    "shell_tokens.WRITE_REDIRECT_OPERATORS": frozenset(
+        {">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"}
+    ),
     # --- hook_common ---
     "hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES": frozenset({"ed", "red", "ex", "sponge"}),
+    "hook_common.DIRECTORY_CHANGE_COMMANDS": _EXPECTED_DIRECTORY_CHANGE_COMMANDS,
     # --- commit_risk ---
     "commit_risk._INDEX_MUTATING_GIT_SUBCOMMANDS": frozenset(
         {
@@ -586,9 +616,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
         }
     ),
     "commit_risk._INPLACE_EDIT_EXECUTABLES": frozenset({"perl", "sed"}),
-    "commit_risk._MUTATING_REDIRECT_OPERATORS": frozenset(
-        {">", ">>", "&>", "&>>", ">|", "<>", "1>", "2>", "1>>", "2>>", ">&"}
-    ),
 }
 
 # 完全一致で固定**しない**語彙と、その代わりに何が固定しているか。
@@ -607,7 +634,8 @@ _EXTERNALLY_PINNED_VOCABULARIES: dict[str, str] = {
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-LAUNCHER = PLUGIN_ROOT / "src" / "claq" / "launcher.py"
+SRC_ROOT = PLUGIN_ROOT / "src"
+LAUNCHER = SRC_ROOT / "claq" / "launcher.py"
 HOOK_WRAPPER = PLUGIN_ROOT / "runtime" / "claq-hook"
 _ISOLATED_ENV_PREFIXES = ("CODEX_", "GROK_", "COPILOT_")
 _ISOLATED_ENV_KEYS = frozenset({
@@ -661,6 +689,41 @@ def _run_launcher(hook: str, payload: dict, tmp_home: Path) -> subprocess.Comple
         text=True,
         env=_launcher_env(tmp_home),
         timeout=30,
+        check=False,
+    )
+
+
+def _run_module(
+    module: str,
+    stdin_text: str,
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+    timeout: float = 60,
+) -> subprocess.CompletedProcess[str]:
+    """``python -m <module>`` を別プロセスで起動し、``stdin_text`` を実 stdin へ流す。
+
+    素の ``python -m`` は editable install 経由で別の checkout の src を読みうるので（worktree で走らせると
+    メインの checkout を検査してしまう）、この checkout の src を PYTHONPATH で名指す。
+
+    Args:
+        module: dotted module name（例: claq.hooks.block_no_verify）。
+        stdin_text: stdin へ流す文字列。
+        env: 子の環境変数。None なら現在の環境を継承する。どちらも PYTHONPATH だけ上書きする。
+        cwd: 子の作業ディレクトリ。None なら現在のディレクトリを継承する。
+        timeout: 打ち切りまでの秒数。
+
+    Returns:
+        CompletedProcess。
+    """
+    return subprocess.run(
+        [sys.executable, "-m", module],
+        input=stdin_text,
+        capture_output=True,
+        text=True,
+        env={**(os.environ if env is None else env), "PYTHONPATH": str(SRC_ROOT)},
+        cwd=cwd,
+        timeout=timeout,
         check=False,
     )
 

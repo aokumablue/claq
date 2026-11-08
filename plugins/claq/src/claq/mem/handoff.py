@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from claq.lib.core_utils import get_home_dir, strip_ansi
+from claq.lib.core_utils import get_home_dir, read_tail_text, strip_ansi
 from claq.lib.harness import (
     extract_file_paths,
     extract_raw_tool_name,
@@ -33,7 +33,7 @@ from claq.lib.harness import (
 )
 from claq.lib.slim_text import compact_line
 from claq.mem.logger import get as _get_logger
-from claq.mem.redaction import redact
+from claq.mem.redaction import PLACEHOLDER, redact
 from claq.mem.settings import CONTEXT_HANDOFF_CHAR_BUDGET
 from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
 
@@ -48,37 +48,11 @@ TRANSCRIPT_MAX_BYTES = 2 * 1024 * 1024
 _TRANSCRIPT_ROOTS_ENV = "CLAQ_TRANSCRIPT_ROOTS"
 """追加の trusted transcript root を ``os.pathsep`` 区切りで指定する環境変数。"""
 
-
-def trusted_transcript_roots() -> tuple[Path, ...]:
-    """走査対象にしてよい transcript root 一覧を返す。
-
-    src 配下は host 検出（``COPILOT_*`` / ``CLAUDECODE`` / ``CODEX_*`` 等の参照）を
-    持たない設計のため、実行中の host から root を導出できない。既知 host の
-    格納規約を静的な allowlist として列挙し、未知 host の利用者は
-    ``CLAQ_TRANSCRIPT_ROOTS`` で自分の host の root を追加できる。
-
-    Returns:
-        既知 host の root と ``CLAQ_TRANSCRIPT_ROOTS`` で追加された root
-        （存在確認はしない）。
-    """
-    home = get_home_dir()
-    extra = os.environ.get(_TRANSCRIPT_ROOTS_ENV, "").split(os.pathsep)
-    return (
-        home / ".claude" / "projects",
-        home / ".copilot",
-        home / ".codex",
-        *(Path(raw.strip()).expanduser() for raw in extra if raw.strip()),
-    )
-
-
 _USER_MESSAGE_COUNT = 3
 """引き継ぎに載せる直近ユーザー依頼の件数。"""
 
 _USER_MESSAGE_CHAR_LIMIT = 200
 """ユーザー依頼 1 件を圧縮する上限文字数。"""
-
-_REDACTION_MARKER = "[REDACTED]"
-"""``redact`` が挿入するマスク文字列。``strip_tags`` の fail closed 判定にも使う。"""
 
 _TRUNCATION_MARKER = "..."
 """``compact_line`` が上限で切ったときに付ける末尾。重複畳み込みの除外判定に使う。"""
@@ -162,7 +136,7 @@ def _sanitize_freeform(text: str) -> str:
         見つかった場合は空文字列。
     """
     stripped = _neutralize(text)
-    if stripped == _REDACTION_MARKER:
+    if stripped == PLACEHOLDER:
         log.warning("タグで分断されたシークレットを検出しました: 引き継ぎ本文を破棄します")
         return ""
     return redact(stripped)
@@ -211,6 +185,22 @@ def build_handoff(payload: dict[str, Any]) -> str:
     """
     explicit = str(payload.get("handoff") or "").strip()
     text = _sanitize_freeform(explicit) if explicit else _summarize_transcript(str(payload.get("transcript_path") or ""))
+    return truncate_handoff(text)
+
+
+def truncate_handoff(text: str) -> str:
+    """引き継ぎ本文を ``CONTEXT_HANDOFF_CHAR_BUDGET`` 文字に収める。
+
+    書き込み側（``build_handoff``）だけでは足りない。注入側の無害化は ``<`` を ``&lt;`` へ
+    広げて本文を伸ばし、DB へ直接書かれた行はこの関数を通っていないため、注入側
+    （``cmd_context._handoff_section``）でも同じ規則で切る。
+
+    Args:
+        text: 切り詰める前の本文。
+
+    Returns:
+        予算内ならそのままの本文。超えた場合は末尾を省略記号にした本文。
+    """
     if len(text) <= CONTEXT_HANDOFF_CHAR_BUDGET:
         return text
     return text[: CONTEXT_HANDOFF_CHAR_BUDGET - 1] + "…"
@@ -232,8 +222,31 @@ def _summarize_transcript(transcript_path: str) -> str:
     path = Path(transcript_path)
     if not is_trusted_transcript(path):
         return ""
-    messages, files, tools = _scan(_read_tail(path), time.monotonic() + TRANSCRIPT_TIMEOUT_SEC)
+    tail = read_tail_text(path, TRANSCRIPT_MAX_BYTES)
+    messages, files, tools = _scan(tail, time.monotonic() + TRANSCRIPT_TIMEOUT_SEC)
     return _compose(messages, files, tools)
+
+
+def trusted_transcript_roots() -> tuple[Path, ...]:
+    """走査対象にしてよい transcript root 一覧を返す。
+
+    src 配下は host 検出（``COPILOT_*`` / ``CLAUDECODE`` / ``CODEX_*`` 等の参照）を
+    持たない設計のため、実行中の host から root を導出できない。既知 host の
+    格納規約を静的な allowlist として列挙し、未知 host の利用者は
+    ``CLAQ_TRANSCRIPT_ROOTS`` で自分の host の root を追加できる。
+
+    Returns:
+        既知 host の root と ``CLAQ_TRANSCRIPT_ROOTS`` で追加された root
+        （存在確認はしない）。
+    """
+    home = get_home_dir()
+    extra_roots = (raw.strip() for raw in os.environ.get(_TRANSCRIPT_ROOTS_ENV, "").split(os.pathsep))
+    return (
+        home / ".claude" / "projects",
+        home / ".copilot",
+        home / ".codex",
+        *(Path(root).expanduser() for root in extra_roots if root),
+    )
 
 
 def is_trusted_transcript(path: Path) -> bool:
@@ -268,24 +281,6 @@ def is_trusted_transcript(path: Path) -> bool:
     except OSError:
         return False
     return any(resolved.is_relative_to(root.resolve()) for root in trusted_transcript_roots())
-
-
-def _read_tail(path: Path) -> str:
-    """トランスクリプトの末尾を上限バイトまで読む。
-
-    先頭が途中で切れた行は JSON として壊れるが、走査側が解析不能行を
-    捨てるため問題にならない。
-
-    Args:
-        path: トランスクリプトの絶対パス。
-
-    Returns:
-        デコード済みの末尾テキスト。
-    """
-    with path.open("rb") as stream:
-        stream.seek(0, 2)
-        stream.seek(max(0, stream.tell() - TRANSCRIPT_MAX_BYTES))
-        return stream.read().decode("utf-8", errors="replace")
 
 
 def _scan(text: str, deadline: float) -> tuple[list[str], list[str], list[str]]:
@@ -444,6 +439,19 @@ def _is_speech_block(part: object) -> bool:
     return False
 
 
+def _message_of(entry: dict[str, Any]) -> dict[str, Any]:
+    """エントリの ``message`` を返す。
+
+    Args:
+        entry: トランスクリプトの 1 エントリ。
+
+    Returns:
+        ``message`` の dict。無い・dict でなければ空 dict。
+    """
+    message = entry.get("message")
+    return message if isinstance(message, dict) else {}
+
+
 def _user_message(entry: dict[str, Any]) -> str:
     """エントリがユーザー発話ならその本文を 1 行へ圧縮して返す。
 
@@ -472,8 +480,7 @@ def _user_message(entry: dict[str, Any]) -> str:
         圧縮済みのユーザー発話。ユーザー発話でない、中身が空、または
         ハーネス足場しか含まれていなければ空文字列。
     """
-    message = entry.get("message")
-    message = message if isinstance(message, dict) else {}
+    message = _message_of(entry)
     if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
         return ""
 
@@ -506,8 +513,7 @@ def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str]) -> N
     if raw_name:
         _record_tool(raw_name, extract_tool_input(entry) or entry.get("input"), tools, files)
 
-    message = entry.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
+    content = _message_of(entry).get("content")
     if not isinstance(content, list):
         return
     for block in content:
@@ -527,17 +533,24 @@ def _record_tool(tool_name: str, tool_input: object, tools: set[str], files: set
     if not tool_name:
         return
     normalized = normalize_tool_name(tool_name)
-    sanitized_name = _sanitize_structured(normalized)
-    if sanitized_name:
-        tools.add(sanitized_name)
+    _add_sanitized(tools, normalized)
     if normalized not in _EDIT_TOOLS:
         return
-    payload = tool_input if isinstance(tool_input, dict | str) else None
-    files.update(
-        sanitized
-        for path in extract_file_paths(tool_name, payload) or ()
-        if (sanitized := _sanitize_structured(path))
-    )
+    usable_input = tool_input if isinstance(tool_input, dict | str) else None
+    for path in extract_file_paths(tool_name, usable_input) or ():
+        _add_sanitized(files, path)
+
+
+def _add_sanitized(collected: set[str], value: str) -> None:
+    """パス・ツール名を無害化し、空にならなければ収集先へ加える。
+
+    Args:
+        collected: 収集先。
+        value: transcript から拾った生の値。
+    """
+    sanitized = _sanitize_structured(value)
+    if sanitized:
+        collected.add(sanitized)
 
 
 def _shorten_path(path: str) -> str:

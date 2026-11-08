@@ -16,6 +16,8 @@ import pytest
 
 from ._support import _MINIMAL_SETTINGS, _OVERLAY, _SKILL_DIR, _TEMPLATE, _load_smoke_check
 
+_TEMPLATE_PYPROJECT = (_TEMPLATE / "pyproject.toml.template").read_text(encoding="utf-8")
+
 
 def _write(root: Path, files: dict[str, str]) -> Path:
     """root の下に、相対パス → 中身の対応でファイルを書き、root を返す。"""
@@ -118,27 +120,25 @@ def _merged_skeleton(destination: Path) -> Path:
 class TestSkeletonPackaging:
     """スケルトンの pyproject.toml.template と SKILL.md の手順が、import の閉包を同梱する。"""
 
-    _TEMPLATE_PYPROJECT = (_TEMPLATE / "pyproject.toml.template").read_text(encoding="utf-8")
-
     def test_template_closure_is_included(self, smoke_static: types.ModuleType) -> None:
         """共通スケルトンの server.py から届くモジュールは、全て template の only-include にある。"""
-        assert smoke_static.local_modules(_TEMPLATE) <= set(_only_include(self._TEMPLATE_PYPROJECT))
+        assert smoke_static.local_modules(_TEMPLATE) <= set(_only_include(_TEMPLATE_PYPROJECT))
 
     def test_overlay_adds_exactly_skill_names(self, smoke_static: types.ModuleType, tmp_path: Path) -> None:
         """重ね合わせの server.py から届くモジュールのうち template に無いものは、SKILL.md が足させる名前と一致する。"""
         root = _merged_skeleton(tmp_path / "dest")
-        added = smoke_static.local_modules(root) - set(_only_include(self._TEMPLATE_PYPROJECT))
+        added = smoke_static.local_modules(root) - set(_only_include(_TEMPLATE_PYPROJECT))
         assert added == set(_overlay_additions())
 
     def test_merged_tree_gaps(self, smoke_static: types.ModuleType, tmp_path: Path) -> None:
         """重ね合わせた生成先で、SKILL.md の名前を足せば不足なし、足さなければ adapters.py と facade が足りない。"""
         root = _merged_skeleton(tmp_path / "dest")
-        (root / "pyproject.toml").write_text(self._TEMPLATE_PYPROJECT, encoding="utf-8")
+        (root / "pyproject.toml").write_text(_TEMPLATE_PYPROJECT, encoding="utf-8")
         assert smoke_static.packaging_gaps(root) == ["adapters.py", "facade"]
-        line = re.search(r"(?m)^only-include = .*$", self._TEMPLATE_PYPROJECT)
+        line = re.search(r"(?m)^only-include = .*$", _TEMPLATE_PYPROJECT)
         assert line, "pyproject.toml.template に only-include の行がありません"
-        extended = json.dumps([*_only_include(self._TEMPLATE_PYPROJECT), *_overlay_additions()])
-        (root / "pyproject.toml").write_text(self._TEMPLATE_PYPROJECT.replace(line.group(0), f"only-include = {extended}"), encoding="utf-8")
+        extended = json.dumps([*_only_include(_TEMPLATE_PYPROJECT), *_overlay_additions()])
+        (root / "pyproject.toml").write_text(_TEMPLATE_PYPROJECT.replace(line.group(0), f"only-include = {extended}"), encoding="utf-8")
         assert smoke_static.packaging_gaps(root) == []
 
     def test_smoke_modules_are_not_shipped(self, smoke_static: types.ModuleType, tmp_path: Path) -> None:
@@ -146,8 +146,17 @@ class TestSkeletonPackaging:
         smoke = {"smoke_check.py", "smoke_static.py", "smoke_config.py"}
         assert smoke <= {path.name for path in _TEMPLATE.iterdir()}
         reached = smoke_static.local_modules(_TEMPLATE) | smoke_static.local_modules(_merged_skeleton(tmp_path / "dest"))
-        listed = set(_only_include(self._TEMPLATE_PYPROJECT)) | set(_overlay_additions())
+        listed = set(_only_include(_TEMPLATE_PYPROJECT)) | set(_overlay_additions())
         assert (reached & smoke, listed & smoke) == (set(), set())
+
+
+def _imported_roots(node: ast.AST) -> list[str]:
+    """node が絶対 import の文なら、読み込む先頭の名前を返す（相対 import とそれ以外の節は空）。"""
+    if isinstance(node, ast.Import):
+        return [alias.name.split(".")[0] for alias in node.names]
+    if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        return [node.module.split(".")[0]]
+    return []
 
 
 def _third_party_imports(smoke_static: types.ModuleType, root: Path) -> set[str]:
@@ -158,13 +167,7 @@ def _third_party_imports(smoke_static: types.ModuleType, root: Path) -> set[str]
         name
         for source in sources
         for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
-        for name in (
-            [alias.name.split(".")[0] for alias in node.names]
-            if isinstance(node, ast.Import)
-            else [node.module.split(".")[0]]
-            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
-            else []
-        )
+        for name in _imported_roots(node)
     }
     return names - {Path(entry).stem for entry in shipped} - set(sys.stdlib_module_names) - {"__future__"}
 
@@ -173,7 +176,7 @@ def _third_party_imports(smoke_static: types.ModuleType, root: Path) -> set[str]
 def test_dependencies_cover_direct_imports(smoke_static: types.ModuleType, tmp_path: Path, overlay: bool) -> None:
     """同梱するモジュールが直接 import するサードパーティは、全て pyproject.toml.template の dependencies にある。"""
     root = _merged_skeleton(tmp_path / "dest") if overlay else _TEMPLATE
-    project = tomllib.loads((_TEMPLATE / "pyproject.toml.template").read_text(encoding="utf-8"))["project"]
+    project = tomllib.loads(_TEMPLATE_PYPROJECT)["project"]
     declared = {re.split(r"[<>=!~;\[ ]", requirement, maxsplit=1)[0].lower() for requirement in project["dependencies"]}
     imported = {name.lower().replace("_", "-") for name in _third_party_imports(smoke_static, root)}
     assert imported == {"mcp", "mcp-types", "pydantic"}

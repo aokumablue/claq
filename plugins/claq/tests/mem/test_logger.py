@@ -1,6 +1,7 @@
 """claq.mem.logger のテスト。"""
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ import claq.mem.logger as logger
 
 
 @pytest.fixture(autouse=True)
-def _reset_logger() -> None:
+def _reset_logger() -> Iterator[None]:
     """各テストの前後でロガーの初期化状態とハンドラを消す。"""
     logger.reset()
     yield

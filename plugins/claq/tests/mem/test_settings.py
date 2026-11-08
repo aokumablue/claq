@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from claq.lib.constants import BASE_DIR_NAME
+from claq.mem import settings as settings_mod
 from claq.mem.settings import Settings
 
 #: 削除済みの設定項目と state 永続化 API。どれも再導入しない。
@@ -27,9 +28,7 @@ _REMOVED_ATTRIBUTES = (
 @pytest.fixture(autouse=True)
 def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """各テストで ~/.claq の代わりに一時ディレクトリを使う。"""
-    import claq.mem.settings as mod
-
-    monkeypatch.setattr(mod, "_default_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(settings_mod, "_default_data_dir", lambda: tmp_path)
 
 
 def test_defaults_and_derived_paths_without_touching_disk(tmp_path: Path) -> None:
@@ -54,8 +53,6 @@ def test_removed_settings_and_state_api_stay_absent() -> None:
 
 def test_default_data_dir_uses_claq_data_path_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """CLAQ_DATA_PATH があればモジュール再読込時にそれをデータディレクトリにする。"""
-    import claq.mem.settings as settings_mod
-
     custom = tmp_path / "custom-data"
     monkeypatch.setenv("CLAQ_DATA_PATH", str(custom))
     importlib.reload(settings_mod)

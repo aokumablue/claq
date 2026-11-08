@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
-import runpy
 import shlex
 import sys
 from pathlib import Path
@@ -13,10 +12,13 @@ from pathlib import Path
 import pytest
 
 from claq.ci import validate_hooks
-from claq.ci.ci_common import REPO_ROOT
+from claq.ci.ci_common import PLUGIN_ROOT
 from claq.ci.validate_hooks import REQUIRED_EVENTS, REQUIRED_HOOKS_VERSION
+from claq.mem.cli import _COMMAND_HANDLERS
 
-REPO_HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
+from ._support import _exit_code_as_main
+
+REPO_HOOKS_JSON = PLUGIN_ROOT / "hooks" / "hooks.json"
 
 # 必須イベント（PreToolUse / PreCompact / SessionStart / SessionEnd）を構造的に正しいダミーで埋めたもの。
 # validate_hooks は完成した hooks マニフェストを検証する契約なので、1 つのマッチャーだけを見たい
@@ -90,15 +92,9 @@ def _pre_tool_use(command: str) -> dict[str, object]:
     "overrides",
     [
         pytest.param({}, id="filler-only"),
-        pytest.param(
-            _pre_tool_use('node -e "console.log(1+2)"'),
-            id="command-string",
-        ),
+        pytest.param(_pre_tool_use('node -e "console.log(1+2)"'), id="command-string"),
         # 旧式のインライン JS コマンドは不透明な文字列として受け入れる。
-        pytest.param(
-            _pre_tool_use('node -e "function {"'),
-            id="inline-js-opaque",
-        ),
+        pytest.param(_pre_tool_use('node -e "function {"'), id="inline-js-opaque"),
         pytest.param(
             {
                 "UserPromptSubmit": [{"hooks": [{"type": "prompt", "prompt": "ok"}]}],
@@ -162,9 +158,7 @@ def test_validate_hooks_main_and_module_entrypoint(
     assert "個のフックマッチャーを検証しました" in capsys.readouterr().out
 
     monkeypatch.setattr(sys, "argv", ["validate_hooks.py", "--hooks-file", str(hooks_file)])
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("claq.ci.validate_hooks", run_name="__main__")
-    assert excinfo.value.code == 0
+    assert _exit_code_as_main("claq.ci.validate_hooks") == 0
 
 
 # --- 単一フックエントリ -------------------------------------------------------
@@ -223,7 +217,9 @@ _POWERSHELL_COMMAND_ONLY = "label では 'powershell' は command フックで�
             id="powershell-on-http",
         ),
         pytest.param(
-            {"type": "prompt", "prompt": "ok", "powershell": "& x"}, [_POWERSHELL_COMMAND_ONLY], id="powershell-on-prompt"
+            {"type": "prompt", "prompt": "ok", "powershell": "& x"},
+            [_POWERSHELL_COMMAND_ONLY],
+            id="powershell-on-prompt",
         ),
     ],
 )
@@ -269,15 +265,19 @@ def _repo_hooks_document() -> dict:
     return json.loads(REPO_HOOKS_JSON.read_text(encoding="utf-8"))
 
 
-def _repo_command_hooks() -> list[tuple[str, dict]]:
-    """実 hooks.json の全 command フックを (イベント名, フック) で返す。"""
+def _repo_hooks() -> list[tuple[str, dict]]:
+    """実 hooks.json の全フックを (イベント名, フック) で返す。"""
     return [
         (event, hook)
         for event, entries in _repo_hooks_document()["hooks"].items()
         for entry in entries
         for hook in entry.get("hooks", [])
-        if hook.get("type") == "command"
     ]
+
+
+def _repo_command_hooks() -> list[tuple[str, dict]]:
+    """実 hooks.json の全 command フックを (イベント名, フック) で返す。"""
+    return [(event, hook) for event, hook in _repo_hooks() if hook.get("type") == "command"]
 
 
 def _repo_hook_argv() -> list[list[str]]:
@@ -314,23 +314,12 @@ class TestRepoHooksJsonStaticChecks:
 
     def test_pre_tool_use_declares_all_required_modules(self) -> None:
         """PreToolUse が保護フックのモジュールを全て起動すること。"""
-        commands = " ".join(
-            str(hook.get("command", ""))
-            for entry in _repo_hooks_document()["hooks"].get("PreToolUse", [])
-            for hook in entry.get("hooks", [])
-        )
+        commands = " ".join(str(hook.get("command", "")) for event, hook in _repo_hooks() if event == "PreToolUse")
         assert [module for module in self._REQUIRED_PRE_TOOL_USE_MODULES if module not in commands] == []
 
     def test_every_hook_entry_has_a_timeout(self) -> None:
         """全イベントの全 hook エントリが timeout を持つこと。"""
-        missing_timeout = [
-            (event, hook.get("command"))
-            for event, entries in _repo_hooks_document()["hooks"].items()
-            for entry in entries
-            for hook in entry.get("hooks", [])
-            if "timeout" not in hook
-        ]
-        assert missing_timeout == []
+        assert [(event, hook.get("command")) for event, hook in _repo_hooks() if "timeout" not in hook] == []
 
     def test_modules_propagate_exit_code_via_system_exit(self) -> None:
         """hooks.json が起動する全モジュールが実在し、`main()` の戻り値を SystemExit で伝えること。
@@ -339,13 +328,14 @@ class TestRepoHooksJsonStaticChecks:
         `code` を返し、例外が上がらなければ `0` を返す。したがって `__main__` が
         `main()` を素で呼ぶモジュールでは、`main()` が 2（deny）を返しても launcher は
         0（allow）を返す — PreToolUse の「exit 2 = deny」契約が黙って壊れる。
-        docs/adr/definition-and-subagent-design.md 決定6 / docs/adr/staleness-detection.md が対象とする
-        「宣言はあるが CI で実測されない契約」の検知器。
+        docs/adr/definition-and-subagent-design.md の「定義に書いた検証規則は CI で実測する」の適用で、
+        docs/adr/staleness-detection.md が対象とする「宣言はあるが CI で実測されない契約」の検知器。
         """
         for argv in _repo_hook_argv():
             module = argv[0]
             spec = importlib.util.find_spec(module)
-            assert spec is not None and spec.origin, f"モジュールが存在しません: {module}"
+            assert spec is not None, f"モジュールが存在しません: {module}"
+            assert spec.origin, f"モジュールが存在しません: {module}"
             tree = ast.parse(Path(spec.origin).read_text(encoding="utf-8"))
             main_blocks = [
                 node for node in tree.body if isinstance(node, ast.If) and "__main__" in ast.dump(node.test)
@@ -357,9 +347,7 @@ class TestRepoHooksJsonStaticChecks:
             )
 
     def test_mem_cli_hooks_name_an_existing_subcommand(self) -> None:
-        """claq.mem.cli 呼び出しが launcher 直後にモジュール名・実在するサブコマンドの順で並ぶこと（``--bg`` 付きも許容）。"""
-        from claq.mem.cli import _COMMAND_HANDLERS
-
+        """claq.mem.cli 呼び出しが launcher 直後にモジュール名・実在するサブコマンドの順で並ぶこと（``--bg`` 可）。"""
         mem_cli_argv = [argv for argv in _repo_hook_argv() if argv[0] == "claq.mem.cli"]
         assert mem_cli_argv
         for argv in mem_cli_argv:
@@ -414,4 +402,4 @@ class TestRepoHooksJsonPowerShellParity:
 
     def test_windows_wrapper_file_exists(self) -> None:
         """`powershell` が起動する `runtime/claq-hook.cmd` が実在すること。"""
-        assert (REPO_ROOT / "runtime" / "claq-hook.cmd").is_file()
+        assert (PLUGIN_ROOT / "runtime" / "claq-hook.cmd").is_file()

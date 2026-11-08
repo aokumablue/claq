@@ -9,9 +9,10 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from claq.lib.core_utils import get_plugin_root
 from claq.lib.frontmatter import FrontmatterError, parse_yaml, split_frontmatter
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+PLUGIN_ROOT = get_plugin_root()
 
 
 def emit_error(message: str) -> None:
@@ -62,6 +63,13 @@ def parse_validator_args(description: str, argv: Sequence[str] | None, **path_de
     return parser.parse_args(argv)
 
 
+def list_markdown_files(directory: Path) -> list[Path]:
+    """ディレクトリ直下の Markdown ファイルを返す。ディレクトリが無ければ空リスト。"""
+    if not directory.exists():
+        return []
+    return [entry for entry in directory.iterdir() if entry.is_file() and entry.name.endswith(".md")]
+
+
 def read_json(file_path: str | Path, label: str) -> Any:
     """JSON を読み取り、パースエラーを ``label`` 付きの ValueError に正規化する。"""
     try:
@@ -88,7 +96,7 @@ def extract_frontmatter(content: str) -> dict[str, object] | None:
         mapping でない場合は None（validators はこれを不合格として報告する）。
     """
     try:
-        data = parse_yaml(split_frontmatter(content))
+        parsed = parse_yaml(split_frontmatter(content))
     except FrontmatterError:
         return None
-    return data if isinstance(data, dict) else None
+    return parsed if isinstance(parsed, dict) else None

@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from pytest import approx
 
-from ._support import BASES, CSS, TOKENS, TOKENS_CSS, _append, _copy_site, _edit, check_site
+from ._support import BASES, BLOCKS, CSS, TOKENS, TOKENS_CSS, _append, _copy_site, _edit, _violations, check_site
 
 # --- upstream への忠実性 -----------------------------------------------------
 
@@ -41,9 +41,8 @@ def test_neutral_tokens_are_verbatim_upstream_values() -> None:
 def test_every_base_carries_the_full_role_set_for_both_themes() -> None:
     """全ベースが role_order の全役割をライト/ダーク両方で持つ。"""
     expected = set(TOKENS["role_order"])
-    for base_id in BASES:
-        for theme in check_site.THEMES:
-            assert set(TOKENS["bases"][base_id][theme]) == expected, f"{base_id}/{theme}"
+    for base_id, theme in BLOCKS:
+        assert set(TOKENS["bases"][base_id][theme]) == expected, f"{base_id}/{theme}"
 
 
 def test_series_uses_five_colors_like_upstream() -> None:
@@ -149,9 +148,8 @@ def test_scheme_applies_contrast_fixes_only_where_needed() -> None:
 def test_derived_roles_are_present_in_every_scheme() -> None:
     """レジストリに無い destructive-foreground を全ブロックが持つ。"""
     expected = TOKENS["derived_roles"]["destructive-foreground"]
-    for base_id in BASES:
-        for theme in check_site.THEMES:
-            assert check_site.scheme(TOKENS, base_id, theme)["--destructive-foreground"] == expected[theme]
+    for base_id, theme in BLOCKS:
+        assert check_site.scheme(TOKENS, base_id, theme)["--destructive-foreground"] == expected[theme]
 
 
 def test_series_colors_share_hues_across_themes() -> None:
@@ -185,9 +183,8 @@ def test_color_var_names_cover_roles_derived_and_charts() -> None:
 
 def test_contrast_contract_holds_for_every_base_and_theme() -> None:
     """10 ブロック（5 ベース × 2 テーマ）すべてが可読性契約（系列色どうしの色差の下限を含む）を満たす。"""
-    for base_id in BASES:
-        for theme in check_site.THEMES:
-            assert check_site.contrast_violations(TOKENS, base_id, theme) == []
+    for base_id, theme in BLOCKS:
+        assert check_site.contrast_violations(TOKENS, base_id, theme) == []
 
 
 def test_contrast_contract_covers_charts_status_focus_and_sidebar_text() -> None:
@@ -216,29 +213,28 @@ def test_text_color_from_a_transparent_mix_is_reported(tmp_path: Path) -> None:
     assert _append(_copy_site(tmp_path), "styles.css", surfaces) == ""
 
 
+def _oklab(value: str) -> tuple[float, float, float]:
+    """不透明な oklch() を OKLab の (L, a, b) にする。"""
+    lightness, chroma, hue, alpha = check_site.parse_oklch(value)
+    assert alpha == 1.0, value
+    return lightness, chroma * math.cos(math.radians(hue)), chroma * math.sin(math.radians(hue))
+
+
 def test_heatmap_cap_keeps_cell_text_readable_in_every_block() -> None:
     """ヒートマップの濃さの上限（`.heat td` の 55%）で、全ブロックの最も濃いセル（`--v: 1`）の文字が 4.5:1 を保つ（上限を上げるとダークで --card-foreground が下地の系列色に近づく。CSS の color-mix(in oklab, …) と同じ OKLab 上の線形混合で測る）。"""
     cap = re.search(r"\.heat td \{[^}]*?calc\(var\(--v, 0\) \* ([\d.]+)%\)", CSS)
     assert cap is not None
     share = float(cap.group(1)) / 100
-
-    def oklab(value: str) -> tuple[float, float, float]:
-        """不透明な oklch() を OKLab の (L, a, b) にする。"""
-        lightness, chroma, hue, alpha = check_site.parse_oklch(value)
-        assert alpha == 1.0, value
-        return lightness, chroma * math.cos(math.radians(hue)), chroma * math.sin(math.radians(hue))
-
-    for base_id in BASES:
-        for theme in check_site.THEMES:
-            resolved = check_site.scheme(TOKENS, base_id, theme)
-            lightness, a_axis, b_axis = (
-                share * top + (1 - share) * under
-                for top, under in zip(oklab(resolved["--chart-1"]), oklab(resolved["--card"]), strict=True)
-            )
-            hue = math.degrees(math.atan2(b_axis, a_axis)) % 360
-            cell = check_site.oklch_to_hex(f"oklch({lightness:.6f} {math.hypot(a_axis, b_axis):.6f} {hue:.6f})")
-            text = check_site.resolved_hex(TOKENS, base_id, theme)["--card-foreground"]
-            assert check_site.contrast_ratio(text, cell) >= 4.5, f"{theme}/{base_id}"
+    for base_id, theme in BLOCKS:
+        resolved = check_site.scheme(TOKENS, base_id, theme)
+        lightness, a_axis, b_axis = (
+            share * top + (1 - share) * under
+            for top, under in zip(_oklab(resolved["--chart-1"]), _oklab(resolved["--card"]), strict=True)
+        )
+        hue = math.degrees(math.atan2(b_axis, a_axis)) % 360
+        cell = check_site.oklch_to_hex(f"oklch({lightness:.6f} {math.hypot(a_axis, b_axis):.6f} {hue:.6f})")
+        text = check_site.resolved_hex(TOKENS, base_id, theme)["--card-foreground"]
+        assert check_site.contrast_ratio(text, cell) >= 4.5, f"{theme}/{base_id}"
 
 
 def test_authored_text_colors_go_through_role_variables() -> None:
@@ -287,7 +283,7 @@ def test_broken_tokens_surface_the_contrast_failure(tmp_path: Path) -> None:
     dest = _copy_site(tmp_path)
     broken = _broken_tokens(("bases", "neutral", "light"), {"foreground": "oklch(0.97 0 0)"})
     (dest / "tokens.json").write_text(json.dumps(broken, ensure_ascii=False), encoding="utf-8")
-    assert "--foreground と --background のコントラスト" in "\n".join(check_site.validate_site(dest))
+    assert "--foreground と --background のコントラスト" in _violations(dest)
 
 
 # --- tokens.css の生成 -------------------------------------------------------
@@ -295,9 +291,8 @@ def test_broken_tokens_surface_the_contrast_failure(tmp_path: Path) -> None:
 
 def test_tokens_css_has_a_block_for_every_base_and_theme() -> None:
     """生成 CSS が 5 ベース × 2 テーマの全ブロックを持つ。"""
-    for base_id in BASES:
-        for theme in check_site.THEMES:
-            assert f':root[data-theme="{theme}"][data-base="{base_id}"] {{' in TOKENS_CSS
+    for base_id, theme in BLOCKS:
+        assert f':root[data-theme="{theme}"][data-base="{base_id}"] {{' in TOKENS_CSS
 
 
 def test_tokens_css_carries_the_shadcn_token_set() -> None:

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-_SCHEMA_SQL = """\
+SCHEMA_SQL = """\
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA foreign_keys = ON;

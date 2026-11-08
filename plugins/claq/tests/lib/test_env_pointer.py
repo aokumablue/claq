@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -20,7 +20,7 @@ import pytest
 from claq.lib import env_pointer as mod
 from claq.lib.constants import BASE_DIR_NAME
 
-from ._support import _ENV_TEMPLATE, _make_plugin_root
+from ._support import _ENV_TEMPLATE, _make_plugin_root, _raise
 from ._support import _isolate_home as _isolate_home
 
 
@@ -30,19 +30,14 @@ def _reset_warned(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "_warned_this_process", False)
 
 
-def _raise(exc: BaseException) -> Callable[..., None]:
-    """呼ばれたら ``exc`` を送出する差し替え関数を返す。"""
-
-    def _boom(*_args: object, **_kwargs: object) -> None:
-        """差し替え先で ``exc`` を送出する。"""
-        raise exc
-
-    return _boom
-
-
 def _pointer_file(home: Path) -> Path:
     """直接 PPID のポインタファイルの場所を返す。"""
     return home / BASE_DIR_NAME / "roots" / str(os.getppid())
+
+
+def _pid_entries(roots_dir: Path) -> set[str]:
+    """``roots/`` のうち PID 名のエントリ名を返す。"""
+    return {path.name for path in roots_dir.iterdir() if path.name.isdigit()}
 
 
 def _single_warning(err: str) -> dict[str, object]:
@@ -88,7 +83,7 @@ class TestWriteEnvPointer:
 
         claq_dir = _isolate_home / BASE_DIR_NAME
         assert called == []
-        assert [p.name for p in (claq_dir / "roots").iterdir() if p.name.isdigit()] == []
+        assert _pid_entries(claq_dir / "roots") == set()
         assert (claq_dir / "env.sh").is_file()
 
     def test_writes_ancestor_chain_not_just_direct_ppid(self, tmp_path: Path, _isolate_home: Path) -> None:
@@ -101,8 +96,7 @@ class TestWriteEnvPointer:
         """
         mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
 
-        roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
-        written = {p.name for p in roots_dir.iterdir() if p.name.isdigit()}
+        written = _pid_entries(_isolate_home / BASE_DIR_NAME / "roots")
         assert str(os.getppid()) in written
         assert len(written) <= mod._MAX_ANCESTOR_DEPTH
 
@@ -126,7 +120,7 @@ class TestWriteEnvPointer:
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
         assert mod._MAX_ANCESTOR_DEPTH == 2
         assert depths == [mod._MAX_ANCESTOR_DEPTH]
-        assert {p.name for p in roots_dir.iterdir() if p.name.isdigit()} == {"4242", "4243"}
+        assert _pid_entries(roots_dir) == {"4242", "4243"}
         for pid, lstart in chain:
             assert (roots_dir / str(pid)).read_text(encoding="utf-8") == f"{plugin_root}\n{lstart}\n"
 
@@ -166,8 +160,8 @@ class TestWriteEnvPointer:
     @pytest.mark.parametrize(
         ("target", "name", "reason"),
         [
-            pytest.param(mod, "_ensure_private_dir", "permission denied", id="private-dir-unwritable"),
-            pytest.param(mod.tempfile, "mkstemp", "mkstemp failed", id="mkstemp-oserror"),
+            pytest.param(mod, "make_private_dirs", "permission denied", id="private-dir-unwritable"),
+            pytest.param(tempfile, "mkstemp", "mkstemp failed", id="mkstemp-oserror"),
         ],
     )
     def test_write_failure_warns_once_per_process(
@@ -247,7 +241,7 @@ class TestStateHome:
     def test_falls_back_to_path_home_when_unset(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """HOME 未設定なら Path.home() を使う。"""
         monkeypatch.delenv("HOME", raising=False)
-        monkeypatch.setattr(mod.Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.setattr(mod.Path, "home", classmethod(lambda _cls: tmp_path))
         assert mod._state_home() == tmp_path
 
     def test_write_warns_when_home_unresolvable(
@@ -523,8 +517,11 @@ class TestResolveAncestorChain:
                 id="stops-at-max-depth",
             ),
             pytest.param(0, "999999999 1 t0\n", 4, [], id="own-ppid-missing-from-table"),
-            # int 変換失敗・フィールド不足・ppid が int でない行。own_ppid 自体の行が壊れていてチェーンを組めない
-            pytest.param(0, "not-a-pid ppid lstart\n123\n{ppid} notanint t0\n", 4, [], id="malformed-lines-skipped"),
+            # 親が表に居なければ（照会時に終了していた）そこで打ち切る。
+            pytest.param(0, "{ppid} 5000 t0\n", 4, [("{ppid}", "t0")], id="parent-missing-from-table"),
+            # ppid が int でない行・フィールド不足の行は読めない段として打ち切る。
+            pytest.param(0, "{ppid} notanint t0\n", 4, [], id="non-int-ppid"),
+            pytest.param(0, "{ppid} 5000\n", 4, [], id="missing-lstart"),
         ],
     )
     def test_chain_from_process_table(
@@ -535,14 +532,39 @@ class TestResolveAncestorChain:
         depth: int,
         expected: list[tuple[int | str, str]],
     ) -> None:
-        """合成したプロセス表（``{ppid}`` は os.getppid()）から祖先チェーンと各 lstart を正しく組むこと。"""
+        """合成したプロセス表（``{ppid}`` は os.getppid()）を PID ごとに照会し、祖先チェーンと各 lstart を組むこと。"""
         own_ppid = os.getppid()
-        stdout = table.replace("{ppid}", str(own_ppid))
-        monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: _PsResult(returncode, stdout))
+        rows = {
+            line.split(None, 1)[0]: line.split(None, 1)[1]
+            for line in table.replace("{ppid}", str(own_ppid)).splitlines()
+        }
+
+        def _ps(args: list[str], **_kwargs: object) -> _PsResult:
+            """``ps -o ppid=,lstart= -p <pid>`` を合成表から答える（表に無い PID は非 0 終了）。"""
+            row = rows.get(args[-1])
+            return _PsResult(returncode, row) if row is not None else _PsResult(1, "")
+
+        monkeypatch.setattr(mod.subprocess, "run", _ps)
 
         chain = mod._resolve_ancestor_chain(depth)
 
         assert chain == [(own_ppid if pid == "{ppid}" else pid, lstart) for pid, lstart in expected]
+
+    def test_all_levels_share_one_deadline(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """全段の ``ps`` は締め切り 1 本を共有し、使い切った後の段は照会しない。"""
+        clock = iter([0.0, 1.0, 5.0])
+        timeouts: list[float] = []
+
+        def _ps(args: list[str], **kwargs: object) -> _PsResult:
+            """渡された timeout を記録し、親 5000 を答える。"""
+            timeouts.append(kwargs["timeout"])
+            return _PsResult(0, "5000 t0\n")
+
+        monkeypatch.setattr(mod.time, "monotonic", lambda: next(clock))
+        monkeypatch.setattr(mod.subprocess, "run", _ps)
+
+        assert mod._resolve_ancestor_chain(4) == [(os.getppid(), "t0")]
+        assert timeouts == [mod._PS_TIMEOUT_SECONDS - 1.0]
 
 
 class TestWriteAncestorPointer:
@@ -564,6 +586,17 @@ class TestWriteAncestorPointer:
             mod._write_ancestor_pointer(path, root, lstart)
         root, lstart = writes[-1]
         assert path.read_text(encoding="utf-8") == f"{root}\n{lstart}\n"
+
+    def test_unchanged_pointer_refreshes_mtime_without_rewriting(self, tmp_path: Path) -> None:
+        """内容が同じなら書き直さず（inode が変わらない）、GC の鮮度判定に使う mtime だけ進める。"""
+        path = tmp_path / "42"
+        mod._write_ancestor_pointer(path, "/root/a", "lstart-a")
+        os.utime(path, (0, 0))
+        inode = path.stat().st_ino
+
+        mod._write_ancestor_pointer(path, "/root/a", "lstart-a")
+
+        assert (path.stat().st_ino, path.stat().st_mtime > 0) == (inode, True)
 
     def test_write_failure_propagates(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """書き込み失敗の OSError はそのまま呼び出し元へ伝わる。"""

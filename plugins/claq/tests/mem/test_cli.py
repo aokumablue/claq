@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import io
 import json
 import runpy
 import sys
-from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -15,25 +13,7 @@ from claq.mem import cli, command_support
 from claq.mem.database import Database
 from claq.mem.models import Repo
 
-from ._support import _run_cli, _seed
-
-
-def _raising(error: Exception):
-    """呼ばれると error を送出し、呼び出しを ``calls`` に記録するスタブを返す（CommandError も送出できる）。"""
-    calls: list[tuple[object, ...]] = []
-
-    def _stub(*args: object, **_kwargs: object) -> None:
-        """呼び出しを記録して error を送出する。"""
-        calls.append(args)
-        raise error
-
-    _stub.calls = calls  # type: ignore[attr-defined]
-    return _stub
-
-
-def _session_start_event(stdout: str) -> str:
-    """stdout の SessionStart 契約 JSON から hookEventName を取り出す。"""
-    return json.loads(stdout)["hookSpecificOutput"]["hookEventName"]
+from ._support import _raising, _run_cli, _seed
 
 
 class TestSessionStartContract:
@@ -45,7 +25,7 @@ class TestSessionStartContract:
         """DB が無くても作成し、SessionStart 契約の JSON を stdout に出す。"""
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"])
         assert (stderr, exit_code) == ("", 0)
-        assert _session_start_event(stdout) == "SessionStart"
+        assert json.loads(stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
         assert (tmp_path / "mem.db").exists()
 
 
@@ -179,13 +159,13 @@ class TestArgvAndStdin:
     """引数と stdin の解釈。"""
 
     @pytest.mark.parametrize("argv", [[], ["--help"], ["-h"]], ids=["no-command", "--help", "-h"])
-    def test_help_is_printed(self, monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:
+    def test_help_is_printed(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], argv: list[str]
+    ) -> None:
         """引数なし・--help・-h は HELP_TEXT を出力する。"""
         monkeypatch.setattr(sys, "argv", ["python", *argv])
-        stdout = io.StringIO()
-        with redirect_stdout(stdout):
-            assert cli.main() == 0
-        assert "CLI Commands for mem" in stdout.getvalue()
+        assert cli.main() == 0
+        assert "CLI Commands for mem" in capsys.readouterr().out
 
     def test_unknown_command_returns_2(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """未知のコマンドは exit_code=2。"""

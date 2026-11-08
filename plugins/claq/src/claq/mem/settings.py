@@ -6,8 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from claq.lib.constants import BASE_DIR_NAME
-from claq.lib.core_utils import get_home_dir
+from claq.lib.core_utils import get_claq_dir
 
 
 def _default_data_dir() -> Path:
@@ -16,7 +15,7 @@ def _default_data_dir() -> Path:
     `Path.home()` を直接見ると、`CLAQ_HOME` を設定しても DB だけが本物の
     `~/.claq` を掴む（transcript の trusted root は `get_home_dir()` 経由で
     移るのに DB は移らない、という非対称）。隔離したつもりのテストが利用者の
-    実データへ書く事故になるため、`core_utils.get_home_dir()` へ揃える。
+    実データへ書く事故になるため、`CLAQ_HOME` を見る `core_utils.get_claq_dir()` へ揃える。
 
     import 時ではなく呼び出し時に評価する。import 時に固定すると、プロセス内で
     環境変数を差し替えても効かない。
@@ -27,7 +26,7 @@ def _default_data_dir() -> Path:
     override = os.environ.get("CLAQ_DATA_PATH")
     if override:
         return Path(override)
-    return get_home_dir() / BASE_DIR_NAME
+    return get_claq_dir()
 
 
 # --- context 注入の予算 ---

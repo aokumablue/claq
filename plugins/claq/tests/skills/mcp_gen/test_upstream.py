@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from ._support import _Clock
+from ._support import _Clock, _scripted
 
 
 class _Sleeper:
@@ -40,15 +40,19 @@ def _raising(error: Exception) -> Any:
     return operation
 
 
-def _scripted(outcomes: list[Any]) -> Any:
-    """用意した順に、例外なら投げ、それ以外なら返す operation を作る。"""
+def _late(events: list[str]) -> Any:
+    """1 回だけ制御を返してから終わる operation を作る（締切を過ぎていれば、その間に取り消される）。"""
 
-    async def operation() -> Any:
-        """次の結果を返すか投げる。"""
-        outcome = outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
+    async def operation() -> str:
+        """制御を返して終わる。取り消しと後始末を events に記録する。"""
+        try:
+            await asyncio.sleep(0)
+            return "late"
+        except asyncio.CancelledError:
+            events.append("cancelled")
+            raise
+        finally:
+            events.append("closed")
 
     return operation
 
@@ -60,7 +64,8 @@ class TestUpstream:
         """一時的な失敗の判定と、モデル向けの文面（内部の詳細を含めず、403 は存在を漏らさないよう 404 と同じ）。"""
         error = facade.upstream.UpstreamError
         message = facade.upstream.model_message
-        assert error(None).retryable and error(429).retryable and error(503).retryable
+        for status in (None, 429, 503):
+            assert error(status).retryable, status
         assert not error(404).retryable
         assert "status=500" in str(error(500, "boom"))
         expected = {
@@ -84,7 +89,8 @@ class TestUpstream:
         """detail は制御文字と CR/LF を除いてから持つ（例外の文面も同じ）。"""
         error = facade.upstream.UpstreamError(502, "bad\r\ngateway\x1b[2J\x00" + "x" * 300)
         assert error.detail == "badgateway[2J" + "x" * 300
-        assert "\n" not in str(error) and "\r" not in str(error) and "\x1b" not in str(error)
+        for char in "\n\r\x1b":
+            assert char not in str(error), repr(char)
         assert str(error) == f"upstream status=502 {error.detail}"
 
     def test_retry_until_success_is_logged(self, facade: types.SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
@@ -246,20 +252,8 @@ class TestCallUpstream:
         """締切を過ぎたら operation の完了を待たずに取り消して後始末（finally）を走らせ、UpstreamError(None, "deadline exceeded") にし、遮断器が失敗として数える。"""
         breaker = facade.breaker.CircuitBreaker(failure_threshold=1)
         events: list[str] = []
-
-        async def operation() -> str:
-            """1 回だけ制御を返してから終わる（締切を過ぎていれば、その間に取り消される）。取り消しと後始末を記録する。"""
-            try:
-                await asyncio.sleep(0)
-                return "late"
-            except asyncio.CancelledError:
-                events.append("cancelled")
-                raise
-            finally:
-                events.append("closed")
-
         with pytest.raises(facade.upstream.UpstreamError) as exceeded:
-            asyncio.run(facade.breaker.call_upstream(breaker, operation, deadline=50.0, clock=_Clock(100.0)))
+            asyncio.run(facade.breaker.call_upstream(breaker, _late(events), deadline=50.0, clock=_Clock(100.0)))
         assert (exceeded.value.status, exceeded.value.detail, events) == (None, "deadline exceeded", ["cancelled", "closed"])
         assert _breaker_is_closed(facade, breaker) is False
 
@@ -274,18 +268,6 @@ class TestCallWithDeadline:
     def test_deadline_exceeded_cancels_operation(self, facade: types.SimpleNamespace) -> None:
         """締切を過ぎたら operation を取り消して後始末を走らせ、UpstreamError(None, "deadline exceeded") にする。"""
         events: list[str] = []
-
-        async def operation() -> str:
-            """1 回だけ制御を返してから終わる。取り消しと後始末を記録する。"""
-            try:
-                await asyncio.sleep(0)
-                return "late"
-            except asyncio.CancelledError:
-                events.append("cancelled")
-                raise
-            finally:
-                events.append("closed")
-
         with pytest.raises(facade.upstream.UpstreamError) as exceeded:
-            asyncio.run(facade.upstream.call_with_deadline(operation, deadline=50.0, clock=_Clock(100.0)))
+            asyncio.run(facade.upstream.call_with_deadline(_late(events), deadline=50.0, clock=_Clock(100.0)))
         assert (exceeded.value.status, exceeded.value.detail, events) == (None, "deadline exceeded", ["cancelled", "closed"])

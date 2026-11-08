@@ -1,7 +1,7 @@
 """``mem.cli`` の各サブコマンドハンドラが共有する型とヘルパ。
 
 ``CommandError``（利用者向けの想定内エラー）、``CommandArgs``（解析済み引数）、
-ハンドラの型 ``_CommandHandler``、および ``--limit`` の変換・key の解決・出力予算・
+ハンドラの型 ``CommandHandler``、および ``--limit`` の変換・key の解決・出力予算・
 session_id の取り出しを持つ。``cmd_knowledge`` / ``cmd_context`` / ``cli`` はこの
 モジュールを import し、このモジュールはそれらを import しない（依存は一方向）。
 """
@@ -33,7 +33,7 @@ class CommandArgs:
         positionals: オプション以外の位置引数。
         flags: 指定された真偽フラグ（``--global`` 等）。
         values: 値付きオプション（``--limit`` 等）の名前から値への写像。
-        stdin_data: stdin から読んだ JSON。dict でなければ空。
+        stdin_data: stdin から読んだ JSON object。stdin を読まないコマンドでは空。
     """
 
     positionals: tuple[str, ...] = ()
@@ -42,13 +42,13 @@ class CommandArgs:
     stdin_data: dict[str, Any] = field(default_factory=dict)
 
 
-_CommandHandler = Callable[[Settings, CommandArgs], str | None]
+CommandHandler = Callable[[Settings, CommandArgs], str | None]
 
 
 # --- 知識 CRUD の補助 ---
 
 
-def _coerce_limit(value: str | None, default: int) -> int:
+def coerce_limit(value: str | None, default: int) -> int:
     """``--limit`` の値を正の整数へ変換する。
 
     Args:
@@ -72,7 +72,7 @@ def _coerce_limit(value: str | None, default: int) -> int:
     return limit
 
 
-def _find_knowledge(db: Database, key: str) -> Knowledge:
+def find_knowledge(db: Database, key: str) -> Knowledge:
     """cwd の repo スコープ → global スコープの順に key を解決する。
 
     Args:
@@ -92,7 +92,7 @@ def _find_knowledge(db: Database, key: str) -> Knowledge:
     return found
 
 
-def _fit_budget(lines: list[str], budget: int) -> list[str]:
+def fit_budget(lines: list[str], budget: int) -> list[str]:
     """出力行を文字数予算に収め、切り捨て分を 1 行で告知する。
 
     Args:
@@ -110,6 +110,6 @@ def _fit_budget(lines: list[str], budget: int) -> list[str]:
     return list(lines)
 
 
-def _session_uid(payload: dict[str, Any]) -> str:
+def session_uid_of(payload: dict[str, Any]) -> str:
     """フック JSON から session_id を取り出す。無ければ空文字。"""
     return str(payload.get("session_id") or "").strip()

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
-from claq.hooks import commit_risk as commit_risk
+from claq.hooks import commit_risk
 
 _MX = ["-m", "x"]
 _FEAT = ["-m", "feat: x"]
@@ -52,9 +54,9 @@ _FEAT = ["-m", "feat: x"]
         pytest.param("&& echo hi", (False, []), id="leading-separator-without-git"),
     ],
 )
-def test_is_git_commit_command(command: str, expected: tuple[bool, list[str]]) -> None:
+def test_parse_git_commit_command(command: str, expected: tuple[bool, list[str]]) -> None:
     """セグメントの実行位置にある `git commit` だけを検出し、その commit の引数を返すこと。"""
-    assert commit_risk._is_git_commit_command(command) == expected
+    assert commit_risk.parse_git_commit_command(command) == expected
 
 
 @pytest.mark.parametrize(
@@ -64,7 +66,7 @@ def test_is_git_commit_command(command: str, expected: tuple[bool, list[str]]) -
 )
 def test_is_commit_all_flag(commit_args: list[str], expected: bool) -> None:
     """-a / --all / -am のような結合短形式だけを -a 相当と判定すること。"""
-    assert commit_risk._is_commit_all_flag(commit_args) is expected
+    assert commit_risk.is_commit_all_flag(commit_args) is expected
 
 
 @pytest.mark.parametrize(
@@ -74,4 +76,72 @@ def test_is_commit_all_flag(commit_args: list[str], expected: bool) -> None:
 )
 def test_compound_commit_risk_sees_glued_operator_runs(command: str) -> None:
     """`shlex` が記号の連なりを 1 語にしても、commit 前の変更を見落とさない。"""
-    assert commit_risk._compound_commit_risk(command) == commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE
+    assert commit_risk.compound_commit_risk(command) == commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE
+
+
+@pytest.mark.parametrize(
+    ("segment", "expected"),
+    [
+        pytest.param(["git", "git", "add", "x"], True, id="repeated-git-before-subcommand"),
+        pytest.param(["git", "-C", ".", "add", "x"], True, id="global-option-before-subcommand"),
+        pytest.param(["git", "status", "git", "add"], True, id="subcommand-after-second-git"),
+        pytest.param(["git", "git", "status"], False, id="repeated-git-without-mutation"),
+    ],
+)
+def test_segment_mutates_worktree_or_index_reads_everything_after_the_first_git(
+    segment: list[str], expected: bool
+) -> None:
+    """最初の git より後ろのどこかに index を変えるサブコマンドがあれば、変更しうると判定する。"""
+    assert commit_risk._segment_mutates_worktree_or_index(segment) is expected
+
+
+def test_segment_scan_stays_linear_in_git_tokens() -> None:
+    """git トークンごとに後ろ全体を読み直さないこと（16,000 語で 1.5 秒かかる二次オーダーへ戻さない）。"""
+    started = time.perf_counter()
+    assert commit_risk._segment_mutates_worktree_or_index(["git"] * 32_000) is False
+    assert time.perf_counter() - started < 1.0
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        pytest.param("bash -c 'git commit -m x'", (True, _MX), id="one-level"),
+        pytest.param("BASH -lc 'git commit -m x'", (True, _MX), id="normalized-shell-name"),
+        pytest.param("echo ok; sh -c 'git commit -m x'", (True, _MX), id="after-a-separator"),
+        pytest.param("bash -c 'git status'", (False, []), id="no-commit-inside"),
+        # 2 段以上の ``sh -c`` は非目標（docs/adr/shell-analysis-boundary.md）。
+        pytest.param("""bash -c "bash -c 'git commit -m x'" """, (False, []), id="two-levels"),
+        # 内側の heredoc のデータ本文は `block_no_verify` の再帰と同じく実行命令として読まない。
+        pytest.param("""bash -c "cat <<'EOF'\ngit commit -m x\nEOF" """, (False, []), id="heredoc-data-inside"),
+    ],
+)
+def test_parse_git_commit_command_reads_one_shell_wrapper(command: str, expected: tuple[bool, list[str]]) -> None:
+    """``sh -c`` の 1 段の内側の commit も commit と読む。"""
+    assert commit_risk.parse_git_commit_command(command) == expected
+
+
+def test_parse_git_commit_command_can_leave_shell_wrappers_unread() -> None:
+    """argv の結合候補は ``sh -c`` の内側を読まない（内側の commit は要素側で数える）。"""
+    assert commit_risk.parse_git_commit_command("bash -c 'git commit -m x'", shell_wrappers=False) == (False, [])
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        pytest.param("bash -c 'git add x && git commit -m y'", "mutation", id="mutation-inside"),
+        pytest.param("git add x; bash -c 'git commit -m y'", "mutation", id="mutation-before-the-wrapper"),
+        pytest.param("bash -c 'git add x'; git commit -m y", "mutation", id="wrapper-mutates-before-commit"),
+        pytest.param("bash -c 'git commit -m a'; git commit -m b", "multiple", id="two-commits"),
+        pytest.param("bash -c 'git commit -m a && git commit -m b'", "multiple", id="two-commits-inside"),
+        pytest.param("bash -c 'git commit -m y'", None, id="single-commit"),
+        pytest.param("bash -c 'git commit -m y' >/tmp/log", None, id="redirect-of-the-wrapper-itself"),
+    ],
+)
+def test_compound_commit_risk_reads_one_shell_wrapper(command: str, expected: str | None) -> None:
+    """``sh -c`` の 1 段の内側も、複数 commit と commit 前の変更の判定に数える。"""
+    messages = {
+        "multiple": commit_risk.MULTIPLE_COMMITS_MESSAGE,
+        "mutation": commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE,
+        None: None,
+    }
+    assert commit_risk.compound_commit_risk(command) == messages[expected]

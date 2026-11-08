@@ -2,6 +2,7 @@
 
 import re
 import time
+from collections.abc import Callable
 
 import pytest
 
@@ -56,7 +57,7 @@ class TestRedact:
         assert redact(text) == text
 
     @pytest.mark.parametrize(
-        "text, expected",
+        ("text", "expected"),
         [
             # 区切りの直後に現れる JWT（JWT の lookbehind は区切りの直後なら一致する）
             pytest.param(
@@ -87,7 +88,7 @@ class TestRedactKnowledgeText:
     """redact_knowledge_text() — knowledge カード向け縮小版（hex_secret/base64_long 除外）"""
 
     @pytest.mark.parametrize(
-        "text, leaked",
+        ("text", "leaked"),
         [
             pytest.param("password" + "=mysecretpassword123", "mysecretpassword123", id="password_assign"),
             pytest.param("ghp_" + "abcdefghijklmnopqrstuvwxyz123456ABCD", "abcdefghijklmnopqrstuvwxyz123456ABCD", id="github_pat"),
@@ -215,7 +216,7 @@ class TestCredentialAssignmentShapes:
     @pytest.mark.parametrize("fn", [redact, redact_knowledge_text])
     @pytest.mark.parametrize(("label", "key", "sep", "quote_key", "quote_value"), _ASSIGN_SHAPES)
     def test_value_is_masked(
-        self, fn, label: str, key: str, sep: str, quote_key: str, quote_value: str
+        self, fn: Callable[[str], str], label: str, key: str, sep: str, quote_key: str, quote_value: str
     ) -> None:
         """キー直後が引用符・`_KEY` 等の接続語でも、値はマスクされる。"""
         text = _kv(key, sep, _ASSIGN_VALUE, quote_key=quote_key, quote_value=quote_value)
@@ -225,7 +226,7 @@ class TestCredentialAssignmentShapes:
 
     @pytest.mark.parametrize("fn", [redact, redact_knowledge_text])
     @pytest.mark.parametrize("text", _NOT_A_SECRET_ASSIGNMENTS)
-    def test_identifier_containing_credential_word_is_kept(self, fn, text: str) -> None:
+    def test_identifier_containing_credential_word_is_kept(self, fn: Callable[[str], str], text: str) -> None:
         """credential 語を識別子の一部に含むだけの代入や、8 文字未満の値は伏せない。"""
         assert fn(text) == text
 
@@ -337,7 +338,7 @@ class TestEmailLocalPartBound:
     """
 
     @pytest.mark.parametrize(
-        "local_length, matches",
+        ("local_length", "matches"),
         [
             pytest.param(64, True, id="at-bound"),
             # 配送不能な長さ。意図した絞り込み

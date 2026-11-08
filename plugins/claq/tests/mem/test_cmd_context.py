@@ -31,23 +31,29 @@ def _envelope(*sections: str) -> str:
     return "<claq-memory>\n" + "\n\n".join(sections) + "\n</claq-memory>"
 
 
+def _inject(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    payload: dict | None = None,
+    *,
+    bg_failure_notice: str = "",
+) -> str:
+    """context を実行し、注入される additionalContext を取り出す。"""
+    stdout, stderr, exit_code = _run_cli(
+        monkeypatch, tmp_path, ["context"], payload or {}, bg_failure_notice=bg_failure_notice
+    )
+    assert (stderr, exit_code) == ("", 0)
+    return json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+
+
+def _repo_root_paths(tmp_path: Path) -> list[str]:
+    """repos に登録された root_path を返す。"""
+    with Database(tmp_path / "mem.db") as db:
+        return [repo.root_path for repo in db.list_repos()]
+
+
 class TestContext:
     """context コマンド（SessionStart 注入経路）。"""
-
-    @staticmethod
-    def _inject(
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        payload: dict | None = None,
-        *,
-        bg_failure_notice: str = "",
-    ) -> str:
-        """context を実行し、注入される additionalContext を取り出す。"""
-        stdout, stderr, exit_code = _run_cli(
-            monkeypatch, tmp_path, ["context"], payload or {}, bg_failure_notice=bg_failure_notice
-        )
-        assert (stderr, exit_code) == ("", 0)
-        return json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
 
     @staticmethod
     def _seed_session(tmp_path: Path, repo_id: str, **overrides: object) -> None:
@@ -108,7 +114,7 @@ class TestContext:
         """
         _seed(tmp_path, scope="global", key="k", title="t")
 
-        injected = self._inject(monkeypatch, tmp_path, bg_failure_notice=notice)
+        injected = _inject(monkeypatch, tmp_path, bg_failure_notice=notice)
 
         assert injected == _envelope("## 共通知識\n- [fact] t", f"## 前回セッションの通知\n{expected}")
 
@@ -189,7 +195,7 @@ class TestContext:
         """
         _seed(tmp_path, key="k", kind="fact", title=title, body=body)
 
-        assert self._inject(monkeypatch, tmp_path) == _envelope(f"## 共通知識\n{expected}")
+        assert _inject(monkeypatch, tmp_path) == _envelope(f"## 共通知識\n{expected}")
 
     @pytest.mark.parametrize(
         ("handoff", "expected"),
@@ -242,8 +248,7 @@ class TestContext:
         """
         self._seed_session(tmp_path, _repo_id(tmp_path), handoff=handoff)
 
-        assert self._inject(monkeypatch, tmp_path) == _envelope(f"## 前回の続き (2026-08-09 14:03)\n{expected}")
-
+        assert _inject(monkeypatch, tmp_path) == _envelope(f"## 前回の続き (2026-08-09 14:03)\n{expected}")
 
     def test_shell_bootstrap_section_names_the_wrapper_where_env_sh_cannot_resolve(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -257,7 +262,7 @@ class TestContext:
         _seed(tmp_path, scope="global", key="k", title="t")
         monkeypatch.setattr(cmd_context, "ancestor_pointers_supported", lambda: False)
 
-        injected = self._inject(monkeypatch, tmp_path)
+        injected = _inject(monkeypatch, tmp_path)
 
         assert "## claq の呼び出し" in injected
         assert str(get_plugin_root() / "runtime" / "claq-hook.cmd") in injected
@@ -268,7 +273,7 @@ class TestContext:
 
     def test_no_knowledge_injects_nothing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """知識も引き継ぎも無ければ 1 文字も注入しない。"""
-        assert self._inject(monkeypatch, tmp_path) == ""
+        assert _inject(monkeypatch, tmp_path) == ""
 
     def test_injects_three_sections(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """共通知識・リポジトリ・前回の続きの 3 層を規定の書式で注入する。"""
@@ -287,7 +292,7 @@ class TestContext:
         )
         self._seed_session(tmp_path, repo_id, handoff="スキーマ確定まで完了、実装未着手。")
 
-        assert self._inject(monkeypatch, tmp_path) == (
+        assert _inject(monkeypatch, tmp_path) == (
             "<claq-memory>\n"
             "## 共通知識\n"
             "- [convention] Python は python3 を使う\n"
@@ -309,7 +314,7 @@ class TestContext:
         _seed(tmp_path, key="a", title="archived card", status="archived")
         _seed(tmp_path, key="rp", scope="repo", repo_id=repo_id, title="repo draft", status="pending")
 
-        assert self._inject(monkeypatch, tmp_path) == ""
+        assert _inject(monkeypatch, tmp_path) == ""
 
     def test_orders_by_confidence_then_updated_at(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """confidence DESC → updated_at DESC の順に並べる。"""
@@ -317,7 +322,7 @@ class TestContext:
         _seed(tmp_path, key="old", title="old", confidence=0.9, updated_at="2026-01-01T00:00:00+00:00")
         _seed(tmp_path, key="new", title="new", confidence=0.9, updated_at="2026-08-09T00:00:00+00:00")
 
-        injected = self._inject(monkeypatch, tmp_path)
+        injected = _inject(monkeypatch, tmp_path)
         assert injected.splitlines()[2:5] == ["- [fact] new", "- [fact] old", "- [fact] low"]
 
     def test_section_is_truncated_at_char_budget(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -325,7 +330,7 @@ class TestContext:
         for index in range(40):
             _seed(tmp_path, key=f"k{index}", title="あ" * 100)
 
-        lines = self._inject(monkeypatch, tmp_path).splitlines()
+        lines = _inject(monkeypatch, tmp_path).splitlines()
         assert lines[-2].startswith("… +")
         # 見出し・タグ・envelope を除いた明細だけで予算内に収まっている
         assert sum(len(line) + 1 for line in lines[2:-2]) <= CONTEXT_GLOBAL_CHAR_BUDGET
@@ -334,7 +339,7 @@ class TestContext:
         """空白だけの引き継ぎは節ごと出さない。"""
         self._seed_session(tmp_path, _repo_id(tmp_path), handoff="   ")
 
-        assert self._inject(monkeypatch, tmp_path) == ""
+        assert _inject(monkeypatch, tmp_path) == ""
 
     def test_handoff_of_other_repo_is_not_injected(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """別リポジトリの引き継ぎは混ざらない。"""
@@ -343,11 +348,11 @@ class TestContext:
             db.upsert_repo(Repo(id="other", identity_key="key-other", root_path="/tmp/other"))
         self._seed_session(tmp_path, "other", handoff="別リポジトリの続き")
 
-        assert self._inject(monkeypatch, tmp_path) == ""
+        assert _inject(monkeypatch, tmp_path) == ""
 
     def test_records_session_row(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """hook の session_id で sessions 行を作る（harness は既定値 unknown）。"""
-        self._inject(monkeypatch, tmp_path, {"session_id": "abc-123"})
+        _inject(monkeypatch, tmp_path, {"session_id": "abc-123"})
 
         with Database(tmp_path / "mem.db") as db:
             row = db.conn.execute("SELECT * FROM sessions").fetchone()
@@ -357,7 +362,7 @@ class TestContext:
 
     def test_missing_session_id_records_no_row(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """session_id を渡さないハーネスでは sessions 行を作らない。"""
-        self._inject(monkeypatch, tmp_path, {"cwd": str(tmp_path)})
+        _inject(monkeypatch, tmp_path, {"cwd": str(tmp_path)})
 
         with Database(tmp_path / "mem.db") as db:
             assert db.conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"] == 0
@@ -368,10 +373,9 @@ class TestContext:
         workdir.mkdir()
         _seed(tmp_path, key="g", title="global card")
 
-        injected = self._inject(monkeypatch, tmp_path, {"cwd": str(workdir)})
+        injected = _inject(monkeypatch, tmp_path, {"cwd": str(workdir)})
         assert injected != ""
-        with Database(tmp_path / "mem.db") as db:
-            assert [repo.root_path for repo in db.list_repos()] == [str(workdir.resolve())]
+        assert _repo_root_paths(tmp_path) == [str(workdir.resolve())]
 
 
 class TestHandoff:
@@ -403,8 +407,7 @@ class TestHandoff:
         assert rows[0]["handoff"] == "タスク5まで完了"
         assert rows[0]["started_at"] == started_at
         assert rows[0]["ended_at"] is not None
-        stdout, _, _ = _run_cli(monkeypatch, tmp_path, ["context"], {"session_id": "s2"})
-        injected = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        injected = _inject(monkeypatch, tmp_path, {"session_id": "s2"})
         assert "## 前回の続き (" in injected
         assert injected.endswith("タスク5まで完了\n</claq-memory>")
 
@@ -427,8 +430,7 @@ class TestHandoff:
 
         self._run(monkeypatch, tmp_path, {"session_id": "s1", "cwd": str(workdir), "handoff": "続き"})
 
-        with Database(tmp_path / "mem.db") as db:
-            assert [repo.root_path for repo in db.list_repos()] == [str(workdir.resolve())]
+        assert _repo_root_paths(tmp_path) == [str(workdir.resolve())]
 
     @pytest.mark.parametrize(
         "payload",

@@ -91,26 +91,25 @@ from __future__ import annotations
 
 import re
 
+from claq.hooks.heredoc import command_readings, strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     emit_block_output,
     is_git_executable_token,
 )
 from claq.hooks.shell_tokens import (
-    MAX_COMMAND_BYTES,
-    command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
     is_shell_wrapper_token,
+    scan_budget_message,
     split_segments,
-    strip_data_heredoc_bodies,
     tokenize_with_status,
 )
 from claq.hooks.stdin_io import (
-    MAX_STDIN_BYTES,
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
+    truncated_input_message,
 )
 from claq.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
 
@@ -202,7 +201,7 @@ _HOOKS_PATH_CONFIG_KEY = "core.hookspath"
 #   **値**の中にあるためフラグ走査に掛からない。展開結果を解釈する術が無い以上、
 #   alias の定義そのものを deny する（誤検出 > 誤通過）。
 #
-# `is_sensitive_config_key` は `git config` / ``-c`` の key だけでなく、`config_protection` が
+# `is_sensitive_config_key` は `git config` / ``-c`` の key だけでなく、`conditional_protection` が
 # config ファイルの本文を解析して得た key の判定にも使う（key 集合を 1 本にするため）。
 _SENSITIVE_CONFIG_KEY_PREFIXES = (
     _HOOKS_PATH_CONFIG_KEY,
@@ -210,64 +209,6 @@ _SENSITIVE_CONFIG_KEY_PREFIXES = (
     "includeif.",
     "alias.",
 )
-
-
-def is_git_invocation(token: str) -> bool:
-    """トークンが git 実行ファイルの起動かどうかを判定する。
-
-    ``/usr/bin/git``・``git.exe``・``GIT`` を拾い、``gitk`` / ``GIT_DIR=.git`` / ``git/`` は
-    一致しない。正規化は兄弟フックと共有する ``hook_common.is_git_executable_token`` に
-    委譲する。
-
-    Args:
-        token: 検査対象のトークン。
-
-    Returns:
-        git 起動トークンなら True。
-
-    Raises:
-        例外は発生しません。
-    """
-    return is_git_executable_token(token)
-
-
-def _consume_short_cluster(token: str, flags: list[str]) -> tuple[int, bool, str | None]:
-    """short オプションのクラスタを 1 文字ずつフラグへ展開する。
-
-    ``-am`` のように複数の short オプションが結合したトークンを扱います。
-    値を取る文字に到達した時点で以降は値なので走査を打ち切ります。
-
-    Args:
-        token: ``-`` で始まる（``--`` ではない）short オプショントークン。
-        flags: 検出したフラグを追記するリスト。
-
-    Returns:
-        (値として追加で消費すべき後続トークン数（0 または 1）,
-        git グローバルオプションとして未知の文字を含むか,
-        ``-c`` が結合形（``-ccore.hooksPath=x``）で値を持つ場合はその値文字列、
-        それ以外は None) の 3 要素タプル。値が次トークンにある場合
-        （非結合形の ``-c``）は None を返し、呼び出し側が
-        ``flags[-1] == "-c"`` を見て次トークンを取得します。
-
-    Raises:
-        例外は発生しません。
-    """
-    last_index = len(token) - 1
-    unknown = False
-    for index, char in enumerate(token[1:], start=1):
-        flags.append(f"-{char}")
-        if char in _OPTIONAL_VALUE_SHORT_OPTIONS:
-            if index < last_index:
-                return 0, unknown, None
-            continue
-        if char in _VALUE_SHORT_OPTIONS:
-            if index < last_index:
-                config_value = token[index + 1 :] if char == "c" else None
-                return 0, unknown, config_value
-            return 1, unknown, None
-        if char not in _BOOLEAN_GLOBAL_SHORT_OPTIONS:
-            unknown = True
-    return 0, unknown, None
 
 
 def _consume_long_option(
@@ -310,8 +251,10 @@ def _consume_short_option(
 ) -> tuple[int, bool]:
     """``-`` で始まる short オプション 1 トークンをフラグへ記録し、値の消費と未知判定を返す。
 
-    結合形の ``-c`` の値（``-ccore.hooksPath=x``）と、非結合形の ``-c`` が次トークンに持つ値を、
-    ともに ``config_values`` へ集約します。
+    ``-am`` のように結合した short オプションのクラスタを 1 文字ずつフラグへ展開し、値を取る文字に
+    到達した時点で以降は値なので走査を打ち切ります。その値は、文字がクラスタの途中なら残りの文字列
+    （``-mmsg``）、末尾なら次トークン（``-am msg``）です。``-c`` の値は結合形（``-ccore.hooksPath=x``）・
+    分離形のどちらでも ``config_values`` へ集約します。
 
     Args:
         token: ``-`` で始まる（``--`` ではなく、``-`` 単独でもない）トークン。
@@ -326,12 +269,50 @@ def _consume_short_option(
     Raises:
         例外は発生しません。
     """
-    consumed, unknown, config_value = _consume_short_cluster(token, flags)
-    if config_value is None and consumed == 1 and flags[-1] == "-c":
-        config_value = next_token
-    if config_value is not None:
-        config_values.append(config_value)
-    return consumed, unknown
+    last_index = len(token) - 1
+    unknown = False
+    for index, char in enumerate(token[1:], start=1):
+        flags.append(f"-{char}")
+        if char in _OPTIONAL_VALUE_SHORT_OPTIONS:
+            if index < last_index:
+                return 0, unknown
+            continue
+        if char in _VALUE_SHORT_OPTIONS:
+            if index < last_index:
+                value, consumed = token[index + 1 :], 0
+            else:
+                value, consumed = next_token, 1
+            if char == "c" and value is not None:
+                config_values.append(value)
+            return consumed, unknown
+        if char not in _BOOLEAN_GLOBAL_SHORT_OPTIONS:
+            unknown = True
+    return 0, unknown
+
+
+def _consume_option(
+    token: str, next_token: str | None, flags: list[str], config_values: list[str]
+) -> tuple[int, bool]:
+    """オプションのトークンを long / short の読み方でフラグへ記録し、値の消費と未知判定を返す。
+
+    Args:
+        token: ``--`` 単独ではないトークン。
+        next_token: 直後のトークン。無ければ None。
+        flags: 検出したフラグを追記するリスト。
+        config_values: ``-c`` / ``--config-env`` の値を追記するリスト。
+
+    Returns:
+        (値として追加で消費すべき後続トークン数（0 または 1）, 未知のオプションか) の 2 要素タプル。
+        非オプション語（``-`` 単独を含む）はフラグを残さず ``(0, False)``。
+
+    Raises:
+        例外は発生しません。
+    """
+    if token.startswith("--"):
+        return _consume_long_option(token, next_token, flags, config_values)
+    if token.startswith("-") and len(token) > 1:
+        return _consume_short_option(token, next_token, flags, config_values)
+    return 0, False
 
 
 def _is_no_verify_flag(flag: str) -> bool:
@@ -346,17 +327,13 @@ def _is_no_verify_flag(flag: str) -> bool:
     Raises:
         例外は発生しません。
     """
-    return (
-        len(flag) >= _MIN_ABBREVIATED_LONG_OPTION_LENGTH
-        and len(flag) <= len(_BYPASS_LONG_FLAG)
-        and _BYPASS_LONG_FLAG.startswith(flag)
-    )
+    return len(flag) >= _MIN_ABBREVIATED_LONG_OPTION_LENGTH and _BYPASS_LONG_FLAG.startswith(flag)
 
 
 def is_sensitive_config_key(key: str) -> bool:
     """config key がフック実行を左右しうるものかを判定する。
 
-    `config_protection` が config ファイルの本文から得た完全修飾 key（``section.sub.key``）にも
+    `conditional_protection` が config ファイルの本文から得た完全修飾 key（``section.sub.key``）にも
     使うため公開名にしている。
 
     Args:
@@ -376,7 +353,7 @@ def is_sensitive_config_key(key: str) -> bool:
 # 未設定の変数へは単なる代入になるため、``HOME+=x`` も ``HOME`` の差し替えである。
 _ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\+?=(.*)$", re.DOTALL)
 
-# GIT_CONFIG_KEY_<n> の index 部分を取り出す正規表現。
+# ``GIT_CONFIG_COUNT`` 方式で config key を与える ``GIT_CONFIG_KEY_<n>`` の変数名。
 _GIT_CONFIG_KEY_INDEX_RE = re.compile(r"^GIT_CONFIG_KEY_\d+$")
 
 # git が config の読み込み元を決めるために読む literal 環境変数名。値を解釈しても
@@ -514,12 +491,7 @@ class _GitScan:
             next_token = segment[j + 1] if j + 1 < end else None
             flags: list[str] = []
             config_values: list[str] = []
-            if token.startswith("--"):
-                consumed, unknown = _consume_long_option(token, next_token, flags, config_values)
-            elif token.startswith("-") and len(token) > 1:
-                consumed, unknown = _consume_short_option(token, next_token, flags, config_values)
-            else:
-                consumed, unknown = 0, False
+            consumed, unknown = _consume_option(token, next_token, flags, config_values)
             # オプションは必ずフラグを 1 つ以上残すので、フラグが無ければ非オプション語。
             is_word = not flags
             k = min(j + 1 + consumed, end)
@@ -606,12 +578,10 @@ def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix:
             内側の git 起動に前置された代入と同じ扱いで環境変数の注入を判定します。
 
     Returns:
-        ``--no-verify``（サブコマンド不問）、``core.hooksPath`` オーバーライド
-        （``-c``/``--config-env``、``git config`` の書込み操作、または
-        literal ``GIT_CONFIG_*`` / ``HOME`` / ``XDG_CONFIG_HOME`` 環境変数代入の
-        いずれか経由）、``git commit``
-        の ``-n``、またはサブコマンドを確定できない状態での ``-n`` を
-        検出したら True。
+        ``--no-verify``（サブコマンド不問）、``core.hooksPath`` オーバーライド（``-c``/``--config-env``、
+        ``git config`` の書込み操作、または literal ``GIT_CONFIG_*`` / ``HOME`` / ``XDG_CONFIG_HOME``
+        環境変数代入のいずれか経由）、``git commit`` の ``-n``、またはサブコマンドを確定できない状態での
+        ``-n`` を検出したら True。
 
     Raises:
         例外は発生しません。
@@ -621,7 +591,7 @@ def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix:
     command = strip_data_heredoc_bodies(command)
     return any(
         _has_bypass_flag_in_dialect(variant, _recursed=_recursed, _inherited_prefix=_inherited_prefix)
-        for variant in command_dialect_variants(command)
+        for variant in command_readings(command)
     )
 
 
@@ -651,11 +621,39 @@ def _wrapper_prefix_tokens(segment: list[str]) -> tuple[str, ...]:
     return tuple(segment[:index])
 
 
+def _segment_has_bypass(segment: list[str], inherited_prefix: tuple[str, ...]) -> bool:
+    """1 セグメント内のいずれかの git 起動がフックを迂回するかを判定する。
+
+    git 起動ごとに、起動トークン以降の解析（`_GitScan`）と、起動より前の literal 環境変数代入
+    （`_EnvAssignmentScan`）を見る。`_GitScan` はセグメントに git 起動が現れたときに 1 回だけ作る。
+
+    Args:
+        segment: シェル区切りで分けた 1 セグメントのトークン列。
+        inherited_prefix: 外側セグメントから引き継いだ前置トークン列（再帰先でのみ非空）。
+
+    Returns:
+        フックを迂回する git 起動があれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    scan: _GitScan | None = None
+    env = _EnvAssignmentScan(inherited_prefix)
+    for index, token in enumerate(segment):
+        if is_git_executable_token(token):
+            if scan is None:
+                scan = _GitScan(segment)
+            if scan.is_bypass_at(index) or env.overrides_hooks_path():
+                return True
+        env.add(token)
+    return False
+
+
 def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_prefix: tuple[str, ...]) -> bool:
     """1 つのシェル方言の読み方で `has_bypass_flag` の判定を行う。
 
     Args:
-        command: `command_dialect_variants` が返した 1 通りの読み方。
+        command: `command_readings` が返した 1 通りの読み方。
         _recursed: ラッパー再帰済みかどうか。
         _inherited_prefix: 外側セグメントから引き継いだ前置トークン列（再帰先でのみ非空）。
 
@@ -669,15 +667,8 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
     if not parsed_cleanly and _UNPARSED_RAW_BYPASS_RE.search(command):
         return True
     for segment in split_segments(tokens):
-        scan: _GitScan | None = None
-        env = _EnvAssignmentScan(_inherited_prefix)
-        for index, token in enumerate(segment):
-            if is_git_invocation(token):
-                if scan is None:
-                    scan = _GitScan(segment)
-                if scan.is_bypass_at(index) or env.overrides_hooks_path():
-                    return True
-            env.add(token)
+        if _segment_has_bypass(segment, _inherited_prefix):
+            return True
         if _recursed:
             continue
         wrapper_command = extract_shell_wrapper_command(segment)
@@ -688,17 +679,11 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
     return False
 
 
-_SCAN_BUDGET_MESSAGE = (
-    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for pre:block-no-verify. "
-    "A command this large cannot be inspected within the hook timeout, and an un-inspected "
-    "command must not be allowed. Split it into smaller commands."
-)
+_BYPASS_BLOCKED_MESSAGE = "[Hook] BLOCKED: git hook bypass flags are not allowed"
 
-_TRUNCATED_INPUT_MESSAGE = (
-    f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:block-no-verify. "
-    "Refusing to evaluate a possibly-truncated bash command for hook bypass flags. "
-    "Retry with a smaller command."
-)
+_SCAN_BUDGET_MESSAGE = scan_budget_message("pre:block-no-verify", "command")
+
+_TRUNCATED_INPUT_MESSAGE = truncated_input_message("pre:block-no-verify", "bash command for hook bypass flags")
 
 _UNPARSEABLE_INPUT_MESSAGE = (
     "[Hook] BLOCKED: could not parse hook input for pre:block-no-verify. "
@@ -737,24 +722,22 @@ def main() -> int:
     if not raw:
         return 0
 
-    data = parse_json_object(raw)
-    if data is None:
+    payload = parse_json_object(raw)
+    if payload is None:
         return emit_block_output(_UNPARSEABLE_INPUT_MESSAGE)
 
-    if extract_tool_input(data) is None:
+    if extract_tool_input(payload) is None:
         return emit_block_output(_MISSING_FIELDS_MESSAGE)
 
     # 先勝ちで 1 キーだけ見ると、複数のコンテナキーを持つ payload で無害な側だけを
     # 検査して素通りさせうるため、全キーを走査する。
-    commands = list(iter_bash_commands(data))
+    commands = list(iter_bash_commands(payload))
     # 検査予算（バイト数）を超える入力は走査せず止める（`MAX_COMMAND_BYTES` のコメント）。
     # argv 配列の要素の走査が積み上がらないよう、全候補を走査する前に検査する。
     if any(command_exceeds_scan_budget(command) for command in commands):
         return emit_block_output(_SCAN_BUDGET_MESSAGE)
-    for command in commands:
-        if has_bypass_flag(command):
-            return emit_block_output("[Hook] BLOCKED: git hook bypass flags are not allowed")
-
+    if any(has_bypass_flag(command) for command in commands):
+        return emit_block_output(_BYPASS_BLOCKED_MESSAGE)
     return 0
 
 

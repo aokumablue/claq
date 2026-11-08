@@ -32,21 +32,21 @@ import dataclasses
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from claq.hooks.hook_common import print_session_start_output
 from claq.hooks.stdin_io import read_raw_stdin
 from claq.mem import logger as mem_logger
-from claq.mem.cmd_context import _handle_context, _handle_handoff
+from claq.mem.cmd_context import handle_context, handle_handoff
 from claq.mem.cmd_knowledge import (
-    _handle_forget,
-    _handle_learn,
-    _handle_list,
-    _handle_promote,
-    _handle_search,
-    _handle_show,
+    handle_forget,
+    handle_learn,
+    handle_list,
+    handle_promote,
+    handle_search,
+    handle_show,
 )
-from claq.mem.command_support import CommandArgs, CommandError, _CommandHandler
+from claq.mem.command_support import CommandArgs, CommandError, CommandHandler
 from claq.mem.database import Database
 from claq.mem.settings import Settings
 
@@ -67,22 +67,33 @@ _BOOL_FLAGS: frozenset[str] = frozenset({"--global", "--repo", "--json"})
 # 無いのに「stdin リダイレクト漏れの可能性」と誤って警告する。
 _STDIN_COMMANDS: frozenset[str] = frozenset({"learn", "context", "handoff"})
 
-_FILTER_OPTIONS = frozenset({"--global", "--repo", "--status", "--kind", "--limit", "--json"})
+_FILTER_OPTIONS: frozenset[str] = frozenset({"--global", "--repo", "--status", "--kind", "--limit", "--json"})
 
-# subcommand ごとの（位置引数の個数, 受理するオプション）。個数 None は可変長
-# （``search`` は複数の位置引数を検索語として連結する）。オプションの対応表を
-# 持たないと `promote <key> --global` のような未対応 flag が黙って通り、指定と
-# 異なるカード（repo 優先探索の結果）を操作してしまう。
-_COMMAND_SPECS: dict[str, tuple[int | None, frozenset[str]]] = {
-    "init": (0, frozenset()),
-    "context": (0, frozenset()),
-    "handoff": (0, frozenset()),
-    "learn": (0, frozenset()),
-    "list": (0, _FILTER_OPTIONS),
-    "search": (None, _FILTER_OPTIONS),
-    "show": (1, frozenset()),
-    "promote": (1, frozenset()),
-    "forget": (1, frozenset({"--superseded-by"})),
+
+class _CommandSpec(NamedTuple):
+    """subcommand が受理する引数の形。
+
+    Attributes:
+        arity: 位置引数の個数。None は可変長（``search`` は複数の位置引数を検索語として連結する）。
+        options: 受理するオプション。
+    """
+
+    arity: int | None
+    options: frozenset[str]
+
+
+# オプションの対応表を持たないと `promote <key> --global` のような未対応 flag が
+# 黙って通り、指定と異なるカード（repo 優先探索の結果）を操作してしまう。
+_COMMAND_SPECS: dict[str, _CommandSpec] = {
+    "init": _CommandSpec(0, frozenset()),
+    "context": _CommandSpec(0, frozenset()),
+    "handoff": _CommandSpec(0, frozenset()),
+    "learn": _CommandSpec(0, frozenset()),
+    "list": _CommandSpec(0, _FILTER_OPTIONS),
+    "search": _CommandSpec(None, _FILTER_OPTIONS),
+    "show": _CommandSpec(1, frozenset()),
+    "promote": _CommandSpec(1, frozenset()),
+    "forget": _CommandSpec(1, frozenset({"--superseded-by"})),
 }
 
 
@@ -155,10 +166,12 @@ def _parse_args_and_stdin(command: str, argv: list[str]) -> CommandArgs:
         ``stdin_data`` は空 dict。
 
     Raises:
-        CommandError: オプションの解析に失敗した場合。
+        CommandError: オプションの解析に失敗した場合、または stdin が JSON object として読めない場合。
     """
     args = _parse_options(argv)
-    return dataclasses.replace(args, stdin_data=_read_stdin_json() if command in _STDIN_COMMANDS else {})
+    if command not in _STDIN_COMMANDS:
+        return args
+    return dataclasses.replace(args, stdin_data=_read_stdin_json())
 
 
 def _check_positional_arity(command: str, args: CommandArgs) -> None:
@@ -175,10 +188,12 @@ def _check_positional_arity(command: str, args: CommandArgs) -> None:
     Raises:
         CommandError: 契約に反する個数の位置引数が指定された場合。
     """
-    arity = _COMMAND_SPECS[command][0] if command in _COMMAND_SPECS else None
-    if arity == 0 and args.positionals:
+    spec = _COMMAND_SPECS.get(command)
+    if spec is None:
+        return
+    if spec.arity == 0 and args.positionals:
         raise CommandError(f"{command} は位置引数を取りません: {' '.join(args.positionals)!r}")
-    if arity == 1:
+    if spec.arity == 1:
         if not args.positionals:
             raise CommandError("key を指定してください")
         if len(args.positionals) > 1:
@@ -222,10 +237,11 @@ def _check_supported_options(command: str, args: CommandArgs) -> None:
     Raises:
         CommandError: 未対応のオプション、または排他オプションの同時指定。
     """
-    if command not in _COMMAND_SPECS:
+    spec = _COMMAND_SPECS.get(command)
+    if spec is None:
         return
     used = set(args.flags) | set(args.values)
-    unsupported = sorted(used - _COMMAND_SPECS[command][1])
+    unsupported = sorted(used - spec.options)
     if unsupported:
         raise CommandError(f"{command} は次のオプションを取りません: {' '.join(unsupported)}")
     if {"--global", "--repo"} <= used:
@@ -243,6 +259,28 @@ def _load_settings_or_raise() -> Settings:
     return settings
 
 
+def _prepare_command(command: str, argv: list[str]) -> tuple[Settings, CommandArgs]:
+    """引数と stdin を読んで検証し、通ったら設定と logger を初期化する。
+
+    Args:
+        command: 実行するコマンド名。
+        argv: コマンド名を除いた引数リスト。
+
+    Returns:
+        初期化済みの Settings と、検証済みの CommandArgs。
+
+    Raises:
+        CommandError: 引数・stdin が契約に反する場合。
+    """
+    args = _parse_args_and_stdin(command, argv)
+    _check_positional_arity(command, args)
+    # learn --status には専用の説明があるため、一般的な未対応オプション
+    # チェックより先に評価する。
+    _check_learn_options(command, args)
+    _check_supported_options(command, args)
+    return _load_settings_or_raise(), args
+
+
 def main() -> int:
     """CLI エントリポイント。argv からコマンドを解決して実行し、終了コードを返す。
 
@@ -256,44 +294,34 @@ def main() -> int:
         return 0
 
     command = sys.argv[1]
-    session_start = command in _SESSION_START_COMMANDS
-    additional_context = ""
-    exit_code = 0
     try:
-        args = _parse_args_and_stdin(command, sys.argv[2:])
-        _check_positional_arity(command, args)
-        # learn --status には専用の説明があるため、一般的な未対応オプション
-        # チェックより先に評価する。
-        _check_learn_options(command, args)
-        _check_supported_options(command, args)
-        settings = _load_settings_or_raise()
+        settings, args = _prepare_command(command, sys.argv[2:])
     except CommandError as e:
         print(str(e), file=sys.stderr)
-        exit_code = 1
+        return 1
     except Exception as e:
         print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
-        exit_code = 1
-    else:
-        handler = _COMMAND_HANDLERS.get(command)
-        try:
-            if session_start:
-                additional_context = handler(settings, args)
-            elif handler is None:
-                log.error("不明なコマンド: %s", command)
-                exit_code = 2
-            else:
-                handler(settings, args)
-        except CommandError as e:
-            print(str(e), file=sys.stderr)
-            exit_code = 1
-        except Exception as e:
-            log.error("コマンド %s 失敗: %s", command, e)
-            print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
-            exit_code = 1
+        return 1
 
-    if session_start and exit_code == 0:
+    # 不明なコマンドの報告はファイルへも残すので、logger の初期化後に判定する。
+    handler = _COMMAND_HANDLERS.get(command)
+    if handler is None:
+        log.error("不明なコマンド: %s", command)
+        return 2
+
+    try:
+        additional_context = handler(settings, args)
+    except CommandError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    except Exception as e:
+        log.error("コマンド %s 失敗: %s", command, e)
+        print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
+        return 1
+
+    if command in _SESSION_START_COMMANDS:
         print_session_start_output(additional_context)
-    return exit_code
+    return 0
 
 
 # --- DB の作り直し ---
@@ -338,16 +366,16 @@ def _remove_db_sidecars(db_path: Path) -> None:
         Path(f"{db_path}{suffix}").unlink(missing_ok=True)
 
 
-_COMMAND_HANDLERS: dict[str, _CommandHandler] = {
+_COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "init": _handle_init,
-    "context": _handle_context,
-    "handoff": _handle_handoff,
-    "learn": _handle_learn,
-    "list": _handle_list,
-    "search": _handle_search,
-    "show": _handle_show,
-    "promote": _handle_promote,
-    "forget": _handle_forget,
+    "context": handle_context,
+    "handoff": handle_handoff,
+    "learn": handle_learn,
+    "list": handle_list,
+    "search": handle_search,
+    "show": handle_show,
+    "promote": handle_promote,
+    "forget": handle_forget,
 }
 
 

@@ -29,6 +29,12 @@ def _trust_tmp_path_as_transcript_root(monkeypatch: pytest.MonkeyPatch, tmp_path
     monkeypatch.setenv("CLAQ_TRANSCRIPT_ROOTS", str(tmp_path))
 
 
+def _point_home_at(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
+    """HOME を home へ向け、テスト隔離用の CLAQ_HOME を外す（既定 host root の基点を固定する）。"""
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAQ_HOME", raising=False)
+
+
 def _write_transcript(directory: Path, entries: list[dict | str]) -> str:
     """directory/transcript.jsonl へ JSONL トランスクリプトを書き出してパスを返す。"""
     lines = [entry if isinstance(entry, str) else json.dumps(entry, ensure_ascii=False) for entry in entries]
@@ -604,8 +610,7 @@ class TestTrustedTranscript:
     ) -> None:
         """allowlist 外の任意ファイルは、性質検査（symlink/所有者）を通っても要約されない。"""
         monkeypatch.delenv("CLAQ_TRANSCRIPT_ROOTS", raising=False)
-        monkeypatch.setenv("HOME", str(tmp_path / "unrelated-home"))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
+        _point_home_at(monkeypatch, tmp_path / "unrelated-home")
         path = _write_transcript(tmp_path, [_user("依頼")])
 
         assert build_handoff({"transcript_path": path}) == ""
@@ -616,8 +621,7 @@ class TestTrustedTranscript:
     ) -> None:
         """既知 host（Claude Code / Copilot CLI / Codex）の既定 root 配下は要約される。"""
         monkeypatch.delenv("CLAQ_TRANSCRIPT_ROOTS", raising=False)
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
+        _point_home_at(monkeypatch, tmp_path)
         project_dir = tmp_path.joinpath(*subdir)
         project_dir.mkdir(parents=True)
 
@@ -627,8 +631,7 @@ class TestTrustedTranscript:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """CLAQ_TRANSCRIPT_ROOTS で未知 host の root を追加でき、追加した root は trusted_transcript_roots に載る。"""
-        monkeypatch.setenv("HOME", str(tmp_path / "unrelated-home"))
-        monkeypatch.delenv("CLAQ_HOME", raising=False)
+        _point_home_at(monkeypatch, tmp_path / "unrelated-home")
         root_a = tmp_path / "root_a"
         root_b = tmp_path / "root_b"
         root_a.mkdir()
@@ -636,7 +639,8 @@ class TestTrustedTranscript:
         monkeypatch.setenv("CLAQ_TRANSCRIPT_ROOTS", f"{root_a}{os.pathsep}{root_b}")
 
         roots = handoff_mod.trusted_transcript_roots()
-        assert root_a in roots and root_b in roots
+        assert root_a in roots
+        assert root_b in roots
         assert build_handoff({"transcript_path": _write_transcript(root_b, [_user("依頼")])}) == "直近の依頼:\n- 依頼"
 
     def test_env_var_blank_entries_are_ignored(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

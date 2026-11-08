@@ -1,12 +1,23 @@
-"""tests/lib/test_env_pointer*.py が共有する補助（テンプレートの場所・最小 plugin root・HOME 隔離）。"""
+"""tests/lib のテストが共有する補助（必ず失敗するスタブ・env テンプレートの場所・最小 plugin root・HOME 隔離）。"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 _ENV_TEMPLATE = Path(__file__).resolve().parents[2] / "runtime" / "env-template.sh"
+
+
+def _raise(exc: BaseException) -> Callable[..., None]:
+    """呼ばれたら ``exc`` を送出する差し替え関数を返す。"""
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        """差し替え先で ``exc`` を送出する。"""
+        raise exc
+
+    return _boom
 
 
 def _make_plugin_root(root: Path) -> Path:

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
-from claq.hooks import shell_tokens
+from claq.hooks import heredoc, shell_tokens
 
 
 class TestHeredocNormalization:
@@ -82,7 +84,7 @@ class TestHeredocNormalization:
     )
     def test_heredoc_delimiters(self, line: str, expected: list) -> None:
         """区切り語の抽出。`<<<`（herestring）とコメント内・クォート内は拾わない。"""
-        assert shell_tokens._heredoc_delimiters(line, None) == (expected, None)
+        assert heredoc._heredoc_delimiters(line, None) == (expected, None)
 
     @pytest.mark.parametrize(
         ("label", "line", "quote", "expected"),
@@ -99,7 +101,7 @@ class TestHeredocNormalization:
         self, label: str, line: str, quote: str | None, expected: tuple
     ) -> None:
         """クォート状態は行をまたいで持ち越される（シェルのクォートは改行を含む）。"""
-        assert shell_tokens._heredoc_delimiters(line, quote) == expected, label
+        assert heredoc._heredoc_delimiters(line, quote) == expected, label
 
     @pytest.mark.parametrize(
         ("label", "line", "expected"),
@@ -117,10 +119,10 @@ class TestHeredocNormalization:
         1 つの演算子の 2 文字目（`<<A` の 2 つ目の `<`）は直前の照合範囲内なので
         `finditer` と同じく飛ばす。
         """
-        offsets, quote = shell_tokens._operator_start_offsets(line, None)
+        offsets, quote = heredoc._operator_start_offsets(line, None)
 
         assert (offsets, quote) == (expected[0], None), label
-        assert shell_tokens._heredoc_delimiters(line, None) == (expected[1], None), label
+        assert heredoc._heredoc_delimiters(line, None) == (expected[1], None), label
 
     @pytest.mark.parametrize(
         ("line", "expected"),
@@ -138,7 +140,7 @@ class TestHeredocNormalization:
     )
     def test_line_keeps_heredoc_bodies(self, line: str, expected: bool) -> None:
         """本文を残す/剥がすの判定。疑わしい形はすべて残す側へ倒す。"""
-        assert shell_tokens._line_keeps_heredoc_bodies(line) is expected
+        assert heredoc._line_keeps_heredoc_bodies(line) is expected
 
     @pytest.mark.parametrize(
         ("label", "command", "expected"),
@@ -275,8 +277,8 @@ class TestHeredocNormalization:
         未終端）、継続演算子で終わる行は次行が `bash` でも本文を剥がさない。
         終端行を残す設計により、結果へ再適用しても変わらない（冪等）。
         """
-        assert shell_tokens.strip_data_heredoc_bodies(command) == expected, label
-        assert shell_tokens.strip_data_heredoc_bodies(expected) == expected, label
+        assert heredoc.strip_data_heredoc_bodies(command) == expected, label
+        assert heredoc.strip_data_heredoc_bodies(expected) == expected, label
 
 
 class TestUnquotedNewlineNormalization:
@@ -441,3 +443,37 @@ class TestUnquotedNewlineNormalization:
         """
         assert shell_tokens.tokenize(command) == expected, label
 
+
+def test_many_heredoc_operators_on_one_line_stay_linear() -> None:
+    """読めるか判定を演算子ごとに行頭から探さない（検査予算いっぱいの 1 行で 2.4 秒かかった）。"""
+    line = ("<<a " * (shell_tokens.MAX_COMMAND_BYTES // 4))[: shell_tokens.MAX_COMMAND_BYTES]
+    started = time.perf_counter()
+    heredoc.strip_data_heredoc_bodies(line)
+    assert time.perf_counter() - started < 1.0
+
+
+@pytest.mark.parametrize(
+    ("label", "command", "expected"),
+    [
+        (
+            "連結した行が区切り語なら、そこまでが本文（物理行はすべて残す）",
+            "cat <<EOF\nE\\\nOF\nrm x\nEOF",
+            "cat <<EOF\nE\\\nOF\nrm x\nEOF",
+        ),
+        ("連結しても区切り語にならない行は本文", "cat <<EOF\nfoo \\\nbar\nEOF\nrm x", "cat <<EOF\nEOF\nrm x"),
+        ("エスケープ済みの ``\\\\`` は連結ではない", "cat <<EOF\nfoo \\\\\nEOF\nrm x", "cat <<EOF\nEOF\nrm x"),
+        ("クォート付きの区切り語は連結しない", "cat <<'EOF'\nfoo \\\nEOF\nrm x", "cat <<'EOF'\nEOF\nrm x"),
+        ("``\\`` 前置の区切り語は連結しない", "cat <<\\EOF\nfoo \\\nEOF\nrm x", "cat <<\\EOF\nEOF\nrm x"),
+        ("連結した終端が見つからなければ剥がさない", "cat <<EOF\nfoo \\", "cat <<EOF\nfoo \\"),
+        (
+            "``<<-`` の本文で連結が起きたら剥がさない",
+            "cat <<-EOF\n\tfoo \\\n\tEOF\nrm x",
+            "cat <<-EOF\n\tfoo \\\n\tEOF\nrm x",
+        ),
+    ],
+)
+def test_unquoted_heredoc_body_is_joined_before_the_terminator_is_matched(
+    label: str, command: str, expected: str
+) -> None:
+    """何も付かない区切り語の本文は、シェルと同じく ``\\`` + 改行を連結してから終端を探す。"""
+    assert heredoc.strip_data_heredoc_bodies(command) == expected, label

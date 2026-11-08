@@ -27,11 +27,11 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 from claq.lib.constants import BASE_DIR_NAME
+from claq.lib.core_utils import make_private_dirs
 from claq.lib.subprocess_utils import run_text
 
 _ROOTS_DIRNAME = "roots"
@@ -43,7 +43,7 @@ _MAX_ANCESTOR_DEPTH = 2
 """writer が祖先 PID へポインタを書く最大段数。resolver の祖先 walk と同じ深さに揃える。"""
 
 _PS_TIMEOUT_SECONDS = 5
-"""祖先チェーン取得用 ``ps`` 呼び出しのハードタイムアウト。"""
+"""祖先チェーン取得の ``ps`` 呼び出し全段で共有する締め切り（秒）。"""
 
 _MAX_ROOT_AGE_SECONDS = 7 * 24 * 60 * 60
 """生存 PID のポインタでもこれより mtime が古ければ PID 再利用とみなし削除する。"""
@@ -63,7 +63,7 @@ _warned_this_process = False
 def ancestor_pointers_supported() -> bool:
     """祖先 PID ポインタ方式が成立する OS かを返す。
 
-    この方式は writer（``ps -eo pid=,ppid=,lstart=``）と resolver（POSIX sh +
+    この方式は writer（``ps -o ppid=,lstart= -p <pid>``）と resolver（POSIX sh +
     ``ps -o lstart=``）の両方に依存する。Windows には ``ps`` が無く、Git Bash の
     ``ps`` は ``-o`` 書式を持たないうえ MSYS の別 PID 空間を返すため照合できない。
     Windows では md の bootstrap 行の代わりに `runtime/claq-hook` を直接呼ぶ必要があり、
@@ -120,25 +120,6 @@ def _state_home() -> Path:
     return Path.home()
 
 
-def _ensure_private_dir(path: Path) -> Path:
-    """ディレクトリを根から順に 0700 で作成し、0700 に締めて返す。
-
-    ``core_utils.ensure_private_dir`` は ``get_claq_dir()``（``CLAQ_HOME`` 対応）基準で
-    判定するため、``$HOME`` 固定の本モジュールでは流用できない。
-
-    作成と ``chmod`` を分けると、その窓の間に他 OS ユーザーが ``opendir`` で得た fd は
-    後続の ``chmod`` で失効しない。``mkdir(mode=..., parents=True)`` は親に mode を
-    適用しないため、祖先を 1 段ずつ作る。``chmod`` は既に 0755 で存在する場合の是正用。
-
-    Raises:
-        OSError: 作成・chmod に失敗した場合。
-    """
-    for target in (*reversed(path.parents), path):
-        target.mkdir(mode=0o700, exist_ok=True)
-    path.chmod(0o700)
-    return path
-
-
 def _atomic_write_text(path: Path, text: str) -> None:
     """テキストを同一ディレクトリの一時ファイル経由で原子的に書き込む。
 
@@ -150,6 +131,10 @@ def _atomic_write_text(path: Path, text: str) -> None:
     Raises:
         OSError: 一時ファイルの作成・書き込み・rename に失敗した場合。
     """
+    # 遅延 import: tempfile は shutil 経由で圧縮モジュール群を引き込み、全 hook 起動の
+    # import 時間に効く。書き込みが要るとき（初回・内容変化時）だけ読み込む。
+    import tempfile
+
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.tmp.")
     tmp_path = Path(tmp_name)
     owned_fd: int | None = fd
@@ -178,7 +163,7 @@ def _write_text_if_changed(path: Path, text: str) -> bool:
 
     ``env.sh`` は同じプラグインバージョンの間は内容が変わらないが、PreToolUse が全ツール
     呼び出しで書くため、毎回の fsync がネットワーク HOME や暗号化 FS で遅延になる。
-    ``roots/<pid>`` は GC が mtime で鮮度を判定するため、この省略を使わない。
+    ``roots/<pid>`` は GC が mtime で鮮度を判定するため、省いたときは呼び出し側が mtime を更新する。
 
     比較はバイト列で行う（``read_text`` は非 UTF-8 の既存ファイルで ``ValueError`` 系を
     送出し、`write_env_pointer` の ``OSError`` ハンドラを素通りしてフックを落とす）。
@@ -201,73 +186,94 @@ def _write_text_if_changed(path: Path, text: str) -> bool:
     return True
 
 
+def _ps_parent_and_lstart(pid: int, deadline: float) -> tuple[int, str] | None:
+    """``pid`` の親 PID と起動時刻（``lstart``）を ``ps -o ppid=,lstart= -p <pid>`` で取る。
+
+    ``lstart`` は内部の空白を正規化しない raw な文字列のまま返す（resolver の
+    ``$(ps -o lstart= -p <pid>)`` とバイト単位で一致させるため）。``lstart`` はロケール
+    依存なので resolver 側と同じく ``LC_ALL=C`` を強制する。subprocess は encoding 指定を
+    集約した ``run_text`` 経由で呼ぶ（locale 依存のデコードで ``UnicodeDecodeError`` が
+    下の except を貫通しないため）。
+
+    Args:
+        pid: 照会する PID。
+        deadline: ``time.monotonic()`` 基準の締め切り。祖先チェーン全体で 1 本を共有する。
+
+    Returns:
+        ``(ppid, lstart)``。締め切り超過・``ps`` の起動失敗・非 0 終了（PID が居ない）・
+        出力が読めない場合は None。
+
+    Raises:
+        例外は発生しません。
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
+    try:
+        proc = run_text(
+            ["ps", "-o", "ppid=,lstart=", "-p", str(pid)], timeout=remaining, extra_env={"LC_ALL": "C"}
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = proc.stdout.splitlines()
+    if proc.returncode != 0 or not lines:
+        return None
+    parts = lines[0].split(None, 1)
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[0]), parts[1]
+    except ValueError:
+        return None
+
+
 def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
     """``os.getppid()`` から始まる祖先チェーンと、各 PID の起動時刻を返す。
 
-    全 hook 起動で走るため、1 回の ``ps -eo pid=,ppid=,lstart=`` でプロセス表全体を取り、
-    チェーンは Python 側で組む。``lstart`` は内部の空白を正規化しない raw な文字列のまま
-    保持する（shell 側の ``$(ps -o lstart= -p <pid>)`` とバイト単位で一致させるため）。
-
-    ``lstart`` はロケール依存なので、resolver 側と同じく ``LC_ALL=C`` を強制する。
-    subprocess は encoding 指定を集約した ``run_text`` 経由で呼ぶ（locale 依存のデコードで
-    ``UnicodeDecodeError`` が下の except を貫通しないため）。
+    全 hook 起動で走るため、プロセス表全体（``ps -eo``）ではなく辿る PID だけを 1 段ずつ
+    照会する（プロセス数に比例して遅くならない）。全段の ``ps`` は ``_PS_TIMEOUT_SECONDS``
+    の締め切り 1 本を共有し、段数倍の待ちで hook の timeout に近づかないようにする。
 
     Args:
         max_depth: 辿る祖先の最大段数（``os.getppid()`` 自身を含む）。
 
     Returns:
-        ``(pid, lstart)`` の近い祖先から遠い祖先の順のリスト。``ps`` の起動・実行に
-        失敗した場合は空リスト（docs/adr/hook-failure-direction.md の fail-open —
-        この回はポインタを書かず、次回 hook 起動での自己修復に委ねる）。チェーンは
-        PID 0/1 に達するか、プロセス表から親を特定できなくなった時点で打ち切る。
+        ``(pid, lstart)`` の近い祖先から遠い祖先の順のリスト。``ps`` で照会できなかった
+        段で打ち切る（最初の段で失敗すれば空リスト。docs/adr/hook-failure-direction.md の
+        fail-open — この回は書けた分だけ書き、次回 hook 起動での自己修復に委ねる）。
+        親が PID 0/1 に達した時点でも打ち切る。
 
     Raises:
         例外は発生しません。
     """
-    try:
-        proc = run_text(["ps", "-eo", "pid=,ppid=,lstart="], timeout=_PS_TIMEOUT_SECONDS, extra_env={"LC_ALL": "C"})
-    except (OSError, subprocess.SubprocessError):
-        return []
-    if proc.returncode != 0:
-        return []
-
-    ppid_of: dict[int, int] = {}
-    lstart_of: dict[int, str] = {}
-    for line in proc.stdout.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) < 3:
-            continue
-        try:
-            pid, ppid = int(parts[0]), int(parts[1])
-        except ValueError:
-            continue
-        ppid_of[pid] = ppid
-        lstart_of[pid] = parts[2]
-
+    deadline = time.monotonic() + _PS_TIMEOUT_SECONDS
     chain: list[tuple[int, str]] = []
     current = os.getppid()
     for _ in range(max_depth):
-        lstart = lstart_of.get(current)
-        if lstart is None:
+        found = _ps_parent_and_lstart(current, deadline)
+        if found is None:
             break
+        parent, lstart = found
         chain.append((current, lstart))
-        parent = ppid_of.get(current)
-        if parent is None or parent in (0, 1):
+        if parent in (0, 1):
             break
         current = parent
     return chain
 
 
 def _write_ancestor_pointer(path: Path, root_text: str, lstart: str) -> None:
-    """1 つの祖先 PID のポインタへ ``root_text`` と ``lstart`` の 2 行を無条件に書く。
+    """1 つの祖先 PID のポインタへ ``root_text`` と ``lstart`` の 2 行を書く。
 
     書き込み対象の PID は host インスタンス専有なので、既存の記録と食い違っても
-    同一 host のアップグレードでしかなく、衝突検知は要らない。
+    同一 host のアップグレードでしかなく、衝突検知は要らない。1 セッションの間は同じ
+    内容になるので、一致すれば書き込みを省き mtime だけ更新する（GC は mtime で鮮度を
+    判定する）。
 
     Raises:
-        OSError: 書き込みに失敗した場合。
+        OSError: 書き込み・mtime 更新に失敗した場合。
     """
-    _atomic_write_text(path, f"{root_text}\n{lstart}\n")
+    if not _write_text_if_changed(path, f"{root_text}\n{lstart}\n"):
+        os.utime(path)
 
 
 def _write_env_pointer_unsafe(plugin_root: Path) -> None:
@@ -283,8 +289,10 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     if "\n" in root_text or "\r" in root_text or "\x00" in root_text:
         raise OSError(f"plugin root contains a newline or NUL byte: {root_text!r}")
 
-    claq_dir = _ensure_private_dir(_state_home() / BASE_DIR_NAME)
-    roots_dir = _ensure_private_dir(claq_dir / _ROOTS_DIRNAME)
+    # `ensure_private_dir` は `get_claq_dir()`（`CLAQ_HOME` を見る）を締め直すため、
+    # `$HOME` 固定の本モジュールでは使わない。
+    claq_dir = make_private_dirs(_state_home() / BASE_DIR_NAME)
+    roots_dir = make_private_dirs(claq_dir / _ROOTS_DIRNAME)
 
     # 祖先ポインタ方式が成立しない OS（Windows）では `ps` を呼ばない。全 hook 起動ごとの
     # 無駄な spawn になるうえ、MSYS/Cygwin 由来の `ps.exe` が PATH にあると別 PID 空間の

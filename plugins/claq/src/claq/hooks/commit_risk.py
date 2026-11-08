@@ -10,17 +10,24 @@ from __future__ import annotations
 
 import re
 
+from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     is_git_executable_token,
     is_inplace_edit_flag,
-    normalize_executable_name,
 )
-from claq.hooks.shell_tokens import split_segments, tokenize, tokenize_with_status
+from claq.hooks.shell_tokens import (
+    WRITE_REDIRECT_OPERATORS,
+    extract_shell_wrapper_command,
+    normalize_executable_name,
+    split_segments,
+    tokenize,
+    tokenize_with_status,
+)
 
 # PreToolUse フックは実行前の index/worktree しか観測できず、2 つ目以降の commit が
 # 何をコミットするかを原理的に検査できない。
-_MULTIPLE_COMMITS_MESSAGE = (
+MULTIPLE_COMMITS_MESSAGE = (
     "[Hook] BLOCKED: this command contains more than one `git commit`. A "
     "PreToolUse hook can only inspect the index as it is before the command "
     "runs, so any commit after the first one cannot be scanned. Split them "
@@ -38,7 +45,7 @@ _MUTATION_BEFORE_COMMIT_MESSAGE = (
 )
 
 
-def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
+def find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     """1 セグメント（シェル区切りを含まないトークン列）内の `git commit` 呼び出しを探します。
 
     `git` トークンの後は、既知/未知を問わずグローバルオプションとその値を区別せず
@@ -61,12 +68,40 @@ def _find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     return segment[segment.index("commit", start + 1) + 1 :]
 
 
-def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
+def with_shell_wrapper_segments(segments: list[list[str]]) -> list[list[str]]:
+    """``sh -c`` の 1 段の内側のセグメントを、ラッパーのセグメントの直前に足します。
+
+    内側は実行される順にラッパーの位置へ入る。ラッパー自身のリダイレクトと文字列引数は素の
+    ``git commit -m x >log`` の同一セグメントと同じ扱いで、内側の commit より前の操作ではない。
+    足したセグメントはこれ以上開かない（2 段以上の ``sh -c`` は非目標。
+    docs/adr/shell-analysis-boundary.md）。内側の heredoc のデータ本文は `block_no_verify` /
+    `bash_config_protection` の再帰と同じく落とす。
+
+    Args:
+        segments: `shell_tokens.split_segments` で得たセグメントのリストです。
+
+    Returns:
+        内側のセグメントを足したセグメントのリストを返します。
+
+    Raises:
+        例外は発生しません。
+    """
+    expanded: list[list[str]] = []
+    for segment in segments:
+        wrapped = extract_shell_wrapper_command(segment)
+        if wrapped is not None:
+            expanded.extend(split_segments(tokenize(strip_data_heredoc_bodies(wrapped))))
+        expanded.append(segment)
+    return expanded
+
+
+def parse_git_commit_command(command: str, *, shell_wrappers: bool = True) -> tuple[bool, list[str]]:
     """コマンド文字列が `git commit` 呼び出しかを判定し、commit 引数トークンを返します。
 
     トークン化してシェル区切りごとのセグメントに分け、セグメントごとに `git` →
     グローバルオプション → `commit` の並びを探す。セグメント分割により
     ``git status;echo commit`` のような非 commit コマンドを commit と判定しない。
+    ``sh -c`` の 1 段の内側も読む（`block_no_verify` と同じ範囲）。
 
     トークン化がクォート不整合で空白分割へフォールバックした場合**だけ**、生文字列の
     正規表現で最終判定する（解析できない入力に対するフェイルセーフ）。解析できた入力に
@@ -75,6 +110,7 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
 
     Args:
         command: 検査対象のコマンド文字列です。
+        shell_wrappers: ``sh -c`` の 1 段の内側も読むなら True。
 
     Returns:
         (is_commit, commit_args) のタプル。is_commit が False の場合、
@@ -84,8 +120,9 @@ def _is_git_commit_command(command: str) -> tuple[bool, list[str]]:
         例外は発生しません。
     """
     tokens, parsed_cleanly = tokenize_with_status(command)
-    for segment in split_segments(tokens):
-        commit_args = _find_git_commit_args_in_segment(segment)
+    segments = split_segments(tokens)
+    for segment in with_shell_wrapper_segments(segments) if shell_wrappers else segments:
+        commit_args = find_git_commit_args_in_segment(segment)
         if commit_args is not None:
             return True, commit_args
 
@@ -138,8 +175,6 @@ _WORKTREE_MUTATING_EXECUTABLES = frozenset(
 # `-i` を伴うときだけ書き込みになるコマンド。フラグ無しでも書き込むコマンド（`ed` 等）を
 # ここへ置くとフラグ判定に落ちて allow になるため、`ALWAYS_MUTATING_EDIT_EXECUTABLES` に置く。
 _INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl"})
-# ``<>`` は読み書きオープンで、対象が無ければ作成する（作業ツリーの変更）。
-_MUTATING_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">|", "<>", "1>", "2>", "1>>", "2>>", ">&"})
 # `>&` は直後が fd 番号（数字のみ）か `-` のとき、fd の複製・クローズでありファイルへ書かない。
 # それ以外（`>&file`）は `&>file` の別綴りで書き込み。`2>&1` も `2`・`>&`・`1` に割れる。
 _FD_DUP_OPERATOR = ">&"
@@ -184,17 +219,20 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
         例外は発生しません。
     """
     if any(
-        token in _MUTATING_REDIRECT_OPERATORS and not _is_fd_duplication(segment, i) for i, token in enumerate(segment)
+        token in WRITE_REDIRECT_OPERATORS and not _is_fd_duplication(segment, i) for i, token in enumerate(segment)
     ):
         return True
 
+    git_seen = False
     for i, token in enumerate(segment):
         if is_git_executable_token(token):
             # 「最初の非 `-` トークン」で決めると `git -C . add x` の値 `.` がサブコマンドと
             # 読まれて不発になるため全トークンを走査する。後続の書込み実行ファイルも
-            # 見るため早期 return しない。
-            if any(sub in _INDEX_MUTATING_GIT_SUBCOMMANDS for sub in segment[i + 1 :]):
+            # 見るため早期 return しない。後ろの git トークンから見る範囲は最初の git トークンから
+            # 見る範囲に含まれるので、最初の 1 つだけ見る（`git git ...` で二次にしない）。
+            if not git_seen and any(sub in _INDEX_MUTATING_GIT_SUBCOMMANDS for sub in segment[i + 1 :]):
                 return True
+            git_seen = True
             continue
 
         # 素の basename（大小区別・`.exe` 残し）で照合すると ``CP evil.py app.py`` や
@@ -208,7 +246,7 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
     return False
 
 
-def _compound_commit_risk(command: str) -> str | None:
+def compound_commit_risk(command: str) -> str | None:
     """1 回の Bash 呼び出しの中で commit 内容を検査できなくする構造を検出します。
 
     PreToolUse フックが観測できるのはコマンド実行前の index/worktree だけなので、
@@ -220,6 +258,7 @@ def _compound_commit_risk(command: str) -> str | None:
 
     ``git add . && git commit -m x`` というイディオムも塞ぐ。通すと「品質フックが
     commit 内容を検査している」という契約が成立せず、誤った安心感になるため。
+    ``sh -c`` の 1 段の内側のセグメントも同じ順序で数える。
 
     Args:
         command: 検査対象のコマンド文字列です。
@@ -230,18 +269,18 @@ def _compound_commit_risk(command: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    segments = split_segments(tokenize(command))
-    commit_indices = [i for i, segment in enumerate(segments) if _find_git_commit_args_in_segment(segment) is not None]
+    segments = with_shell_wrapper_segments(split_segments(tokenize(command)))
+    commit_indices = [i for i, segment in enumerate(segments) if find_git_commit_args_in_segment(segment) is not None]
     if not commit_indices:
         return None
     if len(commit_indices) > 1:
-        return _MULTIPLE_COMMITS_MESSAGE
+        return MULTIPLE_COMMITS_MESSAGE
     if any(_segment_mutates_worktree_or_index(segment) for segment in segments[: commit_indices[0]]):
         return _MUTATION_BEFORE_COMMIT_MESSAGE
     return None
 
 
-def _is_commit_all_flag(commit_args: list[str]) -> bool:
+def is_commit_all_flag(commit_args: list[str]) -> bool:
     """commit 引数トークンに `-a`/`--all`（結合短形式含む）が含まれるかを判定します。
 
     `-am` のような結合短形式は、`-` 始まり・`--` ではない・`=` を含まない短形式
@@ -257,6 +296,7 @@ def _is_commit_all_flag(commit_args: list[str]) -> bool:
         例外は発生しません。
     """
     return any(
-        tok == "--all" or (tok.startswith("-") and not tok.startswith("--") and "=" not in tok and "a" in tok[1:])
-        for tok in commit_args
+        token == "--all"
+        or (token.startswith("-") and not token.startswith("--") and "=" not in token and "a" in token[1:])
+        for token in commit_args
     )

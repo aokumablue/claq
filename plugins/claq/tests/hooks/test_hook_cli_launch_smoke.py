@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from ._support import LAUNCHER, _bash, _iter_declared_commands, _launcher_env, _run_launcher
+from ._support import LAUNCHER, SRC_ROOT, _bash, _iter_declared_commands, _launcher_env, _run_launcher
 
 
 def _launch(args: list[str], payload: dict, tmp_home: Path) -> subprocess.CompletedProcess[str]:
@@ -119,3 +120,46 @@ def test_session_start_emits_valid_json_and_creates_db(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr[:400]
     assert json.loads(result.stdout) is not None
     assert (tmp_path / ".claq" / "mem.db").is_file()
+
+
+def _run_under_c_locale(code: str, cwd: Path, stdin: str = "") -> subprocess.CompletedProcess[str]:
+    """ASCII ロケールの Python で ``code`` を別プロセス実行する（stdout は標準の復号に頼らず受ける）。"""
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        input=stdin,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=cwd,
+        env={**os.environ, "PYTHONPATH": str(SRC_ROOT), "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"},
+        timeout=60,
+        check=False,
+    )
+
+
+def _non_ascii_repo(tmp_path: Path) -> Path:
+    """非 ASCII のパスに git リポジトリを作る。"""
+    repo = tmp_path / "日本語"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    return repo
+
+
+def test_protection_holds_in_a_non_ascii_repo_under_an_ascii_locale(tmp_path: Path) -> None:
+    """ロケールで git の出力を復号できなくても、検査対象が確定した書込みは deny する（例外の exit 1 は許可に等しい）。"""
+    repo = _non_ascii_repo(tmp_path)
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "printf y > ruff.toml"}})
+    code = "import sys\nfrom claq.hooks import bash_config_protection\nsys.exit(bash_config_protection.main())\n"
+    assert _run_under_c_locale(code, repo, stdin=payload).returncode == 2
+
+
+def test_plugin_runtime_check_survives_an_undecodable_git_error(tmp_path: Path) -> None:
+    """git の失敗文面を復号しない（読むのは returncode だけ。例外は保護を外さない関数を許可へ反転させる）。"""
+    repo = _non_ascii_repo(tmp_path)
+    code = (
+        "from pathlib import Path\n"
+        "from claq.hooks.config_protection import _plugin_runtime_is_tracked\n"
+        "print(_plugin_runtime_is_tracked(Path.cwd(), Path.cwd() / 'plugin'))\n"
+    )
+    result = _run_under_c_locale(code, repo)
+    assert (result.returncode, result.stdout.strip()) == (0, "False")

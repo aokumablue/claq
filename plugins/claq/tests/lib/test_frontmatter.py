@@ -314,51 +314,40 @@ def test_nested_block_mapping_is_parsed() -> None:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        # 引用符の未終端と不正なエスケープ
-        "a: 'unterminated",
-        'a: "unterminated',
-        "'unterminated: 1",
-        r'a: "bad\qescape"',
-        r'a: "bad\xZZhex"',
-        r'a: "short\x4"',
-        r'a: "short\u12"',
-        'a: "trailing\\',
-        # フローの未終端・空要素・暗黙マップ
-        "a: [",
-        "a: [1",
-        "a: [1,",
-        "a: [1}",
-        "a: [,]",
-        "a: [a,,b]",
-        "a: [a: 1]",
-        "a: [a:]",
-        'a: ["x" "y"]',
-        "a: {",
-        "a: {k",
-        "a: {k}",
-        "a: {k:",
-        "a: {: 1}",
-        "a: {&x: 1}",
-        # ブロックスカラーの明示インデント指示子・中途半端なデデント・タブインデント
-        "a: >2\n  x",
-        "a: |2-\n  x",
-        "a: |\n    x\n  y",
-        "a: |\n\tx",
-        # マッピング内でコロンがコメントより後ろにある行
-        "a: 1\nb # note: c",
-    ],
-)
-def test_strict_mode_rejects_malformed_syntax(text: str) -> None:
-    """解釈できない構文は FrontmatterError にする。"""
-    with pytest.raises(FrontmatterError):
-        parse_yaml(text)
-
-
 # 解釈できない構文は FrontmatterError にする（部分結果を返さない）。
 _ERROR_INPUTS = [
+    # 引用符の未終端と不正なエスケープ
+    "a: 'unterminated",
+    'a: "unterminated',
+    "'unterminated: 1",
+    r'a: "bad\qescape"',
+    r'a: "bad\xZZhex"',
+    r'a: "short\x4"',
+    r'a: "short\u12"',
+    'a: "trailing\\',
+    # フローの未終端・空要素・暗黙マップ
+    "a: [",
+    "a: [1",
+    "a: [1,",
+    "a: [1}",
+    "a: [,]",
+    "a: [a,,b]",
+    "a: [a: 1]",
+    "a: [a:]",
+    'a: ["x" "y"]',
+    "a: {",
+    "a: {k",
+    "a: {k}",
+    "a: {k:",
+    "a: {: 1}",
+    "a: {&x: 1}",
+    # ブロックスカラーの明示インデント指示子・中途半端なデデント・タブインデント
+    "a: >2\n  x",
+    "a: |2-\n  x",
+    "a: |\n    x\n  y",
+    "a: |\n\tx",
+    # マッピング内でコロンがコメントより後ろにある行
+    "a: 1\nb # note: c",
     pytest.param('name: [', id='E1-unterminated-flow'),
     pytest.param("a: 'x", id='E2-unterminated-quote'),
     pytest.param(r'a: "x\q"', id='E3-unknown-escape'),

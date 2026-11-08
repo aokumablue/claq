@@ -175,7 +175,7 @@ class _FakeServer:
     """install_guard が使う最小限のサーバ面。"""
 
     def __init__(self) -> None:
-        """登録済みのツールを 2 つ持つ。"""
+        """middleware の登録先と、サーバの名前・版を持つ。"""
         self.middleware: list[Any] = []
         self.name = "fake"
         self.version = "0.0.1"
@@ -188,8 +188,8 @@ class _FakeServer:
         ]
 
 
-def _installed(guard: types.ModuleType, limiter: Any, principal: Any = lambda: "alice") -> Any:
-    """ガードを掛けたサーバの middleware を返す。後続の呼び出しは middleware.calls に記録する。"""
+def _installed(guard: types.ModuleType, limiter: Any, principal: Any = lambda: "alice") -> tuple[Any, list[Any]]:
+    """ガードを掛けたサーバの middleware へ要求を通す send と、後続が受け取った文脈の記録を返す。"""
     server = _FakeServer()
     guard.install_guard(server, limiter=limiter, principal=principal)
     calls: list[Any] = []
@@ -205,8 +205,7 @@ def _installed(guard: types.ModuleType, limiter: Any, principal: Any = lambda: "
 
         return asyncio.run(middleware(types.SimpleNamespace(method=method, params=params), call_next))
 
-    send.calls = calls
-    return send
+    return send, calls
 
 
 def _tool_call(name: str, arguments: Any) -> dict[str, Any]:
@@ -220,9 +219,8 @@ class TestInstalledGuard:
     @staticmethod
     def _run(guard: types.ModuleType, method: str, params: Any, result: Any) -> tuple[Any, list[Any]]:
         """どの上限にも当たらない制限で middleware を 1 回通し、結果と後続の呼び出し記録を返す。"""
-        send = _installed(guard, guard.CallLimiter(100, 60.0, clock=_Clock()))
-        outcome = send(method, params, result)
-        return outcome, send.calls
+        send, calls = _installed(guard, guard.CallLimiter(100, 60.0, clock=_Clock()))
+        return send(method, params, result), calls
 
     def test_rejects_unknown_argument_before_handler(self, guard: types.ModuleType) -> None:
         """未知の引数は後続へ渡さずに拒否する。"""
@@ -261,7 +259,7 @@ class TestInstalledGuard:
     def test_limits_calls_per_principal_and_tool(self, guard: types.ModuleType) -> None:
         """主体 × ツールごとに上限まで通し、超えた呼び出しは後続へ渡さずに isError で返す（他の組み合わせは通す）。"""
         caller = ["alice"]
-        send = _installed(guard, guard.CallLimiter(1, 60.0, clock=_Clock()), principal=lambda: caller[0])
+        send, calls = _installed(guard, guard.CallLimiter(1, 60.0, clock=_Clock()), principal=lambda: caller[0])
         refused = [
             send("tools/call", _tool_call("orders_search", {})).get("isError") is True,
             send("tools/call", _tool_call("orders_search", {"status": "open"})).get("isError") is True,
@@ -269,21 +267,21 @@ class TestInstalledGuard:
         ]
         caller[0] = "bob"
         refused.append(send("tools/call", _tool_call("orders_search", {})).get("isError") is True)
-        assert (refused, len(send.calls)) == ([False, True, False, False], 3)
+        assert (refused, len(calls)) == ([False, True, False, False], 3)
 
     def test_limit_recovers_after_window(self, guard: types.ModuleType) -> None:
         """窓が変われば、上限で断られていた呼び出しもまた後続へ渡す。"""
         clock = _Clock(0.0)
-        send = _installed(guard, guard.CallLimiter(1, 60.0, clock=clock))
+        send, calls = _installed(guard, guard.CallLimiter(1, 60.0, clock=clock))
         send("tools/call", _tool_call("orders_search", {}))
         send("tools/call", _tool_call("orders_search", {}))
         clock.now = 60.0
         send("tools/call", _tool_call("orders_search", {}))
-        assert len(send.calls) == 2
+        assert len(calls) == 2
 
     def test_unknown_tool_and_unknown_argument_are_not_counted(self, guard: types.ModuleType) -> None:
         """未知のツール・object でない引数（SDK に任せる）と、未知の引数で拒否した呼び出しは回数に数えない。"""
-        send = _installed(guard, guard.CallLimiter(1, 60.0, clock=_Clock()))
+        send, _ = _installed(guard, guard.CallLimiter(1, 60.0, clock=_Clock()))
         send("tools/call", _tool_call("unknown_tool", {"x": 1}))
         send("tools/call", _tool_call("orders_search", ["not", "a", "mapping"]))
         send("tools/call", _tool_call("orders_search", {"stauts": "open"}))

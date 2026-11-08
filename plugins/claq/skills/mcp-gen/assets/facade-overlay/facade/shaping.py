@@ -41,10 +41,10 @@ _ESCAPE_SEQUENCES = re.compile(
 # 制御文字（Cc）・書式文字（Cf: ゼロ幅・双方向制御・Tag）・私用文字（Co）・サロゲート（Cs）・未割り当て（Cn）
 _HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Cn"})
 _KEPT_CONTROLS = frozenset("\n\t")
-# 区分では拾えないが表示されない文字: 異体字セレクタ（モンゴルを含む）・結合書記素ジョイナ・クメールの不可視母音（Mn）、
-# ハングルと契丹の埋め字・点字の空白（Lo/So）
 # 行区切り（Zl）と段落区切り（Zp）は、JSON に生のまま残ってモデルには改行に見えるので LF に畳む。
 _LINE_SEPARATORS = {0x2028: "\n", 0x2029: "\n"}
+# 区分では拾えないが表示されない文字: 異体字セレクタ（モンゴルを含む）・結合書記素ジョイナ・クメールの不可視母音（Mn）、
+# ハングルと契丹の埋め字・点字の空白（Lo/So）
 _HIDDEN_LETTERS = re.compile(r"[\ufe00-\ufe0f\U000e0100-\U000e01ef\u180b-\u180d\u180f\u034f\u17b4\u17b5\u115f\u1160\u3164\uffa0\u2800\U00016fe4]")
 
 
@@ -111,6 +111,51 @@ def _is_scalar_tree(value: Any) -> bool:
     return isinstance(value, _JSON_SCALARS)
 
 
+def _select_elements(elements: list[Any], tree: dict[str, Any] | None, array_limit: int) -> list[Any]:
+    """配列の先頭 `array_limit` 件の要素から、木で指定された部分を取り出す。
+
+    Args:
+        elements: 配列の値。
+        tree: 各要素に当てるパスの木。
+        array_limit: 配列ごとに残す件数。
+
+    Returns:
+        取り出した要素の一覧。
+
+    Raises:
+        ValueError: `_select` が拒否する値が要素にあるとき。
+    """
+    return [_select(element, tree, array_limit) for element in elements[:array_limit]]
+
+
+def _select_members(value: Mapping[str, Any], tree: dict[str, Any], array_limit: int) -> dict[str, Any]:
+    """object から木のキーの値だけを取り出し、切り詰めた配列の隣に `<名前>_more` を置く。
+
+    Args:
+        value: 取り出し元の object。
+        tree: パスの木。
+        array_limit: 配列ごとに残す件数。
+
+    Returns:
+        取り出した部分。object に無いキーは飛ばす。
+
+    Raises:
+        ValueError: `_select` が拒否する値が子にあるとき。
+    """
+    selected: dict[str, Any] = {}
+    for key, subtree in tree.items():
+        if key not in value:
+            continue
+        child = value[key]
+        if isinstance(child, list):
+            selected[key] = _select_elements(child, subtree, array_limit)
+            if len(child) > array_limit:
+                selected[f"{key}{MORE_SUFFIX}"] = {"total": len(child), "returned": array_limit}
+        else:
+            selected[key] = _select(child, subtree, array_limit)
+    return selected
+
+
 def _select(value: Any, tree: dict[str, Any] | None, array_limit: int) -> Any:
     """木で指定された部分だけを、入れ子の構造を保って取り出す。
 
@@ -138,24 +183,13 @@ def _select(value: Any, tree: dict[str, Any] | None, array_limit: int) -> Any:
     if value is None:
         return None
     if isinstance(value, list):
-        return [_select(element, tree, array_limit) for element in value[:array_limit]]
+        return _select_elements(value, tree, array_limit)
     if not isinstance(value, Mapping):
         # 祖先のスカラーや入れ物を返すと、カタログの葉ではない値が区分の検査なしに出る
         raise ValueError(
             "中間の値が object・配列・null のどれでもありません。正規ドメインモデルは dict・list・JSON のスカラーで組む"
         )
-    selected: dict[str, Any] = {}
-    for key, subtree in tree.items():
-        if key not in value:
-            continue
-        child = value[key]
-        if isinstance(child, list):
-            selected[key] = [_select(element, subtree, array_limit) for element in child[:array_limit]]
-            if len(child) > array_limit:
-                selected[f"{key}{MORE_SUFFIX}"] = {"total": len(child), "returned": array_limit}
-        else:
-            selected[key] = _select(child, subtree, array_limit)
-    return selected
+    return _select_members(value, tree, array_limit)
 
 
 def project(document: Mapping[str, Any], paths: Sequence[str], *, array_limit: int) -> dict[str, Any]:

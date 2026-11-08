@@ -5,13 +5,13 @@ from __future__ import annotations
 import itertools
 import subprocess
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_quality_scanner as commit_quality_scanner
-from claq.hooks import pre_bash_commit_quality as pre_bash_commit_quality
+from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
 
-from ._support import _evaluate_in_repo, _git, _init_git_repo, _spy_commit_message_validation
+from ._support import _SECRET_LINE, _evaluate_in_repo, _git, _init_git_repo, _spy_commit_message_validation
 
 _DASH_A = "git commit -am 'feat(core): add'"
 _PLAIN = "git commit -m 'feat(core): add'"
@@ -72,7 +72,7 @@ def test_evaluate_shares_one_secret_scan_budget(
     # 1 ファイルの時刻取得は lint / secret の 2 回。予算 10 秒は 1 件目の secret scan（累積 18 秒）で尽き、
     # 以降のファイルは lint scan が同じ 1 本の予算を見て即 scan_error になる。予算が複数本なら後続が通ってしまう。
     files = staged + (unstaged or [])
-    assert result["exitCode"] == 2
+    assert result is not None
     assert [path for path in files if any(path in m and "SecretScanBudgetExceeded" in m for m in logs)] == files
     assert validated == [command]
 
@@ -84,7 +84,7 @@ def test_evaluate_commit_amend_with_nothing_staged_is_a_noop(monkeypatch: pytest
     """
     logs = _stub_commit(monkeypatch, "git   commit  --amend --no-edit", [])
 
-    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    assert pre_bash_commit_quality.evaluate("payload") is None
     assert any("No staged files found" in message for message in logs)
 
 
@@ -126,7 +126,7 @@ def test_evaluate_scans_the_files_the_commit_includes(
     seen = _record_scans(monkeypatch, [])
     validated = _spy_commit_message_validation(monkeypatch)
 
-    assert pre_bash_commit_quality.evaluate("payload") == {"output": "payload", "exitCode": 0}
+    assert pre_bash_commit_quality.evaluate("payload") is None
     assert seen == expected_seen
     assert validated == [command]
 
@@ -169,7 +169,7 @@ def test_evaluate_denies_after_scanning_staged_files(
 
     result = pre_bash_commit_quality.evaluate("payload")
 
-    assert result == {"output": "payload", "exitCode": 2, "reason": expected_reason}
+    assert result == expected_reason
     assert seen == [("src/staged.py", None)]
     assert any(expected_log in message for message in logs)
 
@@ -191,12 +191,12 @@ def test_evaluate_detects_secret_from_the_source_the_commit_reads(
 ) -> None:
     """実 git で、commit 種別が読む側（作業ツリーか INDEX か）に入れた secret を検出して止めること。"""
     repo = _init_git_repo(tmp_path / "repo", {"app.py": "value = 'clean'\n"})
-    (repo / "app.py").write_text("value = 'clean'\n" + "api" + "_key" + ' = "hunter2secret"\n', encoding="utf-8")
+    (repo / "app.py").write_text("value = 'clean'\n" + _SECRET_LINE, encoding="utf-8")
     if stage_then_clean_worktree:
         _git(repo, "add", "app.py")
         (repo / "app.py").write_text("value = 'clean'\n", encoding="utf-8")
 
-    assert _evaluate_in_repo(command, repo, monkeypatch)["exitCode"] == 2
+    assert _evaluate_in_repo(command, repo, monkeypatch) is not None
 
 
 def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -244,9 +244,41 @@ def test_get_unstaged_modified_files_when_diff_fails(
 
 def test_get_unstaged_modified_files_returns_none_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
     """subprocess が OSError 系例外を投げた場合は None を返すこと（fail-closed）。"""
-    monkeypatch.setattr(
-        pre_bash_commit_quality.subprocess,
-        "run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing")),
-    )
+    monkeypatch.setattr(pre_bash_commit_quality.subprocess, "run", mock.Mock(side_effect=FileNotFoundError("missing")))
     assert pre_bash_commit_quality.get_unstaged_modified_files() is None
+
+
+@pytest.mark.parametrize("wrapper", ["bash -c", "sh -c", "BASH -lc"])
+def test_commit_inside_a_shell_wrapper_is_scanned_like_a_plain_commit(
+    wrapper: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``sh -c`` の 1 段の内側の commit も secret 走査を受ける（``block_no_verify`` と同じ範囲を読む）。"""
+    repo = _init_git_repo(tmp_path / "repo", {"README.md": "x\n"})
+    (repo / "secret.py").write_text(_SECRET_LINE, encoding="utf-8")
+    _git(repo, "add", "secret.py")
+    assert _evaluate_in_repo(f"""{wrapper} "git commit -m 'feat(core): add'" """, repo, monkeypatch) is not None
+
+
+@pytest.mark.parametrize(
+    ("command", "denied"),
+    [
+        pytest.param("""bash -c "git commit -m 'fix core.worktree'" """, False, id="message-naming-the-config-key"),
+        pytest.param("bash -c 'git commit -m x'", False, id="plain"),
+        pytest.param("git commit -m x && env -C /tmp bash -c 'ls'", False, id="wrapper-after-the-commit-without-a-commit"),
+        pytest.param("env -C /tmp bash -c 'ls'; git commit -m x", False, id="wrapper-before-the-commit-without-a-commit"),
+        pytest.param("env -C ../other bash -c 'git commit -m x'", True, id="wrapper-prefix-moves-directory"),
+        pytest.param("GIT_DIR=../other/.git bash -c 'git commit -m x'", True, id="wrapper-prefix-points-git-elsewhere"),
+    ],
+)
+def test_commit_target_risk_reads_the_prefix_of_a_shell_wrapper_only(command: str, denied: bool) -> None:
+    """ラッパーの前置は commit の対象を変えるが、内側の commit の引数の文字列は変えない。"""
+    assert (pre_bash_commit_quality._commit_target_risk(command) is not None) is denied
+
+
+def test_mutation_visible_only_in_the_windows_reading_is_denied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """commit 前の index 変更は、commit を検出した読みだけでなくどの読みでも数える。"""
+    repo = _init_git_repo(tmp_path / "repo", {"README.md": "x\n"})
+    command = "C:\\Git\\git.exe add x; git commit -m 'feat(core): add'"
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(pre_bash_commit_quality, "parse_json_object", lambda raw: {"tool_input": {"command": command}})
+    assert pre_bash_commit_quality.evaluate("payload") is not None

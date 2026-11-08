@@ -37,14 +37,12 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 import pytest
 
-from claq.ci.ci_common import REPO_ROOT
 from claq.lib.harness import _TOOL_NAME_MAP, normalize_tool_name
 
-HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
+from ._support import HOOKS_JSON
 
 # 全ツールを表す特別値。正規表現として評価されないためアンカー化しない。
 WILDCARD_MATCHER = "*"
@@ -67,7 +65,7 @@ ANCHORED_MATCHER_RE = re.compile(r"^\^\((?P<alternatives>[^()]+)\)\$$")
 
 def _iter_entries() -> list[tuple[str, dict]]:
     """hooks.json の (イベント名, matcher エントリ) のリストを返す。"""
-    hooks = json.loads(Path(HOOKS_JSON).read_text(encoding="utf-8"))["hooks"]
+    hooks = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
     return [(event, entry) for event, entries in hooks.items() for entry in entries]
 
 

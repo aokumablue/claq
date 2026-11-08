@@ -17,8 +17,11 @@ from claq.lib.core_utils import (
     get_home_dir,
     get_sessions_dir,
     log,
+    read_tail_text,
     strip_ansi,
 )
+
+from ._support import _raise
 
 
 @pytest.fixture
@@ -40,6 +43,12 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+def _clear_home_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ホームを決める環境変数をすべて外す。"""
+    for name in ("CLAQ_HOME", "HOME", "USERPROFILE"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _mode(path: Path) -> int:
     """パーミッションビットを返す。"""
     return stat.S_IMODE(path.stat().st_mode)
@@ -54,8 +63,7 @@ def test_get_home_dir_env_priority(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, set_vars: tuple[str, ...], expected: str
 ) -> None:
     """CLAQ_HOME → HOME → USERPROFILE の順で、最初に設定された環境変数を使う。"""
-    for name in ("CLAQ_HOME", "HOME", "USERPROFILE"):
-        monkeypatch.delenv(name, raising=False)
+    _clear_home_env(monkeypatch)
     for name in set_vars:
         monkeypatch.setenv(name, str(tmp_path / name))
 
@@ -64,10 +72,9 @@ def test_get_home_dir_env_priority(
 
 def test_get_home_dir_raises_oserror_when_home_is_unavailable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """HOME を決められないときは cwd へ逃げず OSError を送出する（cwd の `.claq/mem.db` を読んで注入しない）。"""
-    for name in ("CLAQ_HOME", "HOME", "USERPROFILE"):
-        monkeypatch.delenv(name, raising=False)
+    _clear_home_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(Path, "home", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(Path, "home", _raise(RuntimeError("boom")))
 
     with pytest.raises(OSError):
         get_home_dir()
@@ -156,12 +163,7 @@ def test_actor_identity_uses_user_name_without_uid(monkeypatch: pytest.MonkeyPat
 def test_actor_identity_propagates_unresolvable_user(monkeypatch: pytest.MonkeyPatch) -> None:
     """os.getuid が無く利用者名も引けなければ、例外をそのまま伝える（promote は DB を変える前に止まる）。"""
     monkeypatch.delattr(core_utils.os, "getuid", raising=False)
-
-    def fail() -> str:
-        """利用者名を解決できない環境を模す。"""
-        raise OSError("no user")
-
-    monkeypatch.setattr(core_utils.getpass, "getuser", fail)
+    monkeypatch.setattr(core_utils.getpass, "getuser", _raise(OSError("no user")))
 
     with pytest.raises(OSError, match="no user"):
         core_utils.actor_identity()
@@ -194,3 +196,22 @@ def test_log_writes_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
     """stderr に 1 行書き込む。"""
     log("test message")
     assert capsys.readouterr().err == "test message\n"
+
+
+@pytest.mark.parametrize(
+    ("content", "max_bytes", "expected"),
+    [(b"hello\n", 4096, "hello\n"), (b"A" * 100 + b"TAIL", 4, "TAIL"), (b"\xe3\x81\x82x", 2, "\ufffdx")],
+    ids=["within-limit", "tail-only", "split-multibyte-replaced"],
+)
+def test_read_tail_text(tmp_path: Path, content: bytes, max_bytes: int, expected: str) -> None:
+    """上限以内なら全体、超えれば末尾の上限バイトだけを返し、途中で切れた文字は置換すること。"""
+    target = tmp_path / "f.log"
+    target.write_bytes(content)
+
+    assert read_tail_text(target, max_bytes) == expected
+
+
+def test_read_tail_text_propagates_oserror(tmp_path: Path) -> None:
+    """読めないファイルは OSError をそのまま呼び出し側へ伝えること。"""
+    with pytest.raises(OSError):
+        read_tail_text(tmp_path / "missing.log", 4096)

@@ -18,7 +18,7 @@ import pytest
 
 from claq.hooks import bash_config_protection, config_protection
 
-from ._support import _EXPECTED_VOCABULARIES, _bash, _run, _write
+from ._support import _EXPECTED_VOCABULARIES, _bash, _edit, _run, _write
 from ._support import _repo_scope as _repo_scope
 
 
@@ -44,11 +44,6 @@ def _running_root(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.
     return root
 
 
-def _edit(file_path: str) -> dict[str, Any]:
-    """file_path への Edit ツール呼び出しの payload を組み立てる。"""
-    return {"tool_name": "Edit", "tool_input": {"file_path": file_path, "old_string": "a", "new_string": "b"}}
-
-
 @pytest.mark.parametrize(
     "relative", ["runtime/claq-hook", "runtime/claq-hook.cmd", "src/claq/launcher.py", "src/claq/hooks/x.py"]
 )
@@ -61,7 +56,10 @@ def test_write_and_edit_into_running_plugin_are_denied(
     """実行中の plugin root の ``runtime/`` と ``src/claq/`` 配下への Write と Edit を deny する。"""
     target = str(_running_root / relative)
 
-    codes = (_run("config_protection", _write(target), monkeypatch), _run("config_protection", _edit(target), monkeypatch))
+    codes = (
+        _run("config_protection", _write(target), monkeypatch),
+        _run("config_protection", _edit(target, "a", "b"), monkeypatch),
+    )
     err = capsys.readouterr().err
 
     assert (codes, err.count("running claq plugin")) == ((2, 2), 2)
@@ -253,6 +251,23 @@ def test_git_is_consulted_only_after_a_positional_hit(
     _run("config_protection", _write(str(_running_root / "runtime" / "claq-hook")), monkeypatch)
 
     assert (before_hit, len(calls) > 0) == (0, True)
+
+
+def test_git_index_is_consulted_once_per_bash_scan(_running_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """保護ディレクトリに当たる書込み先が複数あっても、1 回の Bash 判定で追跡判定（git）は 1 回だけ起動する。"""
+    calls: list[None] = []
+
+    def _record(_repo: Path, _root: Path) -> bool:
+        """呼び出しを記録し、開発用 checkout として保護を外す。"""
+        calls.append(None)
+        return True
+
+    monkeypatch.setattr(config_protection, "resolve_repo_root", lambda: _running_root.parents[1])
+    monkeypatch.setattr(config_protection, "_plugin_runtime_is_tracked", _record)
+    targets = " ".join(f"{_running_root}/src/claq/hooks/f{i}.py" for i in range(5))
+
+    assert _run("bash_config_protection", _bash(f"rm -f {targets}"), monkeypatch) == 0
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("display", ["runtime/", "src/claq/"])

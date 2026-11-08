@@ -5,15 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from claq.ci.ci_common import (
-    REPO_ROOT,
+    PLUGIN_ROOT,
     emit_error,
     extract_frontmatter,
+    list_markdown_files,
     parse_validator_args,
     read_or_report,
     report_missing,
 )
 
-DEFAULT_AGENTS_DIR = REPO_ROOT / "agents"
+DEFAULT_AGENTS_DIR = PLUGIN_ROOT / "agents"
 
 
 def _validate_agent_file(file_path: Path) -> bool:
@@ -43,8 +44,10 @@ def _validate_agent_file(file_path: Path) -> bool:
     return False
 
 
-def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:
-    """エージェント Markdown ファイルを検証し、JS バリデータと同じメッセージを表示する。
+def validate_agents(agents_dir: str | Path) -> int:
+    """エージェント Markdown ファイルを検証する。
+
+    誤りは 1 件ずつ stderr へ書き出し、全件合格なら検証したファイル数を stdout へ表示する。
 
     Args:
         agents_dir: 検証するエージェントディレクトリ。
@@ -55,9 +58,10 @@ def validate_agents(agents_dir: str | Path = DEFAULT_AGENTS_DIR) -> int:
     agents_path = Path(agents_dir)
     if not agents_path.exists():
         return report_missing("agents ディレクトリ", agents_path)
-    files = [entry for entry in agents_path.iterdir() if entry.is_file() and entry.name.endswith(".md")]
+    files = list_markdown_files(agents_path)
     # 全ファイルの誤りを出し切るため、短絡させずに検証する。
-    if [file_path for file_path in files if _validate_agent_file(file_path)]:
+    failed = [file_path for file_path in files if _validate_agent_file(file_path)]
+    if failed:
         return 1
     print(f"{len(files)} 個のエージェントファイルを検証しました")
     return 0

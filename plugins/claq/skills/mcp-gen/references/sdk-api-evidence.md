@@ -44,7 +44,7 @@ requires-python: >=3.10
 | 公開する inputSchema | root に `additionalProperties` が無い。`X \| None` は `anyOf: [X, {"type": "null"}]`、全ての項目に `title`、入れ子のモデル引数は `$defs` と `$ref` になる | guard が root を閉じ、`anyOf` と `title` を外す。入れ子のモデル引数は使わない |
 | 入れ子のモデルの未知のキー | モデルに `ConfigDict(extra="forbid")` を付ければ `additionalProperties: false` が出て、違反の文面（`Extra inputs are not permitted`）がモデルへ届く | 入れ子のモデル引数を使わないので不要 |
 | text の写し | `pydantic_core.to_json(result, indent=2)`。日本語はエスケープされない | guard が詰めた JSON に置き換える |
-| 構造化出力 | `model_dump(mode="json", by_alias=True)`。None の項目は `null` で出る。`Field(exclude_if=lambda v: v is None)` を付ければ出ず、outputSchema は変わらない | 値が無い項目と空の一覧に `exclude_if` を付ける |
+| 構造化出力 | `model_dump(mode="json", by_alias=True)`。None の項目は `null` で出る。`Field(exclude_if=述語)`（見本は `facade-overlay/server.py` の `_is_none`）を付ければ出ず、outputSchema は変わらない | 値が無い項目と空の一覧に `exclude_if` を付ける |
 | middleware | `MCPServer.middleware`（暫定の API。2.x の minor で形が変わりうる）。`ctx.method` と検証前の `ctx.params` を読める。`tools/list` と `tools/call` の結果は dict（camelCase のキー）で届く。middleware が dict を返すとそのまま送られる（`resultType` は自分で入れる） | guard はこの形に依存する。版を上げたら smoke で確かめる |
 | 公開中のツール | `await mcp.list_tools()` が `name` / `input_schema` を持つツール定義を返す（公開 API） | guard が許される引数名をここから得る |
 | エラーの文面 | `ToolError` は文面が届き、`ValueError` は伏せられる（2.1.1 と同じ） | 変更なし |

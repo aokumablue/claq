@@ -15,6 +15,8 @@ import pytest
 
 from claq.hooks import block_no_verify, pre_compact, shell_tokens
 
+from ._support import _run_module
+
 # ``--no-verify``。テストケース表の横幅を抑えるための別名。
 NV = "--no-verify"
 
@@ -236,17 +238,9 @@ def _run_entrypoint(module_name: str) -> int:
     return excinfo.value.code
 
 
-def _run_module(payload: str) -> subprocess.CompletedProcess[str]:
+def _run_block_no_verify(payload: str) -> subprocess.CompletedProcess[str]:
     """``payload`` を実 stdin へ流して ``python -m claq.hooks.block_no_verify`` を別プロセスで実行する。"""
-    src_root = Path(block_no_verify.__file__).resolve().parents[2]
-    return subprocess.run(
-        [sys.executable, "-m", "claq.hooks.block_no_verify"],
-        input=payload,
-        capture_output=True,
-        text=True,
-        check=False,
-        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(src_root), "CLAUDECODE": "1"},
-    )
+    return _run_module("claq.hooks.block_no_verify", payload, env={"PATH": "/usr/bin:/bin", "CLAUDECODE": "1"})
 
 
 @pytest.mark.parametrize(
@@ -264,7 +258,7 @@ def test_has_bypass_flag(command: str, expected: bool) -> None:
 )
 def test_end_to_end_via_module_subprocess(command: str, expected_code: int) -> None:
     """実 JSON を stdin へ流す ``python -m`` 実行でも同じ判定になり、block のときだけ stdout と stderr を出すこと。"""
-    completed = _run_module(json.dumps({"tool_input": {"command": command}}))
+    completed = _run_block_no_verify(json.dumps({"tool_input": {"command": command}}))
 
     assert completed.returncode == expected_code
     assert bool(completed.stdout) is (expected_code != 0)
@@ -274,7 +268,7 @@ def test_end_to_end_via_module_subprocess(command: str, expected_code: int) -> N
 def test_oversized_payload_is_fail_closed_end_to_end() -> None:
     """1 MiB を超える実 stdin ペイロードは launcher 経由でも deny する（監査の再現手順そのもの）。"""
     filler = "x" * (1024 * 1024 + 100)
-    completed = _run_module(
+    completed = _run_block_no_verify(
         json.dumps({"tool_name": "Bash", "tool_input": {"command": "git commit --no-verify"}, "filler": filler})
     )
 

@@ -38,7 +38,13 @@ from claq.hooks.config_protection import (
     running_plugin_guarded_dir,
     running_plugin_root_is_guarded,
 )
-from claq.hooks.hook_common import basename, memoized_in_scan, normalize_protected_name, resolve_effective_target
+from claq.hooks.hook_common import (
+    basename,
+    fold_path_parts,
+    memoized_in_scan,
+    normalize_protected_name,
+    resolve_effective_target,
+)
 from claq.lib.core_utils import get_home_dir, get_plugin_root
 
 # `protected_path_segment` がプラグインの PreToolUse ガード登録元に返す表示名。
@@ -81,19 +87,23 @@ def match_folded_path_window(
 
 
 @memoized_in_scan
-def _guarded_locations() -> list[tuple[Path, str]]:
+def _guarded_locations() -> list[tuple[tuple[str, ...], str]]:
     """保護する実体の置き場所と表示名の組を返す。
 
     ホームを決められない環境ではホーム配下を省く（名前の構造一致は残る）。ここで例外を
     貫通させると hook が exit 1（PreToolUse では non-blocking＝ツール実行）で落ち、
     構造一致まで含めた判定ごと失われる。
 
+    置き場所は畳んだ要素列で返す。APFS / NTFS では `resolve()` が綴りの大小を実体へ揃えないので、
+    比べる側は畳んだ形でしか祖先を判定できない。
+
     Returns:
-        ``(解決済みの実体 path, 表示名)`` のリスト。
+        ``(解決済みの実体 path を畳んだ要素列, 表示名)`` のリスト。
 
     Raises:
         例外は発生しません。
     """
+    # ホームの決定や ``~user`` の展開自体も失敗しうるので、組み立てを遅らせて下の try で 1 か所ずつ受ける。
     candidates = [(lambda: get_plugin_root() / "hooks" / _HOOKS_JSON_NAME, _PLUGIN_HOOKS_JSON_DISPLAY)]
     configured = os.environ.get("CLAUDE_CONFIG_DIR")
     config_dirs = [lambda: get_home_dir() / ".claude"]
@@ -101,12 +111,12 @@ def _guarded_locations() -> list[tuple[Path, str]]:
         config_dirs.append(lambda: Path(configured).expanduser())
     for config_dir in config_dirs:
         for directory, name in _HOST_SETTINGS_PATH_SEGMENTS:
-            candidates.append((lambda d=config_dir, n=name: d() / n, f"{directory}/{name}"))
-    locations: list[tuple[Path, str]] = []
+            candidates.append((lambda config_dir=config_dir, name=name: config_dir() / name, f"{directory}/{name}"))
+    locations: list[tuple[tuple[str, ...], str]] = []
     for build, display in candidates:
         # 解決できない置き場（`~user` の未知ユーザー・symlink の循環）は省く。貫通させると上の理由で判定ごと失われる。
         try:
-            locations.append((build().resolve(), display))
+            locations.append((fold_path_parts(build().resolve().parts), display))
         except (OSError, RuntimeError):
             continue
     return locations
@@ -145,7 +155,8 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
             return "/".join(segments)
     if resolved is None:
         return None
+    target = fold_path_parts(resolved.parts)
     for location, display in _guarded_locations():
-        if location.is_relative_to(resolved):
+        if location[: len(target)] == target:
             return display
     return running_plugin_guarded_dir(resolved, include_ancestors=True)

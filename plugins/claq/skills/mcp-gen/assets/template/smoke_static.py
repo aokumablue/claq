@@ -15,7 +15,7 @@ import os
 import re
 import stat
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path, PurePosixPath
 
 # 旧仕様の API 名・機構（正本）。生成先のファイルに 1 件でも当たれば旧仕様が混入している。
@@ -53,6 +53,20 @@ def _read_lines(path: Path) -> list[str]:
     return path.read_text(encoding="utf-8").splitlines()
 
 
+def _walk_files(root: Path) -> Iterator[Path]:
+    """root 以下のファイルを名前順に列挙する（`SKIPPED_DIRS` と `.egg-info` の下は見ない）。
+
+    Args:
+        root: 走査の起点。
+
+    Yields:
+        ファイルのパス。
+    """
+    for directory, subdirs, files in os.walk(root):
+        subdirs[:] = sorted(name for name in subdirs if name not in SKIPPED_DIRS and not name.endswith(".egg-info"))
+        yield from (Path(directory, name) for name in sorted(files))
+
+
 def legacy_api_hits(root: Path, *, skip: Iterable[Path]) -> tuple[list[str], list[str]]:
     """root 以下のテキストファイルから、旧仕様の API 名・機構に当たる行を集める。
 
@@ -69,24 +83,21 @@ def legacy_api_hits(root: Path, *, skip: Iterable[Path]) -> tuple[list[str], lis
     hits: list[str] = []
     unscanned: list[str] = []
     skipped = {path.resolve() for path in skip}
-    for directory, subdirs, files in os.walk(root):
-        subdirs[:] = sorted(name for name in subdirs if name not in SKIPPED_DIRS and not name.endswith(".egg-info"))
-        for name in sorted(files):
-            path = Path(directory, name)
-            if path.resolve() in skipped:
-                continue
-            try:
-                lines = _read_lines(path)
-            except UnicodeDecodeError:
-                continue  # バイナリ（.pyc など）は見ない
-            except OSError as error:
-                unscanned.append(f"{path.relative_to(root)} ({error.strerror or error})")
-                continue
-            hits.extend(
-                f"{path.relative_to(root)}:{number}: {line.strip()}"
-                for number, line in enumerate(lines, 1)
-                if FORBIDDEN_PATTERN.search(line)
-            )
+    for path in _walk_files(root):
+        if path.resolve() in skipped:
+            continue
+        try:
+            lines = _read_lines(path)
+        except UnicodeDecodeError:
+            continue  # バイナリ（.pyc など）は見ない
+        except OSError as error:
+            unscanned.append(f"{path.relative_to(root)} ({error.strerror or error})")
+            continue
+        hits.extend(
+            f"{path.relative_to(root)}:{number}: {line.strip()}"
+            for number, line in enumerate(lines, 1)
+            if FORBIDDEN_PATTERN.search(line)
+        )
     return hits, unscanned
 
 

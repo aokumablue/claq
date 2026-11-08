@@ -7,28 +7,22 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple, NoReturn
 
 from claq.ci.harness_audit_repo_checks import get_repo_checks
 from claq.ci.harness_audit_utils import (
-    _has_any_file as _has_any_file,
-)
-from claq.ci.harness_audit_utils import (
-    _has_gitlab_security_scanning,
     count_files,
     detect_target_mode,
     file_has_content,
     find_plugin_install,
     has_file_with_extension,
+    has_gitlab_security_scanning,
     has_python_tests,
     make_check,
     safe_parse_json,
     safe_read,
 )
-from claq.ci.harness_audit_utils import (
-    read_text as read_text,
-)
-from claq.lib.git_hosting import SERVICE_LABELS, detect_git_hosting_service
+from claq.lib.git_hosting import GITHUB, GITLAB, SERVICE_LABELS, detect_git_hosting_service
 
 # origin からホスティングを判定できないときの表示名。
 _UNKNOWN_HOSTING_LABEL = "Git hosting（origin から判定できず）"
@@ -97,10 +91,13 @@ def _option_value(args: list[str], index: int, name: str) -> tuple[str, int]:
         ValueError: 値が無い、空文字、または ``-`` 始まりの場合。
     """
     arg = args[index]
-    if arg.startswith(f"{name}="):
-        value, next_index = arg.split("=", 1)[1], index + 1
+    inline_prefix = f"{name}="
+    if arg.startswith(inline_prefix):
+        value = arg.removeprefix(inline_prefix)
+        next_index = index + 1
     else:
-        value, next_index = (args[index + 1] if index + 1 < len(args) else ""), index + 2
+        value = args[index + 1] if index + 1 < len(args) else ""
+        next_index = index + 2
     if not value or value.startswith("-"):
         raise ValueError(f"{name} requires a non-empty value that is not another flag")
     return value, next_index
@@ -127,8 +124,17 @@ def _apply_arg(parsed: dict[str, Any], args: list[str], index: int) -> int:
     return index + 1
 
 
-def parse_args(argv: Sequence[str] | None = None) -> dict[str, Any]:
-    """CLI 引数を JS 実装と同じルールで解析する。"""
+def parse_args(argv: Sequence[str] | None) -> dict[str, Any]:
+    """CLI 引数を解析する。
+
+    位置引数は scope として、値を取るフラグは ``_VALUE_OPTIONS`` の変換を通して読む。
+
+    Args:
+        argv: 引数リスト。None なら ``sys.argv[1:]``。
+
+    Raises:
+        ValueError: 不明な引数・値の欠落・不正な scope / format / target-kind の場合。
+    """
     args = list(sys.argv[1:] if argv is None else argv)
     parsed: dict[str, Any] = {
         "scope": "repo",
@@ -145,31 +151,40 @@ def parse_args(argv: Sequence[str] | None = None) -> dict[str, Any]:
     return parsed
 
 
-def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> tuple[str, str, bool, bool]:
-    """consumer 向けの (CI パス, セキュリティパス, CI 有無, セキュリティポリシー有無) を返す。
+class _HostingLayout(NamedTuple):
+    """consumer モードで見る CI・セキュリティ設定の置き場所と、それぞれを満たしているか。"""
+
+    ci_path: str
+    security_path: str
+    ci_pass: bool
+    security_pass: bool
+
+
+def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> _HostingLayout:
+    """consumer 向けに、ホスティングごとの CI・セキュリティ設定の置き場所と充足状況を返す。
 
     ホスティングが不明なら、GitHub と GitLab のどちらの置き場所でも満たしたとみなす。
     """
     if hosting_service is None:
-        github, gitlab = _hosting_layout(root_dir, "github"), _hosting_layout(root_dir, "gitlab")
-        return (
-            f"{github[0]} / {gitlab[0]}",
-            f"{github[1]} / {gitlab[1]}",
-            github[2] or gitlab[2],
-            github[3] or gitlab[3],
+        github, gitlab = _hosting_layout(root_dir, GITHUB), _hosting_layout(root_dir, GITLAB)
+        return _HostingLayout(
+            ci_path=f"{github.ci_path} / {gitlab.ci_path}",
+            security_path=f"{github.security_path} / {gitlab.security_path}",
+            ci_pass=github.ci_pass or gitlab.ci_pass,
+            security_pass=github.security_pass or gitlab.security_pass,
         )
-    if hosting_service == "gitlab":
-        return (
-            ".gitlab-ci.yml",
-            ".gitlab-ci.yml",
-            file_has_content(root_dir, ".gitlab-ci.yml"),
-            file_has_content(root_dir, "SECURITY.md") or _has_gitlab_security_scanning(root_dir),
+    if hosting_service == GITLAB:
+        return _HostingLayout(
+            ci_path=".gitlab-ci.yml",
+            security_path=".gitlab-ci.yml",
+            ci_pass=file_has_content(root_dir, ".gitlab-ci.yml"),
+            security_pass=file_has_content(root_dir, "SECURITY.md") or has_gitlab_security_scanning(root_dir),
         )
-    return (
-        ".github/workflows/",
-        "SECURITY.md",
-        has_file_with_extension(root_dir, ".github/workflows", [".yml", ".yaml"]),
-        file_has_content(root_dir, "SECURITY.md")
+    return _HostingLayout(
+        ci_path=".github/workflows/",
+        security_path="SECURITY.md",
+        ci_pass=has_file_with_extension(root_dir, ".github/workflows", [".yml", ".yaml"]),
+        security_pass=file_has_content(root_dir, "SECURITY.md")
         or file_has_content(root_dir, ".github/dependabot.yml")
         or file_has_content(root_dir, ".github/codeql.yml"),
     )
@@ -226,14 +241,20 @@ def _consumer_context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
+def _declares_package_test_script(root_dir: str | Path) -> bool:
+    """``package.json`` の ``scripts.test`` に文字列のテストコマンドが宣言されているかを返す。"""
+    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
+    if not isinstance(package_json, dict):
+        return False
+    scripts = package_json.get("scripts")
+    return isinstance(scripts, dict) and isinstance(scripts.get("test"), str)
+
+
 def _consumer_quality_checks(
     root_dir: str | Path, hosting_label: str, ci_path: str, ci_pass: bool
 ) -> list[dict[str, Any]]:
     """consumer モードの Quality Gates カテゴリのチェックを返す。"""
     category = "Quality Gates"
-    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
-    if not isinstance(package_json, dict):
-        package_json = {}
     return [
         make_check(
             check_id="consumer-test-suite", category=category, points=4, scopes=["repo"],
@@ -241,7 +262,7 @@ def _consumer_quality_checks(
             description="プロジェクトが自動テストのエントリポイントを持つ",
             # 最初のヒットで打ち切る判定（has_python_tests / has_file_with_extension）を
             # 先に置く。count_files はヒットしても数え上げを続けるため最後に回す。
-            passed=(isinstance(package_json.get("scripts"), dict) and isinstance(package_json["scripts"].get("test"), str))
+            passed=_declares_package_test_script(root_dir)
             or has_python_tests(root_dir, minimum=1)
             or has_file_with_extension(root_dir, ".", [".spec.js", ".spec.ts", ".test.ts"])
             or count_files(root_dir, "tests", ".test.js") > 0,
@@ -371,7 +392,7 @@ def _plugin_provider_hint(root_dir: Path) -> str:
     return f" このルートには plugin 提供元ディレクトリがあります: --root {paths}"
 
 
-def build_report(scope: str, root_dir: str | Path | None = None, target_mode: str | None = None) -> dict[str, Any]:
+def build_report(scope: str, root_dir: str | Path, target_mode: str | None = None) -> dict[str, Any]:
     """監査レポートを組み立てる。
 
     `target_mode` を明示した場合、自動判定（`detect_target_mode`）と不一致なら
@@ -380,14 +401,14 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
 
     Args:
         scope: 監査スコープ。
-        root_dir: 監査対象のルート。None なら cwd。
+        root_dir: 監査対象のルート。
         target_mode: ``"repo"`` / ``"consumer"`` を明示する場合に指定する。
             None なら自動判定に任せる。
 
     Raises:
         ValueError: 明示した target_mode が自動判定と食い違う場合。
     """
-    resolved_root = Path(root_dir or os.getcwd()).resolve()
+    resolved_root = Path(root_dir).resolve()
     detected_mode = detect_target_mode(resolved_root)
     if target_mode is not None and target_mode != detected_mode:
         raise ValueError(
@@ -410,7 +431,7 @@ def build_report(scope: str, root_dir: str | Path | None = None, target_mode: st
 
     # 単位を分けた以上、合計が一致することは機械的に保証できる。集計経路が
     # 壊れたら（カテゴリの取りこぼし・二重計上）ここで落とす。
-    category_total = sum(data["earned_points"] for data in category_scores.values())
+    category_total = sum(category_score["earned_points"] for category_score in category_scores.values())
     if category_total != overall_score:
         raise AssertionError(
             f"カテゴリ earned_points の合計 {category_total} が overall_score {overall_score} と一致しません"
@@ -445,11 +466,11 @@ def print_text(report: dict[str, Any]) -> None:
     print(f"Root: {report['root_dir']}")
     print()
     for category in CATEGORIES:
-        data = report["categories"][category]
-        if data["max_points"]:
+        category_score = report["categories"][category]
+        if category_score["max_points"]:
             print(
-                f"- {category}: {data['normalized_score']}/10 "
-                f"({data['earned_points']}/{data['max_points']} pts)"
+                f"- {category}: {category_score['normalized_score']}/10 "
+                f"({category_score['earned_points']}/{category_score['max_points']} pts)"
             )
 
     failed = [check for check in report["checks"] if not check["pass"]]
@@ -462,8 +483,8 @@ def print_text(report: dict[str, Any]) -> None:
             print(f"{index}) [{action['category']}] {action['action']} ({action['path']})")
 
 
-def show_help(exit_code: int = 0) -> None:
-    """ヘルプを表示して終了する。"""
+def show_help() -> NoReturn:
+    """ヘルプを表示して終了コード 0 で終了する。"""
     print(
         """
 Usage: python3 "${CLAUDE_PLUGIN_ROOT}/src/claq/launcher.py" claq.ci.harness_audit [scope] [--scope <repo|hooks|skills|commands|agents>] [--format <text|json>]
@@ -476,7 +497,7 @@ Audits the current working directory by default and auto-detects repo vs consume
 provider directory).
 """
     )
-    raise SystemExit(exit_code)
+    raise SystemExit(0)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -484,7 +505,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = parse_args(argv)
         if args["help"]:
-            show_help(0)
+            show_help()
         report = build_report(args["scope"], root_dir=args["root"], target_mode=args["target_kind"])
         if args["format"] == "json":
             print(json.dumps(report, indent=2, ensure_ascii=False))

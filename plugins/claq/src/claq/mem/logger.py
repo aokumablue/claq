@@ -28,6 +28,9 @@ _FORMATTER = _RedactingFormatter(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
+_PACKAGE_LOGGER_NAME = "claq.mem"
+"""ハンドラを持つ親ロガーの名前。``get`` が返すロガーはこの子なので、ハンドラへ伝播する。"""
+
 _initialized = False
 _lock = threading.Lock()
 
@@ -67,25 +70,29 @@ def _stderr_handler() -> logging.Handler:
     return handler
 
 
-def setup(log_dir: Path, level: str = "info") -> None:
+def setup(log_dir: Path, level: str) -> None:
     """ロガーを初期化する。アプリケーション起動時に1度だけ呼ぶ。
 
     `_initialized` はハンドラの構築と追加が成功した後にだけ立てる。先に立てると、
     `_file_handler` がディスク不調・権限エラー等で例外を投げた場合に「初期化済み
     だがハンドラが空」という復帰不能な状態が残り、以後の `setup()` が何もせずに
     返るようになる。
+
+    Args:
+        log_dir: 日次ログファイルを置くディレクトリ。
+        level: ``logging`` のレベル名（大文字小文字は問わない）。
     """
     global _initialized
     with _lock:
         if _initialized:
             return
 
-        root = logging.getLogger("claq.mem")
+        package_logger = logging.getLogger(_PACKAGE_LOGGER_NAME)
         file_handler = _file_handler(log_dir)
         stderr_handler = _stderr_handler()
-        root.setLevel(getattr(logging, level.upper()))
-        root.addHandler(file_handler)
-        root.addHandler(stderr_handler)
+        package_logger.setLevel(getattr(logging, level.upper()))
+        package_logger.addHandler(file_handler)
+        package_logger.addHandler(stderr_handler)
         _initialized = True
 
 
@@ -94,10 +101,9 @@ def reset() -> None:
     global _initialized
     with _lock:
         _initialized = False
-    root = logging.getLogger("claq.mem")
-    root.handlers.clear()
+    logging.getLogger(_PACKAGE_LOGGER_NAME).handlers.clear()
 
 
 def get(component: str) -> logging.Logger:
     """コンポーネント名でロガーを取得する。"""
-    return logging.getLogger(f"claq.mem.{component}")
+    return logging.getLogger(f"{_PACKAGE_LOGGER_NAME}.{component}")

@@ -28,8 +28,16 @@ def test_run_text_enforces_text_encoding_and_env(
     result = run_text(["echo", "hi"], timeout=1.5, input_text="payload", extra_env=extra_env)
 
     assert result.stdout == "ok"
-    expected_kwargs = {"input": "payload", "text": True, "encoding": "utf-8", "errors": "replace", "capture_output": True}
-    expected_kwargs |= {"check": False, "timeout": 1.5, "env": {**os.environ, **(extra_env or {})}}
+    expected_kwargs = {
+        "input": "payload",
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "capture_output": True,
+        "check": False,
+        "timeout": 1.5,
+        "env": {**os.environ, **(extra_env or {})},
+    }
     assert calls == [(["echo", "hi"], expected_kwargs)]
 
 

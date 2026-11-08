@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
-import runpy
+import sys
 from pathlib import Path
 
 import pytest
 
-import claq.ci.harness_audit as harness_audit
+from claq.ci import harness_audit
 from claq.ci.harness_audit_utils import make_check
 
+from ._support import _exit_code_as_main, _write_files, _write_repo_markers
 from ._support import _isolate_home as _isolate_home
-from ._support import _write_files, _write_repo_markers
 
 
 @pytest.mark.parametrize(
@@ -176,7 +176,7 @@ def test_build_report_uses_git_hosting_service_for_consumer_checks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, service: str, files: dict[str, str], ci_path: str, label: str
 ) -> None:
     """ホスティング種別ごとの CI 設定・セキュリティスキャンの置き場所で consumer チェックが通る。"""
-    monkeypatch.setattr(harness_audit, "detect_git_hosting_service", lambda *args, **kwargs: service)
+    monkeypatch.setattr(harness_audit, "detect_git_hosting_service", lambda *_args, **_kwargs: service)
     _write_files(tmp_path, files)
 
     checks = {check["id"]: check for check in harness_audit.build_report("repo", root_dir=tmp_path)["checks"]}
@@ -240,7 +240,7 @@ def test_summarize_self_check_detects_broken_aggregation(monkeypatch: pytest.Mon
     """カテゴリ earned_points の合計が overall_score と一致しなければ落とす（取りこぼし・二重計上の検出）。"""
     zero = {"earned_points": 0, "max_points": 0, "normalized_score": 0}
     monkeypatch.setattr(
-        harness_audit, "summarize_category_scores", lambda checks: dict.fromkeys(harness_audit.CATEGORIES, zero)
+        harness_audit, "summarize_category_scores", lambda _checks: dict.fromkeys(harness_audit.CATEGORIES, zero)
     )
     _write_repo_markers(tmp_path)
 
@@ -335,11 +335,6 @@ def test_main_help_exits_zero_and_errors_return_one(
 def test_main_entrypoint_exits_with_audit_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """`python -m` 起動は main の戻り値で終了し、不合格のある repo では 1 になる。"""
     _write_repo_markers(tmp_path)
-    monkeypatch.setattr(
-        harness_audit.sys, "argv", ["harness_audit.py", "--scope", "repo", "--format=json", "--root", str(tmp_path)]
-    )
+    monkeypatch.setattr(sys, "argv", ["harness_audit.py", "--scope", "repo", "--format=json", "--root", str(tmp_path)])
 
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("claq.ci.harness_audit", run_name="__main__")
-
-    assert excinfo.value.code == 1
+    assert _exit_code_as_main("claq.ci.harness_audit") == 1

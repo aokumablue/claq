@@ -344,6 +344,30 @@ def _fold_lines(kept: list[str]) -> str:
     return "".join(parts) + "\n"
 
 
+def _render_block_scalar(content: list[str], style: str, chomping: str) -> str:
+    """ブロックスカラーの本文行をスタイルどおりに連結し、チョンピングを適用する。
+
+    Args:
+        content: インデントを外した本文行（末尾の空行を含む）。
+        style: ``|``（リテラル）または ``>``（折り畳み）。
+        chomping: ``-``（strip）/ ``+``（keep）/ ``""``（clip）。
+
+    Returns:
+        チョンピング適用後の文字列。
+    """
+    end = len(content)
+    while end > 0 and content[end - 1] == "":
+        end -= 1
+    kept = content[:end]
+    trailing = len(content) - end
+    body = "".join(line + "\n" for line in kept) if style == "|" else _fold_lines(kept)
+    if chomping == "-":
+        return body.rstrip("\n")
+    if chomping == "+":
+        return body + "\n" * trailing
+    return body
+
+
 def _skip_spaces(text: str, index: int) -> int:
     """空白とタブを読み飛ばした位置を返す。"""
     while index < len(text) and text[index] in " \t":
@@ -578,8 +602,6 @@ class _Parser:
     def _read_block_scalar(self, style: str, chomping: str, base_indent: int) -> str:
         """``|`` / ``>`` のブロックスカラー本文を読み取って文字列を返す。
 
-        コンテンツのインデントはヘッダ直後の最初の非空行のインデントを採用する。
-
         Args:
             style: ``|``（リテラル）または ``>``（折り畳み）。
             chomping: ``-``（strip）/ ``+``（keep）/ ``""``（clip）。
@@ -587,6 +609,20 @@ class _Parser:
 
         Returns:
             チョンピング適用後の文字列。
+        """
+        return _render_block_scalar(self._collect_block_lines(base_indent), style, chomping)
+
+    def _collect_block_lines(self, base_indent: int) -> list[str]:
+        """ブロックスカラーの本文行を、コンテンツのインデントを外して集める。
+
+        コンテンツのインデントはヘッダ直後の最初の非空行のインデントを採用する。
+        空白だけの行は空文字列として集める。
+
+        Args:
+            base_indent: 本文がこれより深いインデントであることを要求する基準桁。
+
+        Returns:
+            本文の行リスト（末尾の空行を含む）。
         """
         content: list[str] = []
         content_indent: int | None = None
@@ -605,17 +641,7 @@ class _Parser:
                 break
             content.append(line[content_indent:])
             self.pos += 1
-        end = len(content)
-        while end > 0 and content[end - 1] == "":
-            end -= 1
-        kept = content[:end]
-        trailing = len(content) - end
-        body = "".join(line + "\n" for line in kept) if style == "|" else _fold_lines(kept)
-        if chomping == "-":
-            return body.rstrip("\n")
-        if chomping == "+":
-            return body + "\n" * trailing
-        return body
+        return content
 
     def _read_flow(self, text: str, start: int) -> tuple[object, int]:
         """フローコレクションを解析して (値, 閉じ括弧の次の位置) を返す。

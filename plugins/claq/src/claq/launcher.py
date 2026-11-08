@@ -170,9 +170,6 @@ def main(argv: list[str] | None = None) -> int:
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
 
-    from claq.hooks.detach import detach_process
-    from claq.hooks.hook_common import write_stderr
-    from claq.hooks.stdin_io import read_raw_stdin
     from claq.lib.env_pointer import write_env_pointer
 
     # md（agents/commands/skills）がベンダ固有パスを書かずに plugin root を
@@ -194,6 +191,11 @@ def main(argv: list[str] | None = None) -> int:
 
     # --bg は host に関わらず常に detach し、呼び出し側フックを同期ブロックしない。
     # hooks.json / claq-helpers.sh のターゲットはすべて dotted module name なので `-m` で起動する。
+    # detach（tempfile を引き込む）は --bg の経路でだけ import し、同期 hook の起動を軽くする。
+    from claq.hooks.detach import detach_process
+    from claq.hooks.hook_common import write_stderr
+    from claq.hooks.stdin_io import read_raw_stdin
+
     try:
         detach_process([sys.executable, "-m", target, *target_args], read_raw_stdin(), env=build_env())
     except OSError as err:

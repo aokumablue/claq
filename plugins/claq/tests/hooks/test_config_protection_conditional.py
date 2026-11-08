@@ -15,17 +15,10 @@ from typing import Any
 
 import pytest
 
-from claq.hooks import config_protection
+from claq.hooks import conditional_protection
+from claq.hooks.hook_common import scan_memo
 
-from ._support import _run, _write_content
-
-
-def _edit(file_path: str, old_string: str, new_string: str, tool_name: str = "Edit") -> dict[str, Any]:
-    """Edit 系ツールの payload を組み立てる。"""
-    return {
-        "tool_name": tool_name,
-        "tool_input": {"file_path": file_path, "old_string": old_string, "new_string": new_string},
-    }
+from ._support import _edit, _run, _write_content
 
 
 def _multi_edit(edits: list[dict[str, str]]) -> dict[str, Any]:
@@ -198,12 +191,12 @@ def test_conditional_protection(
 )
 def test_editable_text(tool_name: str, container: Any, expected: list[str] | None) -> None:
     """_editable_text の分岐（実 JSON 経路では組み立てにくい枝）。"""
-    assert config_protection._editable_text(tool_name, container) == expected
+    assert conditional_protection._editable_text(tool_name, container) == expected
 
 
 def test_resolve_lint_section_empty_snippet_is_undetermined() -> None:
     """空の断片はディスク上のセクションを判定できない。"""
-    assert config_protection._resolve_lint_section_from_disk("pyproject.toml", "") is None
+    assert conditional_protection._resolve_lint_section_from_disk("pyproject.toml", "") is None
 
 
 def test_resolve_lint_section_read_failure_is_undetermined(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -216,7 +209,7 @@ def test_resolve_lint_section_read_failure_is_undetermined(monkeypatch: pytest.M
         raise OSError("permission denied")
 
     monkeypatch.setattr("pathlib.Path.open", _boom)
-    assert config_protection._resolve_lint_section_from_disk(str(target), "name") is None
+    assert conditional_protection._resolve_lint_section_from_disk(str(target), "name") is None
 
 
 def test_resolve_lint_section_read_is_capped_at_max_stdin_bytes(
@@ -242,16 +235,53 @@ def test_resolve_lint_section_read_is_capped_at_max_stdin_bytes(
         return handle
 
     monkeypatch.setattr("pathlib.Path.open", _spy_open)
-    config_protection._resolve_lint_section_from_disk(str(target), "ignore")
+    conditional_protection._resolve_lint_section_from_disk(str(target), "ignore")
 
-    assert requested == [config_protection.MAX_STDIN_BYTES]
+    assert requested == [conditional_protection.MAX_STDIN_BYTES]
 
 
 def test_resolve_lint_section_snippet_before_any_header_is_not_lint(tmp_path: Path) -> None:
     """先頭セクション見出しより前（トップレベル）に見つかった場合は lint 系ではない。"""
     target = tmp_path / "setup.cfg"
     target.write_text("# leading comment\ntop_level_marker\n[flake8]\nmax-line-length = 100\n", encoding="utf-8")
-    assert config_protection._resolve_lint_section_from_disk(str(target), "top_level_marker") is False
+    assert conditional_protection._resolve_lint_section_from_disk(str(target), "top_level_marker") is False
+
+
+def test_resolve_lint_section_reads_a_header_cut_off_by_the_snippet(tmp_path: Path) -> None:
+    """断片が見出しと同じ行にあるとき、断片より前だけを見出しとして読む（``[tool.ruff] # x`` の ``# x``）。"""
+    target = tmp_path / "pyproject.toml"
+    target.write_text("[project]\n[tool.ruff] # note\nname = 1\n", encoding="utf-8")
+    assert conditional_protection._resolve_lint_section_from_disk(str(target), "# note") is True
+    # 行全体は見出しの形をしていないので、次の行は前の見出しに属する。
+    assert conditional_protection._resolve_lint_section_from_disk(str(target), "name") is False
+
+
+@pytest.mark.parametrize("line_end", ["\n", "\r\n", "\x0c"], ids=["lf", "crlf", "form-feed"])
+def test_resolve_lint_section_finds_the_last_header_for_every_line_end(tmp_path: Path, line_end: str) -> None:
+    """行区切りの種類によらず、断片はその行より前で最後の見出しに属する。"""
+    target = tmp_path / "pyproject.toml"
+    target.write_bytes(line_end.join(["[project]", "name = 1", "[tool.ruff]", "select = 1", ""]).encode())
+    assert conditional_protection._resolve_lint_section_from_disk(str(target), "name") is False
+    assert conditional_protection._resolve_lint_section_from_disk(str(target), "select") is True
+
+
+def test_resolve_lint_section_reads_the_file_once_per_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """1 回の判定の中で断片ごとに読み直さない（MultiEdit の断片数だけ読むと timeout を超える）。"""
+    target = tmp_path / "pyproject.toml"
+    target.write_text("[project]\nname = 1\n[tool.ruff]\nselect = 1\n", encoding="utf-8")
+    original_open = Path.open
+    opened: list[Path] = []
+
+    def counting_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        """開いたパスを記録してから元の open へ渡す。"""
+        opened.append(self)
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counting_open)
+    with scan_memo():
+        verdicts = [conditional_protection._resolve_lint_section_from_disk(str(target), s) for s in ("name", "select")]
+    assert verdicts == [False, True]
+    assert opened == [target]
 
 
 class TestLintKeyPatternIsLinear:
@@ -286,7 +316,7 @@ class TestLintKeyPatternIsLinear:
     )
     def test_non_matching_input_returns_quickly(self, pattern_name: str, text: str) -> None:
         """一致しない空白主体の入力が上限時間内に一致なしで返る。"""
-        pattern = getattr(config_protection, pattern_name)
+        pattern = getattr(conditional_protection, pattern_name)
 
         started = time.monotonic()
         match = pattern.search(text)
@@ -311,11 +341,11 @@ class TestLintKeyPatternIsLinear:
         TOML / INI ともキーと `=` は同じ行に無ければならないため、改行を
         跨ぐ形を落としても正当な設定行の取りこぼしは生じない。
         """
-        assert bool(config_protection._LINT_KEY_PATTERN.search(text)) is expected
+        assert bool(conditional_protection._LINT_KEY_PATTERN.search(text)) is expected
 
 
 def test_lint_signal_scans_the_whole_text() -> None:
     """大きいだけのテキストは通し、末尾に置いた lint キーも見つける（長さの上限は stdin 側が持つ）。"""
     padding = "x = 1\n" * 100_000
-    assert config_protection._text_has_protected_signal(padding, "pyproject.toml") is False
-    assert config_protection._text_has_protected_signal(padding + "[tool.ruff]\n", "pyproject.toml") is True
+    assert conditional_protection._text_has_protected_signal(padding, "pyproject.toml") is False
+    assert conditional_protection._text_has_protected_signal(padding + "[tool.ruff]\n", "pyproject.toml") is True

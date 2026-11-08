@@ -25,6 +25,11 @@ _ORDER = {
 }
 
 
+def _chars(facade: types.SimpleNamespace, result: Any) -> int:
+    """結果を詰めた JSON の文字数（予算と比べる長さ）。"""
+    return len(facade.shaping.compact_json(result))
+
+
 class TestShaping:
     """応答の整形。"""
 
@@ -123,7 +128,7 @@ class TestShaping:
 
         def measure(result: dict[str, Any]) -> int:
             """結果を詰めた JSON の文字数。"""
-            return len(facade.shaping.compact_json(result))
+            return _chars(facade, result)
 
         size = measure(build(items[:4]))
         assert facade.shaping.fit_items(items, build, measure, max_chars=size) == 4
@@ -180,7 +185,7 @@ class TestFitView:
         """見本のパス（fallback は a だけ）で fit_view を呼ぶ。"""
         return facade.shaping.fit_view(
             _view_result,
-            lambda result: len(facade.shaping.compact_json(result)),
+            lambda result: _chars(facade, result),
             paths=TestFitView._PATHS,
             fallback_paths=["a"],
             max_chars=max_chars,
@@ -189,11 +194,11 @@ class TestFitView:
     def test_fit_view_within_budget_keeps_paths(self, facade: types.SimpleNamespace) -> None:
         """結果全体が予算ちょうどまでなら、指定のパスのまま notes を足さずに返し、返したパスも添える。"""
         whole = _view_result(self._PATHS, [])
-        assert self._fit(facade, len(facade.shaping.compact_json(whole))) == (whole, self._PATHS)
+        assert self._fit(facade, _chars(facade, whole)) == (whole, self._PATHS)
 
     def test_fit_view_over_budget_falls_back(self, facade: types.SimpleNamespace) -> None:
         """予算を 1 文字でも超えたら fallback（summary）のパスに落とし、notes で fields の絞り方を伝え、落とした後のパスを返す。"""
-        size = len(facade.shaping.compact_json(_view_result(self._PATHS, [])))
+        size = _chars(facade, _view_result(self._PATHS, []))
         result, paths = self._fit(facade, size - 1)
         assert (result, paths) == (_view_result(["a"], [facade.shaping.FALLBACK_NOTE]), ["a"])
 
@@ -238,7 +243,7 @@ class TestFitPage:
             upstream_next,
             issue=issue,
             build=_page_result,
-            measure=lambda result: len(facade.shaping.compact_json(result)),
+            measure=lambda result: _chars(facade, result),
             max_chars=max_chars,
             empty_note=self._EMPTY,
         )
@@ -262,7 +267,7 @@ class TestFitPage:
     def test_over_budget_reduces_and_continues_same_page(self, facade: types.SimpleNamespace) -> None:
         """予算を超えたら収まる件数に減らし、続きは同じ上流のページで読み飛ばす件数を増やした位置にする。"""
         longest_note = max(facade.shaping.REDUCED_NOTE, self._EMPTY, key=len)
-        budget = len(facade.shaping.compact_json(_page_result(self._ITEMS[:4], "cursor:p1:9", [longest_note])))
+        budget = _chars(facade, _page_result(self._ITEMS[:4], "cursor:p1:9", [longest_note]))
         result = self._fit(facade, self._ITEMS, max_chars=budget)
         assert result == _page_result(self._ITEMS[:4], "cursor:p1:7", [facade.shaping.REDUCED_NOTE])
 
@@ -296,14 +301,14 @@ class TestFitPage:
                 except facade.errors.FacadeError:
                     continue
                 returned += 1
-                assert len(facade.shaping.compact_json(result)) <= budget, (budget, upstream_next)
+                assert _chars(facade, result) <= budget, (budget, upstream_next)
         assert returned > 0
 
     def test_result_always_fits_budget(self, facade: types.SimpleNamespace) -> None:
         """どの予算でも、返した結果全体は予算に収まる（見積もりは実際の cursor と notes 以上）。"""
         longest_note = max(facade.shaping.REDUCED_NOTE, self._EMPTY, key=len)
-        smallest = len(facade.shaping.compact_json(_page_result(self._ITEMS[:1], "cursor:p1:9", [longest_note])))
+        smallest = _chars(facade, _page_result(self._ITEMS[:1], "cursor:p1:9", [longest_note]))
         for budget in range(smallest, smallest + 400, 7):
             for upstream_next in ("p2", None):
                 result = self._fit(facade, self._ITEMS, max_chars=budget, upstream_next=upstream_next)
-                assert len(facade.shaping.compact_json(result)) <= budget, (budget, upstream_next)
+                assert _chars(facade, result) <= budget, (budget, upstream_next)

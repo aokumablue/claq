@@ -1,19 +1,22 @@
 """claq フック実装の共通ユーティリティ。
 
-出力書き込み、保護対象の判定の共有関数を提供する。シェルコマンドの解析は ``shell_tokens`` が持つ。
-stdin の読み取りは ``stdin_io`` が持つ。
+フック出力の書き込み、保護対象名の正規化と判定、1 回の判定の中だけのメモ化、
+リポジトリルートの解決を兄弟フックで共有する。シェルコマンドの解析と実行トークン名の
+正規化は ``shell_tokens``、stdin の読み取りは ``stdin_io`` が持つ。
 """
 
 from __future__ import annotations
 
 import contextlib
 import functools
+import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from claq.hooks.output_adapter import adapt_context_output, emit_block
+from claq.hooks.output_adapter import adapt_context_output, adapt_deny_output
+from claq.hooks.shell_tokens import basename_any_separator, normalize_executable_name
 from claq.lib.core_utils import get_home_dir
 
 # `scan_memo` の with の中でだけ使う、引数ごとの結果の置き場。with の外では None（毎回計算する）。
@@ -74,6 +77,9 @@ def resolve_repo_root() -> Path | None:
     必要なときだけ呼び、`lru_cache` で同一プロセス内の `git` 起動を最大 1 回にする。
     テストでキャッシュを跨がせない場合は `resolve_repo_root.cache_clear()` を呼ぶこと。
 
+    出力はロケールの復号に頼らず bytes で受け、`os.fsdecode` でパスへ戻す。ASCII ロケールの非 ASCII
+    リポジトリでは復号が例外になり、hook が exit 1（PreToolUse では許可）で落ちる。
+
     Returns:
         リポジトリルートの絶対パス。タイムアウト・失敗時は None（呼び出し側が
         非ブロッキングにフォールバックする）。
@@ -85,13 +91,12 @@ def resolve_repo_root() -> Path | None:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True,
-            text=True,
             timeout=5,
             check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
-    top = result.stdout.strip()
+    top = os.fsdecode(result.stdout).strip()
     return Path(top) if result.returncode == 0 and top else None
 
 
@@ -136,47 +141,6 @@ def basename(path: str) -> str:
     return Path(path).name
 
 
-def _basename_any_separator(path: str) -> str:
-    """`/` と `\\` の**両方**を区切りとみなして basename を取り出します。
-
-    `basename` は POSIX ホストでは `\\` を区切りとみなさない。クォートで守られた
-    Windows 絶対パス（``"C:\\bin\\rm.exe" ruff.toml``）は方言展開でも `\\` を保った
-    まま 1 トークンで残るため、ここで両方の区切りを扱う。
-
-    Args:
-        path: パスまたは実行トークンの文字列です。
-
-    Returns:
-        両方の区切りで切り出した末尾要素を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    return path.replace("\\", "/").rsplit("/", 1)[-1]
-
-
-def normalize_executable_name(token: str) -> str:
-    """実行トークンを比較用の名前（basename 化・大小無視・`.exe` 除去）へ正規化します。
-
-    `/usr/bin/git`・`git.exe`・`C:\\Program Files\\Git\\bin\\git.exe`・`GIT` を
-    いずれも `git` へ畳む。大小を無視するのは、APFS / NTFS が既定で大小を区別せず、
-    PowerShell が cmdlet 名を大小無視で解決するため（Linux での誤検出は
-    docs/adr/shell-analysis-boundary.md の範囲内）。保護 hook の実行名照合は
-    この 1 関数だけを通し、兄弟フック間で正規化がずれないようにする。
-
-    Args:
-        token: `shlex` 等でトークン化された 1 トークンです。
-
-    Returns:
-        basename を大小無視へ畳み、末尾の `.exe` を除いた名前を返します。
-
-    Raises:
-        例外は発生しません。
-    """
-    name = _basename_any_separator(token).casefold()
-    return name[: -len(".exe")] if name.endswith(".exe") else name
-
-
 def normalize_protected_name(path: str) -> str:
     """保護対象ファイル名の照合用に basename を大小無視・Win32 正準化へ畳みます。
 
@@ -198,8 +162,23 @@ def normalize_protected_name(path: str) -> str:
     Raises:
         例外は発生しません。
     """
-    name = _basename_any_separator(path).split(":", 1)[0]
+    name = basename_any_separator(path).split(":", 1)[0]
     return name.rstrip(". \t").casefold()
+
+
+def fold_path_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
+    """パス要素列の各要素を `normalize_protected_name` で畳み、大小を無視して比べられる形にする。
+
+    Args:
+        parts: 畳むパス要素列。
+
+    Returns:
+        畳んだ要素列。
+
+    Raises:
+        例外は発生しません。
+    """
+    return tuple(normalize_protected_name(part) for part in parts)
 
 
 def is_git_executable_token(token: str) -> bool:
@@ -227,6 +206,11 @@ def is_git_executable_token(token: str) -> bool:
 # `bash_config_protection` と `pre_bash_commit_quality` が共有する。判定軸が兄弟ごとに
 # 割れると、片方だけずれた語彙を持って静かなバイパスになる。
 ALWAYS_MUTATING_EDIT_EXECUTABLES = frozenset({"ed", "red", "ex", "sponge"})
+
+# カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
+# 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
+# `bash_config_protection` と `pre_bash_commit_quality` が共有する。
+DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 
 # sed の GNU 長形式 in-place フラグ。GNU getopt は曖昧でない長形式の短縮を受け付け、
 # ``sed --i`` も in-place になるため、この名前の非空プレフィックスを一致条件にする。
@@ -329,11 +313,10 @@ def emit_block_output(reason: str) -> int:
     Raises:
         例外は発生しません。
     """
-    exit_code, deny_out, reason_err = emit_block(reason)
     with contextlib.suppress(Exception):
-        write_stdout(deny_out)
-        write_stderr(reason_err + "\n")
-    return exit_code
+        write_stdout(adapt_deny_output(reason))
+        write_stderr(reason + "\n")
+    return 2
 
 
 def print_session_start_output(additional_context: str) -> None:
@@ -343,6 +326,7 @@ def print_session_start_output(additional_context: str) -> None:
         additional_context: コンテキストに注入する追加文字列。
 
     Raises:
-        例外は発生しません。
+        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
+        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
     """
     print(adapt_context_output("SessionStart", additional_context))

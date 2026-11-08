@@ -1,7 +1,7 @@
 """保護フックの語彙集合の固定と、個別の迂回回帰。
 
-保護フックの語彙集合（`config_protection` / `bash_config_protection` / `block_no_verify` /
-`commit_risk` / `shell_tokens` / `commit_quality_scanner` ほか）を層2（完全一致）と層1（全要素を
+保護フックの語彙集合（`config_protection` / `conditional_protection` / `bash_config_protection` /
+`block_no_verify` / `commit_risk` / `shell_tokens` / `commit_quality_scanner` ほか）を層2（完全一致）と層1（全要素を
 フックへ流して判定を実測）で固定し、`claq.hooks` 配下の語彙集合の台帳が漏れなく宣言されていることを
 検査する。期待値表（`_EXPECTED_VOCABULARIES` と `_EXTERNALLY_PINNED_VOCABULARIES`）は
 `_support.py` に置き、保護ファイル名の全数検査（`test_protection_bypass_regressions.py`）と共有する。
@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 import claq.hooks
-from claq.hooks import bash_config_protection, commit_quality_scanner, commit_risk, shell_tokens
+from claq.hooks import bash_config_protection, commit_quality_scanner, commit_risk, heredoc, shell_tokens
 
 from ._support import (
     _EXPECTED_VOCABULARIES,
@@ -188,13 +188,13 @@ _VOCABULARY_DENY_ALLOW_CASES = (
     ("hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES", "bash_config_protection", "{item} ruff.toml", "{item} app.py"),
     ("shell_tokens.SHELL_WRAPPER_EXECUTABLES", "block_no_verify", "{item} -c '" + _NO_VERIFY + "'", "{item} -c 'git commit -m x'"),
     (
-        "shell_tokens._BODY_EXECUTING_BUILTINS",
+        "heredoc._BODY_EXECUTING_BUILTINS",
         "block_no_verify",
         "{item} /dev/stdin <<'EOF'\n" + _NO_VERIFY + "\nEOF",
         "cat /dev/stdin <<'EOF'\n" + _NO_VERIFY + "\nEOF",
     ),
     # 区切りが効かないとセグメントが融合し、後続コマンドが実行位置に来ない。
-    ("shell_tokens._SHELL_SEPARATORS", "bash_config_protection", "cat notes.txt {item} rm ruff.toml", "cat notes.txt {item} rm app.py"),
+    ("shell_tokens.SHELL_SEPARATORS", "bash_config_protection", "cat notes.txt {item} rm ruff.toml", "cat notes.txt {item} rm app.py"),
     # --- block_no_verify の config 注入経路 ---
     ("block_no_verify._SENSITIVE_CONFIG_KEY_PREFIXES", "block_no_verify", "git -c {item}=x commit -m y", "git -c user.name=x commit -m y"),
     ("block_no_verify._GIT_CONFIG_INJECTION_ENV_NAMES", "block_no_verify", "{item}=x git commit -m y", "SOME_VAR=x git commit -m y"),
@@ -236,7 +236,7 @@ _VOCABULARY_ALLOW_ONLY_CASES = (
     ("block_no_verify._GIT_CONFIG_READ_ONLY_FLAGS", "block_no_verify", "git config {item} core.hooksPath", "git config --add core.hooksPath x"),
     ("block_no_verify._GIT_CONFIG_NEW_READ_OPS", "block_no_verify", "git config {item} core.hooksPath", "git config set core.hooksPath x"),
     # 行コメントの開始条件。直前文字が語彙に無ければ `#` は語の一部なので deny。
-    ("shell_tokens._COMMENT_PRECEDING_CHARS", "block_no_verify", "echo ok{item}# " + _NO_VERIFY, "echo okX# " + _NO_VERIFY),
+    ("shell_tokens.COMMENT_PRECEDING_CHARS", "block_no_verify", "echo ok{item}# " + _NO_VERIFY, "echo okX# " + _NO_VERIFY),
 )
 
 # 層1（Write 系 payload）: (語彙の完全修飾名, deny payload の組み立て, allow payload)。
@@ -247,12 +247,12 @@ _VOCABULARY_WRITE_CASES = (
         {"tool_name": "Read", "tool_input": {"file_path": "ruff.toml"}},
     ),
     (
-        "config_protection._PACKAGE_JSON_LINT_KEYS",
+        "conditional_protection._PACKAGE_JSON_LINT_KEYS",
         lambda item: _write_content("package.json", '{"' + item + '": {}}'),
         _write_content("package.json", '{"name": "x"}'),
     ),
     (
-        "config_protection._TOX_COMMAND_KEYS",
+        "conditional_protection._TOX_COMMAND_KEYS",
         lambda item: _write_content("tox.ini", f"{item} = pytest\n"),
         _write_content("tox.ini", "[tox]\nenvlist = py312\n"),
     ),
@@ -274,12 +274,12 @@ _VOCABULARY_WRITE_CASES = (
         _write_content("docs/config", "[core]\n\thooksPath = /dev/null\n"),
     ),
     (
-        "config_protection._SETTINGS_GUARDED_SUBTREES",
+        "conditional_protection._SETTINGS_GUARDED_SUBTREES",
         lambda item: _write_content(".claude/settings.json", '{"' + item + '": {}}'),
         _write_content(".claude/settings.json", '{"model": "x"}'),
     ),
     (
-        "config_protection._SETTINGS_GUARDED_ENV_NAMES",
+        "conditional_protection._SETTINGS_GUARDED_ENV_NAMES",
         lambda item: _write_content(".claude/settings.json", '{"env": {"' + item + '": "/tmp/x"}}'),
         _write_content(".claude/settings.json", '{"env": {"DEBUG": "1"}}'),
     ),
@@ -292,7 +292,7 @@ _VOCABULARY_WRITE_CASES = (
 _VOCABULARY_LAYER1_ELSEWHERE = {
     "bash_config_protection._BASH_TOOL_NAMES": "_HARNESS_CASES の copilot bash 危険 / 通常",
     "bash_config_protection._ALL_PROTECTED_BASENAMES": "test_every_protected_file_is_denied_on_bash_write",
-    "bash_config_protection._DIRECTORY_CHANGE_COMMANDS": "test_every_directory_change_command_forces_unconditional_deny",
+    "hook_common.DIRECTORY_CHANGE_COMMANDS": "test_every_directory_change_command_forces_unconditional_deny",
     "bash_config_protection._LEADING_SHELL_KEYWORDS": "test_directory_change_behind_shell_keywords_is_not_trusted (test_bash_config_protection_boundaries.py)",
     "bash_config_protection._HOME_LOG_PATH_SEGMENTS": "test_tilde_form_is_blocked / test_absolute_form_is_blocked / test_relative_after_cd_is_blocked (TestHomeLogDirectoryProtection)",
     "host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS": "test_tilde_form_is_blocked の settings-redirect / settings-local-append (TestHostGuardFilesOutsideRepo)",
@@ -301,8 +301,8 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "config_protection.PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": "_BLOCKED_CASES の保護 path の大文字（Bash）",
-    "config_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
-    "config_protection._LINT_KEYS": "test_every_lint_key_is_detected",
+    "conditional_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
+    "conditional_protection._LINT_KEYS": "test_every_lint_key_is_detected",
     "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": "test_every_running_plugin_guarded_dir_is_denied_on_write_and_bash (test_running_plugin_protection)",
     "host_guard_targets._RUNTIME_ENTRYPOINT_NAMES": "test_every_runtime_entrypoint_name_is_denied_after_cd (test_running_plugin_protection)",
 }
@@ -415,9 +415,9 @@ def test_every_write_path_vocabulary_element_changes_the_verdict(
     assert _run("config_protection", allow_payload, monkeypatch) == 0, qualified
 
 
-@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["bash_config_protection._REDIRECT_OPERATORS"]))
+@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["shell_tokens.WRITE_REDIRECT_OPERATORS"]))
 def test_every_redirect_operator_yields_a_write_target(operator: str) -> None:
-    """`_REDIRECT_OPERATORS` の全要素がリダイレクト先を返すこと（層1・単体）。
+    """`WRITE_REDIRECT_OPERATORS` の全要素が `bash_config_protection` でリダイレクト先を返すこと（層1・単体）。
 
     ここだけ end-to-end ではなく抽出関数を直接呼ぶ。``1>`` / ``2>`` /
     ``1>>`` / ``2>>`` は `tokenize` が数字を別トークンへ割るため ``>`` /
@@ -428,18 +428,18 @@ def test_every_redirect_operator_yields_a_write_target(operator: str) -> None:
     assert bash_config_protection._redirect_targets(["printf", "x", operator, "ruff.toml"]) == ["ruff.toml"]
 
 
-@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["commit_risk._MUTATING_REDIRECT_OPERATORS"]))
+@pytest.mark.parametrize("operator", sorted(_EXPECTED_VOCABULARIES["shell_tokens.WRITE_REDIRECT_OPERATORS"]))
 def test_every_mutating_redirect_operator_marks_the_segment(operator: str) -> None:
-    """`_MUTATING_REDIRECT_OPERATORS` の全要素が mutation 判定を立てること（層1・単体）。
+    """`WRITE_REDIRECT_OPERATORS` の全要素が `commit_risk` で mutation 判定を立てること（層1・単体）。
 
-    `_REDIRECT_OPERATORS` と同じ理由で単体呼び出しにする。演算子を含まない
+    前のテストと同じ理由で単体呼び出しにする。演算子を含まない
     同形のセグメントが False であることを対照に置き、判定が演算子由来だと示す。
     """
     assert commit_risk._segment_mutates_worktree_or_index(["printf", "x", operator, "app.py"])
     assert not commit_risk._segment_mutates_worktree_or_index(["printf", "x", "app.py"])
 
 
-@pytest.mark.parametrize("suffix", _EXPECTED_VOCABULARIES["shell_tokens._HEREDOC_CONTINUATION_SUFFIXES"])
+@pytest.mark.parametrize("suffix", _EXPECTED_VOCABULARIES["heredoc._HEREDOC_CONTINUATION_SUFFIXES"])
 def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     """`_HEREDOC_CONTINUATION_SUFFIXES` の全要素が本文の剥がしを止めること（層1・単体）。
 
@@ -454,8 +454,45 @@ def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     body = _NO_VERIFY
     kept = f"cat <<'EOF' {suffix}\n{body}\nEOF"
     stripped = f"cat <<'EOF'\n{body}\nEOF"
-    assert shell_tokens.strip_data_heredoc_bodies(kept) == kept
-    assert shell_tokens.strip_data_heredoc_bodies(stripped) != stripped
+    assert heredoc.strip_data_heredoc_bodies(kept) == kept
+    assert heredoc.strip_data_heredoc_bodies(stripped) != stripped
+
+
+@pytest.mark.parametrize("opener", sorted(_EXPECTED_VOCABULARIES["heredoc._GROUP_OPENERS"]))
+def test_every_group_opener_holds_separators_inside_the_statement(opener: str) -> None:
+    """`_GROUP_OPENERS` の全要素が、閉じるまでの区切りを同じトップレベルの文に入れること（層1・単体）。
+
+    開く語と認めないと、``)`` で深さが負になり文の境界を確定できない側（全体で 1 文）へ落ちる。
+    """
+    assert heredoc._top_level_statements([opener, ";", "a", ")", ";", "b"]) == [[opener, ";", "a", ")"], ["b"]]
+    assert len(heredoc._top_level_statements(["x", ";", "a", ")", ";", "b"])) == 1
+
+
+@pytest.mark.parametrize("closer", sorted(_EXPECTED_VOCABULARIES["heredoc._GROUP_CLOSERS"]))
+def test_every_group_closer_ends_the_group(closer: str) -> None:
+    """`_GROUP_CLOSERS` の全要素が、コマンド位置で深さを戻すこと（層1・単体）。"""
+    assert heredoc._top_level_statements(["(", ";", closer, ";", "b"]) == [["(", ";", closer], ["b"]]
+    assert len(heredoc._top_level_statements(["(", ";", "x", ";", "b"])) == 1
+
+
+@pytest.mark.parametrize("keyword", sorted(_EXPECTED_VOCABULARIES["heredoc._COMMAND_POSITION_KEYWORDS"]))
+def test_every_command_position_keyword_puts_the_next_token_at_command_position(keyword: str) -> None:
+    """`_COMMAND_POSITION_KEYWORDS` の全要素の直後の閉じる語が深さを戻すこと（層1・単体）。
+
+    対照の ``x`` の直後の ``done`` は引数なので深さを戻さず、文が閉じない。
+    """
+    assert heredoc._top_level_statements(["while", ";", "x", keyword, "done", ";", "b"]) == [
+        ["while", ";", "x", keyword, "done"],
+        ["b"],
+    ]
+    assert len(heredoc._top_level_statements(["while", ";", "x", "y", "done", ";", "b"])) == 1
+
+
+@pytest.mark.parametrize("separator", sorted(_EXPECTED_VOCABULARIES["heredoc._STATEMENT_SEPARATORS"]))
+def test_every_statement_separator_splits_top_level_statements(separator: str) -> None:
+    """`_STATEMENT_SEPARATORS` の全要素が深さ 0 で文を分けること（層1・単体）。``|`` は分けない。"""
+    assert heredoc._top_level_statements(["a", separator, "b"]) == [["a"], ["b"]]
+    assert heredoc._top_level_statements(["a", "|", "b"]) == [["a", "|", "b"]]
 
 
 @pytest.mark.parametrize("suffix", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._LINTABLE_SUFFIXES"]))
@@ -491,9 +528,12 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     `_VOCABULARY_LAYER1_ABSENT`（理由付きで持たない）へ明示する。
     """
     unit_covered = {
-        "bash_config_protection._REDIRECT_OPERATORS",
-        "commit_risk._MUTATING_REDIRECT_OPERATORS",
-        "shell_tokens._HEREDOC_CONTINUATION_SUFFIXES",
+        "shell_tokens.WRITE_REDIRECT_OPERATORS",
+        "heredoc._HEREDOC_CONTINUATION_SUFFIXES",
+        "heredoc._GROUP_OPENERS",
+        "heredoc._GROUP_CLOSERS",
+        "heredoc._COMMAND_POSITION_KEYWORDS",
+        "heredoc._STATEMENT_SEPARATORS",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",

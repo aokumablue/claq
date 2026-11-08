@@ -12,6 +12,7 @@ import shlex
 
 import pytest
 
+from claq.hooks import bash_config_protection, block_no_verify, config_protection
 from claq.lib import harness
 
 _NO_VERIFY = "git commit --no-verify"
@@ -351,8 +352,6 @@ def test_container_scanning_is_the_single_source() -> None:
     フック側が走査を手書きすると片側だけ緩い状態が再発する（実測: 走査を
     手書きしていない 2 フックが複数コンテナキー payload を素通りさせた）。
     """
-    from claq.hooks import bash_config_protection, block_no_verify, config_protection
-
     assert "toolInput" in harness.INPUT_CONTAINER_KEYS
     assert config_protection.iter_tool_input_containers is harness.iter_tool_input_containers
     for module in (block_no_verify, bash_config_protection):
@@ -370,16 +369,16 @@ class TestDeepNestingIsParseFailureNotCrash:
 
     _DEEP_JSON_TEXT = "[" * 200_000 + "]" * 200_000
 
-    def test_recursion_error_is_in_parse_failure_tuple(self):
+    def test_recursion_error_is_in_parse_failure_tuple(self) -> None:
         """RecursionError が JSON パース失敗として扱われる集合に入っている。"""
         assert RecursionError in harness.JSON_PARSE_FAILURES
 
-    def test_deep_nesting_actually_raises_recursion_error(self):
+    def test_deep_nesting_actually_raises_recursion_error(self) -> None:
         """前提の実測: この入力は json.loads が RecursionError を投げる（崩れると下のテストが何も守らない）。"""
         with pytest.raises(RecursionError):
             json.loads(self._DEEP_JSON_TEXT)
 
-    def test_both_json_loads_call_sites_return_raw_string(self):
+    def test_both_json_loads_call_sites_return_raw_string(self) -> None:
         """`extract_tool_input` と `_extract_patch_text` の両方が生文字列を返す（片側だけ塞ぐと穴が残る）。"""
         text = self._DEEP_JSON_TEXT
         assert harness.extract_tool_input({"toolArgs": text}) == text

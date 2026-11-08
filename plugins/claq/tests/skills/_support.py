@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import shutil
 import sys
 import types
@@ -36,6 +37,8 @@ def _load(name: str, path: Path) -> types.ModuleType:
 check_site = _load("html_gen_check_site", _CHECK_SITE)
 TOKENS = check_site.load_tokens(_TOKENS)
 BASES = check_site.base_ids(TOKENS)
+#: 配色の 1 ブロック（ベース × テーマ）の全組み合わせ。
+BLOCKS = tuple(itertools.product(BASES, check_site.THEMES))
 HTML = (_TEMPLATE / "index.html").read_text(encoding="utf-8")
 CSS = (_TEMPLATE / "styles.css").read_text(encoding="utf-8")
 JS = (_TEMPLATE / "app.js").read_text(encoding="utf-8")
@@ -55,6 +58,11 @@ def _copy_site(tmp_path: Path, name: str = "site") -> Path:
     return dest
 
 
+def _violations(dest: Path) -> str:
+    """サイトの違反を 1 本の文字列で返す。"""
+    return "\n".join(check_site.validate_site(dest))
+
+
 def _edit(dest: Path, filename: str, *replacements: tuple[str, str]) -> str:
     """サイト内のファイルを置換して書き戻し、違反を 1 本の文字列で返す（置換元が無ければ空振りなので落とす）。"""
     path = dest / filename
@@ -63,11 +71,11 @@ def _edit(dest: Path, filename: str, *replacements: tuple[str, str]) -> str:
         assert old in text, f"{filename} に置換元が無い: {old!r}"
         text = text.replace(old, new)
     path.write_text(text, encoding="utf-8")
-    return "\n".join(check_site.validate_site(dest))
+    return _violations(dest)
 
 
 def _append(dest: Path, filename: str, snippet: str) -> str:
     """サイト内のファイルへ追記し、違反を 1 本の文字列で返す。"""
     path = dest / filename
     path.write_text(path.read_text(encoding="utf-8") + snippet, encoding="utf-8")
-    return "\n".join(check_site.validate_site(dest))
+    return _violations(dest)

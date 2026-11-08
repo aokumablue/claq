@@ -1,6 +1,6 @@
 """`pre_bash_commit_quality` 専用テスト（shell 区切り誤認 / fail-open 境界）。
 
-`_is_git_commit_command` 系テストのうち、shell 区切り文字の密着トークン化と
+`parse_git_commit_command` 系テストのうち、shell 区切り文字の密着トークン化と
 stdin truncation / main() の fail-open・fail-closed 境界分割に関する分岐は
 本ファイルへ集約する。
 """
@@ -15,6 +15,8 @@ import pytest
 
 from claq.hooks import block_no_verify, commit_risk, stdin_io
 from claq.hooks import pre_bash_commit_quality as pbcq
+
+from ._support import _bash
 
 
 class TestShellSeparatorTokenization:
@@ -41,7 +43,7 @@ class TestShellSeparatorTokenization:
     )
     def test_is_git_commit_command_shell_separator_boundary(self, command: str, expected_is_commit: bool) -> None:
         """区切り文字で分けたセグメントの実行位置にある `git commit` だけを commit と判定すること。"""
-        is_commit, _args = commit_risk._is_git_commit_command(command)
+        is_commit, _args = commit_risk.parse_git_commit_command(command)
         assert is_commit is expected_is_commit
 
     def test_block_no_verify_and_commit_quality_agree_on_quoted_text(self) -> None:
@@ -53,7 +55,7 @@ class TestShellSeparatorTokenization:
         """
         quoted = "copilot -p 'Explain why a git commit command may fail'"
 
-        assert commit_risk._is_git_commit_command(quoted)[0] is False
+        assert commit_risk.parse_git_commit_command(quoted)[0] is False
         assert block_no_verify.has_bypass_flag(quoted) is False
 
 
@@ -98,7 +100,7 @@ class TestMainStdinBoundary:
         expected_reason: str | None,
     ) -> None:
         """deny は exit 2 と理由入りの deny JSON・stderr を出し、commit でないコマンドは品質スキャンに入らず無出力の exit 0 で通すこと。"""
-        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin_with_truncation", read)
+        monkeypatch.setattr(pbcq, "read_raw_stdin_with_truncation", read)
 
         rc = pbcq.main()
         captured = capsys.readouterr()
@@ -118,8 +120,8 @@ class TestCompoundCommitGuard:
         ("command", "expected_message"),
         [
             # 複数 commit: 2 つ目がコミットする内容は実行前状態に現れない。
-            ("git commit --allow-empty -m first && git commit -am second", commit_risk._MULTIPLE_COMMITS_MESSAGE),
-            ("git commit -m a; git commit -m b", commit_risk._MULTIPLE_COMMITS_MESSAGE),
+            ("git commit --allow-empty -m first && git commit -am second", commit_risk.MULTIPLE_COMMITS_MESSAGE),
+            ("git commit -m a; git commit -m b", commit_risk.MULTIPLE_COMMITS_MESSAGE),
             # commit より前の index / worktree 変更。
             ("git add . && git commit -m x", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE),
             (
@@ -164,7 +166,7 @@ class TestCompoundCommitGuard:
     )
     def test_uninspectable_compounds_are_denied(self, command: str, expected_message: str) -> None:
         """commit より前の変更・複数 commit を含む複合コマンドを、その理由で止めること。"""
-        assert commit_risk._compound_commit_risk(command) == expected_message
+        assert commit_risk.compound_commit_risk(command) == expected_message
 
     @pytest.mark.parametrize(
         "command",
@@ -197,7 +199,7 @@ class TestCompoundCommitGuard:
     )
     def test_inspectable_commands_pass(self, command: str) -> None:
         """commit 前が read-only・commit が単独・commit を含まないコマンドは本ガードで止めないこと。"""
-        assert commit_risk._compound_commit_risk(command) is None
+        assert commit_risk.compound_commit_risk(command) is None
 
     @pytest.mark.parametrize(
         "segment",
@@ -237,17 +239,17 @@ class TestCompoundCommitGuard:
                     "tool_input": {"command": "git commit -m ok"},
                     "tool_args": {"command": "git add . && git commit -m x"},
                 },
-                commit_risk._MULTIPLE_COMMITS_MESSAGE,
+                commit_risk.MULTIPLE_COMMITS_MESSAGE,
             ),
         ],
         ids=["single-container", "harmless-first-key", "passing-commit-first-key"],
     )
     def test_evaluate_denies_across_every_container_key(self, payload: dict, expected_reason: str) -> None:
-        """evaluate() は全コンテナキーの `git commit` を検査し、deny 理由と exitCode 2 を返すこと。"""
+        """evaluate() は全コンテナキーの `git commit` を検査し、deny 理由を返すこと。"""
         result = pbcq.evaluate(json.dumps(payload))
 
-        assert result["exitCode"] == 2
-        assert result["reason"] == expected_reason
+        assert result is not None
+        assert result == expected_reason
 
     def test_evaluate_skips_container_whose_commit_detection_raises(
         self, monkeypatch: pytest.MonkeyPatch
@@ -255,21 +257,21 @@ class TestCompoundCommitGuard:
         """1 コンテナの判定失敗で残りのコンテナを捨てない。"""
         calls: list[str] = []
 
-        def _flaky(command: str) -> tuple[bool, list[str]]:
+        def _flaky(command: str, *, shell_wrappers: bool = True) -> tuple[bool, list[str]]:
             """呼び出しを記録し、``boom`` だけ判定に失敗する。"""
             calls.append(command)
             if command == "boom":
                 raise RuntimeError("tokenize exploded")
             return (False, [])
 
-        monkeypatch.setattr(pbcq, "_is_git_commit_command", _flaky)
+        monkeypatch.setattr(pbcq, "parse_git_commit_command", _flaky)
         raw = json.dumps(
             {"tool_name": "Bash", "tool_input": {"command": "boom"}, "tool_args": {"command": "echo ok"}}
         )
 
         result = pbcq.evaluate(raw)
 
-        assert result["exitCode"] == 0
+        assert result is None
         assert calls == ["boom", "echo ok"]
 
 
@@ -277,18 +279,16 @@ class TestArgvGroupCommitCounting:
     """argv 配列は 1 本のコマンドとして数え、要素と結合の二重計上で誤拒否しない。"""
 
     @staticmethod
-    def _run(command: object, monkeypatch: pytest.MonkeyPatch) -> tuple[dict, list[str]]:
+    def _run(command: object, monkeypatch: pytest.MonkeyPatch) -> tuple[str | None, list[str]]:
         """品質スキャンを stub に差し替えて ``evaluate`` を実行し、スキャンに渡った command を返す。"""
         scanned: list[str] = []
 
-        def _stub(raw_input: str, command: str, commit_args: list[str]) -> dict:
+        def _stub(command: str, commit_args: list[str]) -> None:
             """スキャンに渡った command を記録し、問題なしで通す。"""
             scanned.append(command)
-            return {"output": raw_input, "exitCode": 0}
 
         monkeypatch.setattr(pbcq, "_evaluate_confirmed_commit", _stub)
-        raw = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
-        return pbcq.evaluate(raw), scanned
+        return pbcq.evaluate(json.dumps(_bash(command))), scanned
 
     @pytest.mark.parametrize(
         ("command", "expected_exit", "expected_reason", "expected_scanned"),
@@ -306,11 +306,11 @@ class TestArgvGroupCommitCounting:
             (
                 [["git", "commit", "-m", "a"], ["git", "commit", "-m", "b"]],
                 2,
-                commit_risk._MULTIPLE_COMMITS_MESSAGE,
+                commit_risk.MULTIPLE_COMMITS_MESSAGE,
                 [],
             ),
             # コマンド文字列を並べた配列の複数 commit は要素をそのまま数えて deny する。
-            (["git commit -m a", "git commit -m b"], 2, commit_risk._MULTIPLE_COMMITS_MESSAGE, []),
+            (["git commit -m a", "git commit -m b"], 2, commit_risk.MULTIPLE_COMMITS_MESSAGE, []),
             # 結合側が検出しない配列でも、要素 1 件の commit は検査する。
             (["git commit -m a", "echo done"], 0, None, ["git commit -m a"]),
             # commit を含まない argv は検査せずに通す。
@@ -336,8 +336,8 @@ class TestArgvGroupCommitCounting:
         """argv 配列の commit を 1 本ずつ数え、1 本なら品質スキャンへ渡し、複数なら deny すること。"""
         result, scanned = self._run(command, monkeypatch)
 
-        assert result["exitCode"] == expected_exit
-        assert result.get("reason") == expected_reason
+        assert (0 if result is None else 2) == expected_exit
+        assert result == expected_reason
         assert scanned == expected_scanned
 
     def test_oversized_element_in_argv_group_is_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -345,8 +345,8 @@ class TestArgvGroupCommitCounting:
         monkeypatch.setattr(pbcq, "command_exceeds_scan_budget", lambda command: command == "big")
         result, scanned = self._run(["git", "big"], monkeypatch)
 
-        assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._SCAN_BUDGET_MESSAGE
+        assert result is not None
+        assert result == pbcq._SCAN_BUDGET_MESSAGE
         assert scanned == []
 
     def test_failing_candidate_in_argv_group_does_not_drop_the_others(
@@ -355,7 +355,7 @@ class TestArgvGroupCommitCounting:
         """グループ内 1 候補の判定失敗で、残りの候補の commit 検出を捨てない。"""
         real = pbcq._detect_git_commit
 
-        def _flaky(command: str):
+        def _flaky(command: str, *, shell_wrappers: bool = True):
             """``boom`` だけ判定に失敗し、それ以外は本物の検出に任せる。"""
             if command == "boom":
                 raise RuntimeError("tokenize exploded")
@@ -364,7 +364,7 @@ class TestArgvGroupCommitCounting:
         monkeypatch.setattr(pbcq, "_detect_git_commit", _flaky)
         result, scanned = self._run(["boom", "git commit -m a"], monkeypatch)
 
-        assert result["exitCode"] == 0
+        assert result is None
         assert scanned == ["git commit -m a"]
 
 
@@ -382,8 +382,8 @@ class TestWorktreeEnumerationFailClosed:
         monkeypatch.setattr(pbcq, "get_unstaged_modified_files", lambda: None)
         raw = json.dumps({"tool_input": {"command": "git commit -am x"}})
         result = pbcq.evaluate(raw)
-        assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._WORKTREE_FILES_UNAVAILABLE_MESSAGE
+        assert result is not None
+        assert result == pbcq._WORKTREE_FILES_UNAVAILABLE_MESSAGE
 
 
 class TestStagedFileNameDecoding:
@@ -503,15 +503,22 @@ class TestCommitAgainstAnotherIndex:
             "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=../other git commit -am x",
             "GIT_CONFIG_PARAMETERS=x git commit -am x",
             "git config core.worktree ../other && git commit -am x",
+            # `sh -c` の 1 段の内側も commit の検出と同じ範囲で読む。
+            "bash -c 'cd ../other && git commit -m x'",
+            "bash -c 'git -C ../other commit -m x'",
+            "bash -c 'GIT_INDEX_FILE=/tmp/i git commit -m x'",
+            "env -C ../other bash -c 'git commit -m x'",
+            "env --chdir=../other bash -c 'git commit -m x'",
+            "sudo -D ../other bash -c 'git commit -m x'",
         ],
     )
     def test_commit_against_another_index_is_denied(self, command: str) -> None:
         """別の index / 作業ツリーを commit しうる形は、cwd に staged が無くても deny する。"""
         result = pbcq.evaluate(json.dumps({"tool_input": {"command": command}}))
 
-        assert result["exitCode"] == 2
-        assert result["reason"] == pbcq._COMMIT_TARGET_UNVERIFIABLE_MESSAGE
-        assert "separate tool call" in result["reason"]
+        assert result is not None
+        assert result == pbcq._COMMIT_TARGET_UNVERIFIABLE_MESSAGE
+        assert "separate tool call" in result
 
     @pytest.mark.parametrize(
         "command",
@@ -523,13 +530,29 @@ class TestCommitAgainstAnotherIndex:
             "git commit -m 'cd into GIT_DIR=x'",
             # commit より後ろの `cd` はその commit の対象を変えない。
             "git commit -m x && cd ..",
+            "bash -c 'git commit -m x && cd ..'",
+            # `sh -c` でないセグメントの `-C` は git の対象と無関係。
+            "grep -C 3 x y; bash -c 'git commit -m x'",
+            # シェル起動より後ろの `-C` はシェルの引数で、作業ディレクトリを変えない。
+            "bash -C -c 'git commit -m x'",
         ],
     )
     def test_commit_against_cwd_index_is_scanned(self, command: str) -> None:
         """cwd の index を commit する形は従来どおり走査へ進む（ここでは staged 無しで exit 0）。"""
         result = pbcq.evaluate(json.dumps({"tool_input": {"command": command}}))
 
-        assert result["exitCode"] == 0
+        assert result is None
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["env", "GIT_INDEX_FILE=/tmp/i", "bash", "-c", "git commit -m x"],
+            ["env", "-C", "../other", "bash", "-c", "git commit -m x"],
+        ],
+    )
+    def test_argv_wrapper_pointing_at_another_index_is_denied(self, argv: list[str]) -> None:
+        """argv の要素で検出した commit も、外側の指定を結合候補で見て deny する。"""
+        assert pbcq.evaluate(json.dumps({"tool_input": {"command": argv}})) == pbcq._COMMIT_TARGET_UNVERIFIABLE_MESSAGE
 
     @pytest.mark.parametrize(
         ("command", "expected"),

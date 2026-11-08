@@ -92,6 +92,29 @@ def model_message(error: UpstreamError) -> str:
     return "一時的に取得できません。時間を置いてから呼び直してください。"
 
 
+def _retry_delay(
+    error: UpstreamError, attempt: int, *, base_delay: float, max_delay: float, jitter: Callable[[], float]
+) -> float | None:
+    """次の試行までの待ち時間を決める。
+
+    Args:
+        error: 直前の失敗。
+        attempt: 直前の試行の番号（0 始まり）。
+        base_delay: 最初の待ち時間（秒）。
+        max_delay: 待ち時間の上限（秒）。
+        jitter: 0 以上 1 未満の乱数を返す関数。
+
+    Returns:
+        待つ秒数。`retry_after` が NaN で再試行を諦めるときは None。
+    """
+    if error.retry_after is None:
+        return min(max_delay, base_delay * 2**attempt) * (0.5 + jitter() / 2)
+    # NaN は締切との比較がすべて偽になり、締切を越えて待ってしまう
+    if math.isnan(error.retry_after):
+        return None
+    return max(0.0, error.retry_after)
+
+
 async def call_with_retry[T](
     operation: Callable[[], Awaitable[T]],
     *,
@@ -133,15 +156,8 @@ async def call_with_retry[T](
         except UpstreamError as error:
             if not error.retryable or attempt == attempts - 1:
                 raise
-            delay = error.retry_after
-            if delay is None:
-                delay = min(max_delay, base_delay * 2**attempt) * (0.5 + jitter() / 2)
-            elif math.isnan(delay):
-                # NaN は締切との比較がすべて偽になり、締切を越えて待ってしまう
-                raise
-            else:
-                delay = max(0.0, delay)
-            if clock() + delay >= deadline:
+            delay = _retry_delay(error, attempt, base_delay=base_delay, max_delay=max_delay, jitter=jitter)
+            if delay is None or clock() + delay >= deadline:
                 raise
             logger.warning(
                 "upstream retry: attempt=%d/%d delay=%.2fs status=%s %s",

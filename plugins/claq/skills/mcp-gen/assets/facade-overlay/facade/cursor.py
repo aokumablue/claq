@@ -25,7 +25,7 @@ from .errors import CursorError, FacadeError
 _VERSION = 1
 # 照合値の入力の先頭に置く領域名（他の用途のハッシュと取り違えないため）
 _CHECK_DOMAIN = "facade.cursor"
-_PAGE_TOKEN_TOO_LONG = (
+PAGE_TOKEN_TOO_LONG = (
     "上流のページトークンが長すぎるため、続きの cursor を発行できません。"
     "サーバの運用者に MAX_PAGE_TOKEN_CHARS と MAX_CURSOR_CHARS の見直しを依頼してください。"
 )
@@ -51,7 +51,7 @@ def query_fingerprint(arguments: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
-def _encode(raw: bytes) -> str:
+def encode(raw: bytes) -> str:
     """URL に安全な base64（パディングなし）にする。
 
     Args:
@@ -63,8 +63,8 @@ def _encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
-def _decode(text: str) -> bytes:
-    """`_encode` の逆変換。
+def decode(text: str) -> bytes:
+    """`encode` の逆変換。
 
     Args:
         text: 符号化された文字列。
@@ -78,7 +78,7 @@ def _decode(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
-def _is_int(value: Any) -> bool:
+def is_int(value: Any) -> bool:
     """bool を除く int か（JSON の true を 1 として通さない）。
 
     Args:
@@ -110,7 +110,7 @@ def accepts_position(token: str, position: Mapping[str, Any], *, max_page_token_
     return (
         len(token) <= max_cursor_chars
         and set(position) == {"page", "skip"}
-        and _is_int(skip)
+        and is_int(skip)
         and skip >= 0
         and (page is None or (isinstance(page, str) and len(page) <= max_page_token_chars))
     )
@@ -126,13 +126,13 @@ def _read_position(body: str) -> dict[str, Any] | None:
         位置。読めない・版が違う・位置が dict でないときは None。
     """
     try:
-        payload = json.loads(_decode(body))
+        payload = json.loads(decode(body))
     except ValueError:
         return None
     if not isinstance(payload, dict):
         return None
     version, position = payload.get("v"), payload.get("pos")
-    if not (_is_int(version) and version == _VERSION and isinstance(position, dict)):
+    if not (is_int(version) and version == _VERSION and isinstance(position, dict)):
         return None
     return position
 
@@ -169,7 +169,7 @@ class PageCursor:
             符号化済みの照合値。
         """
         message = json.dumps([_CHECK_DOMAIN, self._scope, fingerprint, body], separators=(",", ":"))
-        return _encode(hashlib.sha256(message.encode("ascii")).digest())
+        return encode(hashlib.sha256(message.encode("ascii")).digest())
 
     def _accepts(self, token: str, position: Mapping[str, Any]) -> bool:
         """cursor の長さと位置の形を、このページングの上限で確かめる。
@@ -203,10 +203,10 @@ class PageCursor:
                 開けない cursor は返さない。
         """
         payload = {"v": _VERSION, "pos": dict(position)}
-        body = _encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        body = encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
         token = f"{body}.{self._check(body, fingerprint)}"
         if not self._accepts(token, position):
-            raise FacadeError(_PAGE_TOKEN_TOO_LONG)
+            raise FacadeError(PAGE_TOKEN_TOO_LONG)
         return token
 
     def open(self, token: str, *, fingerprint: str) -> dict[str, Any]:

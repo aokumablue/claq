@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -19,10 +20,12 @@ from ._support import (
     CSS,
     HTML,
     JS,
+    TOKENS_CSS,
     _append,
     _copy_site,
     _edit,
     _load,
+    _violations,
     check_site,
 )
 
@@ -34,16 +37,10 @@ def test_template_passes_validator(tmp_path: Path) -> None:
     assert check_site.validate_site(_copy_site(tmp_path)) == []
 
 
-@pytest.mark.parametrize(
-    ("name", "path"),
-    [
-        pytest.param("html_gen_check_site", _CHECK_SITE, id="check_site"),
-    ],
-)
-def test_loading_template_scripts_leaves_no_bytecode_in_the_shipped_assets(name: str, path: Path) -> None:
+def test_loading_template_scripts_leaves_no_bytecode_in_the_shipped_assets() -> None:
     """同梱スクリプトの読み込みが配布ディレクトリに .pyc を落とさない。"""
     shutil.rmtree(_TEMPLATE / "__pycache__", ignore_errors=True)
-    _load(name, path)
+    _load("html_gen_check_site", _CHECK_SITE)
     assert not (_TEMPLATE / "__pycache__").exists()
 
 
@@ -51,7 +48,7 @@ def test_write_css_matches_committed_tokens_css(tmp_path: Path) -> None:
     """--write-css の出力はコミット済み tokens.css と一致する。"""
     dest = _copy_site(tmp_path)
     assert check_site.main(["--write-css", str(dest)]) == 0
-    assert (dest / "tokens.css").read_text(encoding="utf-8") == (_TEMPLATE / "tokens.css").read_text(encoding="utf-8")
+    assert (dest / "tokens.css").read_text(encoding="utf-8") == TOKENS_CSS
 
 
 def test_generated_tokens_css_is_the_only_place_with_raw_color() -> None:
@@ -59,7 +56,7 @@ def test_generated_tokens_css_is_the_only_place_with_raw_color() -> None:
     for filename, text in (("index.html", HTML), ("styles.css", CSS), ("app.js", JS)):
         assert check_site.HEX_RE.findall(text) == [], filename
         assert [m.group(1) for m in check_site.COLOR_FUNCTION_RE.finditer(text)] == [], filename
-    assert check_site.COLOR_FUNCTION_RE.search((_TEMPLATE / "tokens.css").read_text(encoding="utf-8"))
+    assert check_site.COLOR_FUNCTION_RE.search(TOKENS_CSS)
 
 
 # --- 壊すと落ちる契約（置換による書き換え） ------------------------------------
@@ -315,6 +312,10 @@ def test_appended_css_violation_is_reported(tmp_path: Path, snippet: str, needle
         # [data-animate] の下の both は、JS が画面内でだけ起動するので通す
         pytest.param('\n[data-animate="in"] .x { animation: rise 300ms both; }\n', id="scoped-both"),
         pytest.param("\n@keyframes slide {\n  from {\n    opacity: 0;\n  }\n}\n", id="opacity-zero-in-keyframes"),
+        pytest.param(
+            "\n@keyframes slide {\n  from { opacity: 0; }\n  \n  to { opacity: 1; }\n}\n",
+            id="blank-line-between-keyframe-blocks",
+        ),
         pytest.param("\n.live { animation-iteration-count: 2; }\n", id="finite-iteration"),
         pytest.param("\n:root { --pulse-count: 1; }\n", id="finite-custom-property"),
         # 偽陽性: キーフレーム名が infinite を含むだけの有限の動き。コメント内は動きにならない（閉じていなければ末尾まで）
@@ -427,7 +428,7 @@ def test_empty_and_missing_files_are_reported(tmp_path: Path) -> None:
     """空の app.js と欠けたファイルはそれぞれ違反になる。"""
     dest = _copy_site(tmp_path)
     (dest / "app.js").write_text("", encoding="utf-8")
-    assert "app.js が空" in "\n".join(check_site.validate_site(dest))
+    assert "app.js が空" in _violations(dest)
 
     dest = _copy_site(tmp_path, "s2")
     (dest / "styles.css").unlink()
@@ -474,3 +475,16 @@ def test_cli_runs_as_a_subprocess(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "PASS" in result.stdout
+
+
+def test_unclosed_keyframes_do_not_stall_the_check() -> None:
+    """閉じていない @keyframes で検査が止まらないこと（段数の指数で遅くなる形へ戻さない。10 段で 11 秒超だった）。"""
+    css = "@keyframes a {\n" + "  from { opacity: 1; }\n  \n" * 10
+    started = time.perf_counter()
+    check_site._validate_resting_state(css)
+    assert time.perf_counter() - started < 1.0
+
+
+def test_block_without_a_selector_is_reported_instead_of_crashing() -> None:
+    """セレクタが空白だけのブロックでも検査が落ちず、違反として報告する。"""
+    assert ["(セレクタなし)" in violation for violation in check_site._validate_resting_state("\n{ animation: a 1s both; }")] == [True]

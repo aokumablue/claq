@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .audit_log import AuditLog
-from .cursor import _decode, _encode, _is_int, accepts_position
+from .cursor import PAGE_TOKEN_TOO_LONG, accepts_position, decode, encode, is_int
 from .errors import CursorError, FacadeError
 
 _VERSION = 1
@@ -31,10 +31,6 @@ _MIN_SECRET_BYTES = 32
 # MAC の入力の先頭に置く領域名（同じ鍵で作る、他の用途の MAC と取り違えないため）
 _MAC_DOMAIN = "facade.cursor"
 _EXPIRED = "この cursor は有効期限が切れています。cursor を外して、同じ条件で検索し直してください。"
-_PAGE_TOKEN_TOO_LONG = (
-    "上流のページトークンが長すぎるため、続きの cursor を発行できません。"
-    "サーバの運用者に MAX_PAGE_TOKEN_CHARS と MAX_CURSOR_CHARS の見直しを依頼してください。"
-)
 
 
 def _read_payload(body: str) -> dict[str, Any] | None:
@@ -47,13 +43,13 @@ def _read_payload(body: str) -> dict[str, Any] | None:
         本体（版・位置・期限）。読めない・版が違う・形が違うときは None。
     """
     try:
-        payload = json.loads(_decode(body))
+        payload = json.loads(decode(body))
     except ValueError:
         return None
     if not isinstance(payload, dict):
         return None
     version, position, expires = payload.get("v"), payload.get("pos"), payload.get("exp")
-    if not (_is_int(version) and version == _VERSION and isinstance(position, dict) and _is_int(expires)):
+    if not (is_int(version) and version == _VERSION and isinstance(position, dict) and is_int(expires)):
         return None
     return payload
 
@@ -95,7 +91,7 @@ class CursorCodec:
             符号化済みの署名。
         """
         message = json.dumps([_MAC_DOMAIN, scope, principal, fingerprint, body], separators=(",", ":"))
-        return _encode(hmac.new(self._secret, message.encode("ascii"), hashlib.sha256).digest())
+        return encode(hmac.new(self._secret, message.encode("ascii"), hashlib.sha256).digest())
 
     def issue(self, *, scope: str, principal: str, fingerprint: str, position: Mapping[str, Any]) -> str:
         """続きの位置を封じたカーソルを発行する。
@@ -110,7 +106,7 @@ class CursorCodec:
             カーソル文字列。
         """
         payload = {"v": _VERSION, "pos": dict(position), "exp": int(self._clock()) + self._ttl_seconds}
-        body = _encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        body = encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
         return f"{body}.{self._sign(body, scope=scope, principal=principal, fingerprint=fingerprint)}"
 
     def open(self, token: str, *, scope: str, principal: str, fingerprint: str) -> dict[str, Any]:
@@ -208,7 +204,7 @@ class SignedPageCursor:
         """
         token = self._codec.issue(scope=self._scope, principal=principal, fingerprint=fingerprint, position=position)
         if not self._accepts(token, position):
-            raise FacadeError(_PAGE_TOKEN_TOO_LONG)
+            raise FacadeError(PAGE_TOKEN_TOO_LONG)
         return token
 
     def open(self, token: str, *, principal: str, fingerprint: str) -> dict[str, Any]:

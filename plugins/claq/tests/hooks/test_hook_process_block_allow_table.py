@@ -19,12 +19,11 @@ PreToolUse の終了コード契約: 2=deny / 0=allow / 1=non-blocking error（�
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 
 import pytest
 
 from ._support import _bash as _bash_payload
+from ._support import _run_module
 from ._support import _write as _write_payload
 
 DENY = 2
@@ -105,14 +104,7 @@ _BLOCK_ALLOW_TABLE: tuple[tuple[str, str, dict, int], ...] = (
 )
 def test_hook_process_exit_code(module: str, label: str, payload: dict, expect: int) -> None:
     """フックを別プロセスで起動し、表どおりの終了コードを返すこと。"""
-    proc = subprocess.run(
-        [sys.executable, "-m", module],
-        input=json.dumps(payload),
-        text=True,
-        capture_output=True,
-        timeout=30,
-        check=False,
-    )
+    proc = _run_module(module, json.dumps(payload), timeout=30)
     assert proc.returncode == expect, (
         f"{label}: {module} が exit {expect} を返さず {proc.returncode} を返した。"
         f" stdout={proc.stdout[:200]!r} stderr={proc.stderr[:200]!r}"

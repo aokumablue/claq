@@ -17,8 +17,7 @@ from pathlib import Path
 
 import pytest
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-LAUNCHER = PLUGIN_ROOT / "src" / "claq" / "launcher.py"
+from ._support import LAUNCHER, PLUGIN_ROOT, _bash, _git
 
 # 本文がデータとして扱われる形。すべて exit 0 になること。
 _DATA_HEREDOC_LINES = (
@@ -82,7 +81,7 @@ def _run(hook: str, command: str, tmp_home: Path, cwd: Path) -> subprocess.Compl
     }
     return subprocess.run(
         [sys.executable, str(LAUNCHER), hook],
-        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
+        input=json.dumps(_bash(command)),
         capture_output=True,
         text=True,
         env=env,
@@ -97,7 +96,7 @@ def repo(tmp_path: Path) -> Path:
     """保護対象ファイル判定の基準になる使い捨て git リポジトリ。"""
     root = tmp_path / "repo"
     root.mkdir()
-    subprocess.run(["git", "init", "-q", "."], cwd=root, check=True, capture_output=True)
+    _git(root, "init", "-q", ".")
     return root
 
 

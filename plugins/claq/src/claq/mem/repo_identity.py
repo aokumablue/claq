@@ -8,8 +8,8 @@
 
 ``git worktree`` 配下で起動しても ``--git-common-dir`` 経由で本体へ寄せるため、
 本体と worktree は同一の ``identity_key`` になる。git 呼び出しはすべて
-``GIT_TIMEOUT_SECONDS`` のハードタイムアウト付きで、git 不在・タイムアウト・
-リポジトリ外のいずれでも絶対パスによる識別へ分岐してハングしない。
+``GIT_TIMEOUT_SECONDS`` のハードタイムアウト付きでハングしない。git 不在・
+リポジトリ外では絶対パスによる識別へ分岐し、タイムアウトは失敗として伝える。
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ FALLBACK_SLUG = "repo"
 
 _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*)://(.*)$", re.DOTALL)
 _PORT_RE = re.compile(r":\d+$")
+_QUERY_OR_FRAGMENT_RE = re.compile(r"[?#]")
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -133,7 +134,7 @@ def _strip_credentials(remote_url: str) -> str:
     Returns:
         userinfo・query・fragment を除去した remote URL。
     """
-    trimmed = re.split(r"[?#]", remote_url, maxsplit=1)[0]
+    trimmed = _QUERY_OR_FRAGMENT_RE.split(remote_url, maxsplit=1)[0]
     scheme_match = _SCHEME_RE.match(trimmed)
     if scheme_match:
         authority, sep, path = scheme_match.group(2).partition("/")
@@ -160,9 +161,7 @@ def normalize_remote_url(remote_url: str | None) -> str | None:
     Returns:
         正規化済みの正体キー文字列。remote が無い・正規化した結果が空になる場合は None。
     """
-    if not remote_url:
-        return None
-    raw = remote_url.strip()
+    raw = (remote_url or "").strip()
     if not raw:
         return None
 
@@ -186,7 +185,7 @@ class RepoIdentity:
     Attributes:
         identity_key: 正規化 remote URL。remote が無ければ repo root 絶対パス。
         root_path: シンボリックリンク解決済みの絶対パス（worktree は本体へ寄せる）。
-        remote_url: userinfo（`user:token@`）除去済みの remote URL。remote が
+        remote_url: credential（userinfo・query・fragment）除去済みの remote URL。remote が
             無い・使えない場合は None（`_strip_credentials` 適用済み）。
     """
 
@@ -195,20 +194,23 @@ class RepoIdentity:
     remote_url: str | None
 
 
-def find_repo_root(cwd: str | Path | None = None) -> str:
+def find_repo_root(cwd: str | Path | None) -> str:
     """*cwd* が属する git リポジトリ本体のルート絶対パスを返す。
 
     ``git rev-parse --path-format=absolute --git-common-dir`` を使うため、
     ``git worktree`` 配下で呼び出しても本体リポジトリのルートへ解決される。
-    git が使えない・リポジトリ外・タイムアウトの場合は *cwd* 自身を返す。
+    git が使えない・リポジトリ外の場合は *cwd* 自身を返す。
 
     Args:
         cwd: 起点ディレクトリ。None なら現在の作業ディレクトリ。
 
     Returns:
         シンボリックリンク解決済みの絶対パス。
+
+    Raises:
+        subprocess.TimeoutExpired: git が時間内に終わらない場合（``_run_git`` を参照）。
     """
-    start = os.path.realpath(str(cwd) if cwd is not None else Path.cwd())
+    start = os.path.realpath(Path.cwd() if cwd is None else cwd)
     common_dir = _run_git(start, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if common_dir is None:
         return start
@@ -225,12 +227,15 @@ def read_remote_url(root_path: str) -> str | None:
         root_path: git リポジトリのルート絶対パス。
 
     Returns:
-        生の remote URL。origin 未設定・git 実行失敗・タイムアウト時は None。
+        生の remote URL。origin 未設定・git 実行失敗時は None。
+
+    Raises:
+        subprocess.TimeoutExpired: git が時間内に終わらない場合（``_run_git`` を参照）。
     """
     return _run_git(root_path, "remote", "get-url", "origin")
 
 
-def detect_repo_identity(cwd: str | Path | None = None) -> RepoIdentity:
+def detect_repo_identity(cwd: str | Path | None) -> RepoIdentity:
     """*cwd* から identity_key / root_path / remote_url を確定する。
 
     remote が取得でき正規化にも成功した場合のみ remote 由来の identity_key を使う。

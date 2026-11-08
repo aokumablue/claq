@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import re
 
-_PLACEHOLDER = "[REDACTED]"
+PLACEHOLDER = "[REDACTED]"
+"""マスク箇所へ挿入する文字列。``tag_stripping`` と ``handoff`` も細工検出時の本文・判定に使う。"""
 
 # (name, pattern) の順序付きリスト。上から順にマッチを置換する。
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -111,7 +112,14 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # `@` はクラスと素なので各走査長の総和が入力長に収まり、原理的に線形。
     ("email", re.compile(r"\b[A-Za-z0-9._%+\-]{1,64}+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")),
     # IPv4 アドレス（プライベートアドレス帯のみ: 10.x / 172.16-31.x / 192.168.x）
-    ("ipv4", re.compile(r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b")),
+    (
+        "ipv4",
+        re.compile(
+            r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+            r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+            r"|192\.168\.\d{1,3}\.\d{1,3})\b"
+        ),
+    ),
     # 32 文字以上の連続した16進数文字列（ハッシュ・API キー等）
     ("hex_secret", re.compile(r"\b[0-9a-f]{32,}\b")),
     # Base64 エンコードされた長い文字列（40 文字以上）—JWT の payload 等。
@@ -125,7 +133,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 def _apply(patterns: list[tuple[str, re.Pattern[str]]], text: str) -> str:
     """*patterns* を上から順に適用し、一致を [REDACTED] に置換して返す。"""
     for _, pattern in patterns:
-        text = pattern.sub(_PLACEHOLDER, text)
+        text = pattern.sub(PLACEHOLDER, text)
     return text
 
 

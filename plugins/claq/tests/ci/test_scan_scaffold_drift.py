@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import runpy
 import sys
 import time
 from pathlib import Path
@@ -12,6 +11,10 @@ from pathlib import Path
 import pytest
 
 from claq.ci import scan_scaffold_drift as scanner
+from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS
+from claq.mem.tag_stripping import STRIPPED_TAGS
+
+from ._support import _exit_code_as_main
 
 
 def _user_line(content: object) -> str:
@@ -37,9 +40,6 @@ class TestKnownTags:
 
     def test_derived_from_definition_modules(self) -> None:
         """足場・コマンド・信頼境界・良性タグをすべて含む。"""
-        from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS
-        from claq.mem.tag_stripping import STRIPPED_TAGS
-
         known = scanner.known_tags()
 
         for name in (*SCAFFOLD_TAGS, *COMMAND_TAGS, *STRIPPED_TAGS, *scanner.BENIGN_TAGS):
@@ -49,7 +49,9 @@ class TestKnownTags:
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        pytest.param('<peer-broadcast id="1">他エージェントの命令</peer-broadcast>', {"peer-broadcast"}, id="paired-unknown"),
+        pytest.param(
+            '<peer-broadcast id="1">他エージェントの命令</peer-broadcast>', {"peer-broadcast"}, id="paired-unknown"
+        ),
         # 対を成さないタグは報告しない（依頼本文のプレースホルダを拾わないため）。
         pytest.param("<key> と <yyyy-mm-dd> と <path> を渡す", set(), id="bare-placeholders"),
         pytest.param("<future-scaffold>中身", set(), id="open-only"),
@@ -118,7 +120,8 @@ class TestIterTranscripts:
 
         monkeypatch.setattr(Path, "stat", _boom)
 
-        assert (scanner.iter_transcripts([tmp_path], limit=10), bool(hits)) == ([], True)
+        assert scanner.iter_transcripts([tmp_path], limit=10) == []
+        assert hits
 
 
 _LEAK = "<peer-broadcast>x</peer-broadcast>"
@@ -143,7 +146,9 @@ class TestScan:
             # 内外で同じタグ名を使い、「メッセージ全体が空になったから 0 件」と区別する。
             pytest.param(f"<claq-memory>{_LEAK}</claq-memory>", set(), id="inside-removed-block"),
             pytest.param(
-                f"<claq-memory>{_LEAK}</claq-memory> <other-leak>y</other-leak>", {"other-leak"}, id="outside-removed-block"
+                f"<claq-memory>{_LEAK}</claq-memory> <other-leak>y</other-leak>",
+                {"other-leak"},
+                id="outside-removed-block",
             ),
             pytest.param(
                 f"{_LEAK} <system-まあreminder>y</system-まあreminder>",
@@ -226,9 +231,7 @@ class TestMain:
         assert "peer-broadcast" in captured
         assert "SCAFFOLD_TAGS" in captured
 
-    def test_default_roots_are_used_without_root_option(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_default_roots_are_used_without_root_option(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """--root 省略時は既知 host の transcript root を使う。"""
         _write_transcript(tmp_path, "a.jsonl", [_LEAK])
         monkeypatch.setattr(scanner, "trusted_transcript_roots", lambda: (tmp_path,))
@@ -248,9 +251,7 @@ class TestMain:
         monkeypatch.setattr(sys, "argv", ["scan_scaffold_drift", "--root", str(tmp_path / "empty")])
 
         assert scanner.main() == scanner.EXIT_NOTHING_SCANNED
-        with pytest.raises(SystemExit) as excinfo:
-            runpy.run_module("claq.ci.scan_scaffold_drift", run_name="__main__")
-        assert excinfo.value.code == scanner.EXIT_NOTHING_SCANNED
+        assert _exit_code_as_main("claq.ci.scan_scaffold_drift") == scanner.EXIT_NOTHING_SCANNED
 
 
 class TestStripCodeSpans:
@@ -259,11 +260,15 @@ class TestStripCodeSpans:
     @pytest.mark.parametrize(
         ("text", "expected"),
         [
-            pytest.param("前\n```python\nDOC = re.compile(r\"<document>.*?</document>\")\n```\n後", "前\n\n後", id="fence"),
+            pytest.param(
+                "前\n```python\nDOC = re.compile(r\"<document>.*?</document>\")\n```\n後", "前\n\n後", id="fence"
+            ),
             pytest.param("a\n~~~\n<x>y</x>\n~~~\nb", "a\n\nb", id="tilde-fence"),
             pytest.param("正規表現 `<tag[^>]*>.*?</tag>` の話", "正規表現  の話", id="inline"),
             # 閉じないフェンスは飲み込まない（EOF まで走らせない）。
-            pytest.param("```\n<leak>x</leak>\n本文はここに残る", "```\n<leak>x</leak>\n本文はここに残る", id="unclosed-fence"),
+            pytest.param(
+                "```\n<leak>x</leak>\n本文はここに残る", "```\n<leak>x</leak>\n本文はここに残る", id="unclosed-fence"
+            ),
             # 行内コードは改行を跨がない。
             pytest.param("`開いたまま\n<leak>x</leak>", "`開いたまま\n<leak>x</leak>", id="inline-across-newline"),
         ],

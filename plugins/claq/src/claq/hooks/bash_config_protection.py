@@ -47,8 +47,7 @@ import するのは、Write を deny する綴りと Bash を deny する綴り�
 
 非目標: `python -c`/`eval`/任意スクリプト経由の間接書き込み、`$(...)`・変数展開・
     パイプ越しの間接書き込み、シェルエイリアス・ラッパースクリプト経由の呼び出し。
-    うっかり書き換えの抑止であって敵対的回避への防壁ではない
-    （docs/adr/shell-analysis-boundary.md）。
+    うっかり書き換えの抑止であって敵対的回避への防壁ではない（docs/adr/shell-analysis-boundary.md）。
 """
 
 from __future__ import annotations
@@ -70,13 +69,15 @@ from claq.hooks.git_config_text import (
     GLOBAL_GITCONFIG_NAME,
     global_git_config_path,
 )
+from claq.hooks.heredoc import command_readings, strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
+    DIRECTORY_CHANGE_COMMANDS,
     basename,
     emit_block_output,
+    fold_path_parts,
     is_inplace_edit_flag,
     memoized_in_scan,
-    normalize_executable_name,
     normalize_protected_name,
     resolve_effective_target,
     resolve_repo_root,
@@ -84,37 +85,29 @@ from claq.hooks.hook_common import (
 )
 from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
 from claq.hooks.shell_tokens import (
-    MAX_COMMAND_BYTES,
-    command_dialect_variants,
+    WRITE_REDIRECT_OPERATORS,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
+    normalize_executable_name,
+    scan_budget_message,
     split_segments,
-    strip_data_heredoc_bodies,
     tokenize,
 )
 from claq.hooks.stdin_io import (
-    MAX_STDIN_BYTES,
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
+    truncated_input_message,
 )
 from claq.lib.harness import (
     extract_raw_tool_name,
-    is_unidentifiable_tool,
+    is_known_tool_outside,
     iter_bash_commands,
-    normalize_tool_name,
 )
 
 # matcher（hooks.json）の綴りがズレても、本体側で対象外ツールを早期 return する多重防御。
 _BASH_TOOL_NAMES = frozenset({"bash"})
-
-# リダイレクト演算子。``1>``/``2>`` 等は数字が別トークンに分かれ ``>``/``>>`` に一致する
-# ため不要だが、意図の記録として明示している。``&>>`` は stdout+stderr の追記、``>&`` は
-# ``&>`` の別綴り（``>&file``）で、どちらも `tokenize` が 1 トークンにする。``>&2`` / ``2>&1`` の
-# ような fd 複製も同じ ``>&`` だが、後続が保護名でなければ書き込み先として一致せず allow になる。
-# ``<>`` は読み書きオープンで、対象が無ければ作成する（保護名の空ファイル作成と同じ効果）。
-_REDIRECT_OPERATORS = frozenset({">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"})
 
 # 末尾引数が書き込み先になるコマンド。Windows のシェルツールは PowerShell なので、
 # 別名だけでは拾えない長形式 cmdlet を併記する。
@@ -171,10 +164,6 @@ _DD_COMMANDS = frozenset({"dd"})
 # arity 表を持つより誤検出側を選ぶ。``New-Item`` は `_TEE_COMMANDS` 側にある。
 _TOUCH_COMMANDS = frozenset({"touch"})
 
-# カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
-# 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
-_DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
-
 # ディレクトリ移動の判定で、コマンド名より前に来うるシェルの予約語・グループ化と `builtin`。
 # ``{ cd x; …}`` / ``if cd x; then …`` / ``builtin cd x`` の ``cd`` を見落とすと、cwd 基準の解決を
 # 信用したまま相対パスの書込み先を判定してしまう。
@@ -187,7 +176,6 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 # 注入の永続化経路になる。保護の範囲を「Bash からの直接追記の拒否」に限るため、
 # `config_protection` の保護 path（Edit/Write にも効く）へは足さず本モジュールに閉じる。
 _HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
-
 
 # 未展開のまま ``~/.gitconfig`` 等を指せる、書込み先トークン先頭の ``$HOME`` / ``$XDG_CONFIG_HOME``（``{}`` 付き可）。
 _HOME_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{HOME\}|HOME)(?=/|$)")
@@ -215,8 +203,7 @@ def _expand_config_home_variables(token: str) -> str:
 
 @memoized_in_scan
 def _find_home_log_directory_match(token: str) -> str | None:
-    """トークンが ``~/.claq/logs/`` のディレクトリ構造に一致するか、その
-    ディレクトリ自身を指すかを判定する。
+    """トークンが ``~/.claq/logs/`` のディレクトリ構造に一致するか、そのディレクトリ自身を指すかを判定する。
 
     symlink を解決し、畳んだ名前（`normalize_protected_name`）で構造的に一致を見る。
     ``~/.claq/logs/`` はどのリポジトリでも同じ固定位置を指すため、呼び出し側は
@@ -447,7 +434,7 @@ def _redirect_targets(segment: list[str]) -> list[str]:
     return [
         segment[index + 1]
         for index, token in enumerate(segment)
-        if token in _REDIRECT_OPERATORS and index + 1 < len(segment)
+        if token in WRITE_REDIRECT_OPERATORS and index + 1 < len(segment)
     ]
 
 
@@ -502,7 +489,7 @@ def _changes_working_directory(segment: list[str]) -> bool:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        先頭の `_LEADING_SHELL_KEYWORDS` を除いた実行位置のコマンドが `_DIRECTORY_CHANGE_COMMANDS`
+        先頭の `_LEADING_SHELL_KEYWORDS` を除いた実行位置のコマンドが `DIRECTORY_CHANGE_COMMANDS`
         に属するなら True。
 
     Raises:
@@ -512,7 +499,7 @@ def _changes_working_directory(segment: list[str]) -> bool:
     while start < len(segment) and segment[start] in _LEADING_SHELL_KEYWORDS:
         start += 1
     index = _command_index(segment[start:])
-    return index is not None and normalize_executable_name(segment[start + index]) in _DIRECTORY_CHANGE_COMMANDS
+    return index is not None and normalize_executable_name(segment[start + index]) in DIRECTORY_CHANGE_COMMANDS
 
 
 def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
@@ -523,19 +510,19 @@ def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
         repo_root: `resolve_repo_root` が返したリポジトリルート。
 
     Returns:
-        `repo_root` 配下にあれば True。配下外、または `repo_root` 自身の解決に失敗した
-        場合は False。
+        `repo_root` 配下にあれば True。配下外、または `repo_root` の解決に失敗したら False。
 
     Raises:
         例外は発生しません。
     """
     try:
-        return resolved.is_relative_to(repo_root.resolve())
+        root_parts = fold_path_parts(repo_root.resolve().parts)
     except (OSError, RuntimeError):
         return False
+    return fold_path_parts(resolved.parts)[: len(root_parts)] == root_parts
 
 
-def find_protected_write(command: str, *, _recursed: bool = False) -> str | None:
+def find_protected_write(command: str, *, _recursed: bool = False, _scope_certain: bool = True) -> str | None:
     """コマンド文字列内に保護対象への書き込みがあればその表示名を返す。
 
     保護対象ヒットがあった場合のみリポジトリルートを解決し、書き込み先がその配下に
@@ -548,11 +535,13 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
     （``cd plugins && printf x > ../ruff.toml`` を通さない。docs/adr/shell-analysis-boundary.md）。
 
     既知シェルの ``-c`` へ渡された文字列コマンドへは 1 段だけ再帰する（`block_no_verify`
-    と同じ。2 段以上のネストは非目標）。
+    と同じ。2 段以上のネストは非目標）。外側の `cd` は内側の相対パスの基準もずらすので、
+    外側の判定を再帰先へ引き継ぐ。
 
     Args:
         command: 検査対象のシェルコマンド文字列。
         _recursed: 内部再帰用フラグ。True の場合、これ以上ラッパーへ再帰しない。
+        _scope_certain: 内部再帰用フラグ。外側のコマンドが cwd 基準の解決を信用できるなら True。
 
     Returns:
         `_protected_target` / `find_host_guard_match` の表示名（`_blocked_message` が文言を選ぶ鍵）、
@@ -564,24 +553,70 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
     # heredoc のデータ本文は方言展開の前に 1 回だけ落とす（`block_no_verify` と同じ順序に
     # しないと、同じ入力でも hook によって解析対象が変わる）。
     stripped = strip_data_heredoc_bodies(command)
-    for variant in command_dialect_variants(stripped):
-        found = _find_protected_write_in_dialect(variant, _recursed=_recursed)
+    for variant in command_readings(stripped):
+        found = _find_protected_write_in_dialect(variant, _recursed=_recursed, _scope_certain=_scope_certain)
         if found is not None:
             return found
     return None
 
 
-def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | None:
-    """1 つのシェル方言の読み方で保護対象書き込みを探す。
+def _protected_write_hit(token: str, *, scope_certain: bool) -> str | None:
+    """書き込み先トークン 1 つが deny すべき保護対象なら、その表示名を返す。
 
     ``~/.claq/logs/``・ホーム側の git 設定・`find_host_guard_match`（``hooks/hooks.json``・実行中の
     plugin の ``runtime/`` と ``src/claq/``・ホスト設定）への一致は repo スコープ判定より前で、無条件に deny する。
     保護名に一致したトークンの解決に失敗した場合も repo スコープ判定に進めないため deny する。
 
     Args:
-        command: `command_dialect_variants` が返した 1 通りの読み方
+        token: 書き込み先候補の生トークン。
+        scope_certain: コマンドが `cd` 系を含まず、cwd 基準の解決を信用できるなら True。
+
+    Returns:
+        保護対象の表示名。該当しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    home_log_hit = _find_home_log_directory_match(token)
+    if home_log_hit is not None:
+        return home_log_hit
+    # ホーム側の設定はリポジトリ外の固定位置。repo スコープ判定に掛けると allow になる。
+    global_config_hit = global_git_config_path(_expand_config_home_variables(token))
+    if global_config_hit is not None:
+        return global_config_hit
+    host_guard_hit = find_host_guard_match(token, scope_certain=scope_certain)
+    if host_guard_hit is not None:
+        return host_guard_hit
+    # ``cd ~ && printf x >> .gitconfig``: `cd` を含むコマンドは basename で見る。
+    if not scope_certain and normalize_protected_name(basename(token)) == GLOBAL_GITCONFIG_NAME:
+        return GLOBAL_GITCONFIG_DISPLAY_NAME
+    found = _protected_target(token)
+    if found is None:
+        return None
+    if not scope_certain:
+        return found
+    resolved = resolve_effective_target(token)
+    if resolved is None:
+        # 保護名に一致したトークンが解決できない（単独サロゲート・symlink ループ等）。
+        # 書込み先がリポジトリ外だと示せない以上、入力側が任意に作れる解決不能で
+        # 保護を外せないよう deny する（docs/adr/hook-failure-direction.md）。
+        return found
+    repo_root = resolve_repo_root()
+    if repo_root is None:
+        # 「決定不能なら allow」はこの書込み先 1 つについての判断。呼び出し側は残りの書込み先候補と
+        # `sh -c` 再帰の検査を続ける（そこまで捨てると allow が広がる）。
+        return None
+    return found if _within_repo_root(resolved, repo_root) else None
+
+
+def _find_protected_write_in_dialect(command: str, *, _recursed: bool, _scope_certain: bool) -> str | None:
+    """1 つのシェル方言の読み方で保護対象書き込みを探す。
+
+    Args:
+        command: `command_readings` が返した 1 通りの読み方
             （heredoc のデータ本文は呼び出し元で除去済み）。
         _recursed: ラッパー再帰済みかどうか。
+        _scope_certain: 外側のコマンドが cwd 基準の解決を信用できるなら True。
 
     Returns:
         保護対象の表示名。該当しなければ None。
@@ -590,46 +625,20 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
         例外は発生しません。
     """
     segments = split_segments(tokenize(command))
-    scope_certain = not any(_changes_working_directory(segment) for segment in segments)
+    scope_certain = _scope_certain and not any(_changes_working_directory(segment) for segment in segments)
     for segment in segments:
         for token in _write_target_tokens_in_segment(segment):
-            home_log_hit = _find_home_log_directory_match(token)
-            if home_log_hit is not None:
-                return home_log_hit
-            # ホーム側の設定はリポジトリ外の固定位置。repo スコープ判定に掛けると allow になる。
-            global_config_hit = global_git_config_path(_expand_config_home_variables(token))
-            if global_config_hit is not None:
-                return global_config_hit
-            host_guard_hit = find_host_guard_match(token, scope_certain=scope_certain)
-            if host_guard_hit is not None:
-                return host_guard_hit
-            # ``cd ~ && printf x >> .gitconfig``: `cd` を含むコマンドは basename で見る。
-            if not scope_certain and normalize_protected_name(basename(token)) == GLOBAL_GITCONFIG_NAME:
-                return GLOBAL_GITCONFIG_DISPLAY_NAME
-            found = _protected_target(token)
-            if found is None:
-                continue
-            if not scope_certain:
+            found = _protected_write_hit(token, scope_certain=scope_certain)
+            if found is not None:
                 return found
-            resolved = resolve_effective_target(token)
-            if resolved is None:
-                # 保護名に一致したトークンが解決できない（単独サロゲート・symlink ループ等）。
-                # 書込み先がリポジトリ外だと示せない以上、入力側が任意に作れる解決不能で
-                # 保護を外せないよう deny する（docs/adr/hook-failure-direction.md）。
-                return found
-            repo_root = resolve_repo_root()
-            if repo_root is None:
-                # 「決定不能なら allow」はこの書込み先 1 つについての判断。return にすると
-                # 残りの書込み先候補と `sh -c` 再帰まで捨てて allow が広がる。
-                continue
-            if _within_repo_root(resolved, repo_root):
-                return found
-        if not _recursed:
-            wrapped = extract_shell_wrapper_command(segment)
-            if wrapped is None:
-                continue
-            if (found := find_protected_write(wrapped, _recursed=True)) is not None:
-                return found
+        if _recursed:
+            continue
+        wrapper_command = extract_shell_wrapper_command(segment)
+        if wrapper_command is None:
+            continue
+        found = find_protected_write(wrapper_command, _recursed=True, _scope_certain=scope_certain)
+        if found is not None:
+            return found
     return None
 
 
@@ -662,16 +671,10 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
     return None
 
 
-_SCAN_BUDGET_MESSAGE = (
-    f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for pre:bash-config-protection. "
-    "A command this large cannot be inspected within the hook timeout, and an un-inspected "
-    "command must not be allowed. Split it into smaller commands."
-)
+_SCAN_BUDGET_MESSAGE = scan_budget_message("pre:bash-config-protection", "command")
 
-_TRUNCATED_INPUT_MESSAGE = (
-    f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for pre:bash-config-protection. "
-    "Refusing to evaluate a possibly-truncated bash command for protected config writes. "
-    "Retry with a smaller command."
+_TRUNCATED_INPUT_MESSAGE = truncated_input_message(
+    "pre:bash-config-protection", "bash command for protected config writes"
 )
 
 _MALFORMED_INPUT_MESSAGE = (
@@ -767,21 +770,19 @@ def main() -> int:
     if not raw:
         return 0
 
-    data = parse_json_object(raw)
-    if data is None:
+    payload = parse_json_object(raw)
+    if payload is None:
         return emit_block_output(_MALFORMED_INPUT_MESSAGE) if _raw_text_write_risk(raw) else 0
 
-    tool_name = extract_raw_tool_name(data)
+    tool_name = extract_raw_tool_name(payload)
     # 既知の「シェルではないツール」だけを skip する。ツール名を特定
     # できない payload を対象外へ倒すと保護が丸ごと無効になる。
-    if normalize_tool_name(tool_name).lower() not in _BASH_TOOL_NAMES and not is_unidentifiable_tool(
-        tool_name
-    ):
+    if is_known_tool_outside(tool_name, _BASH_TOOL_NAMES):
         return 0
 
     # コンテナキーは 1 つも取りこぼさず走査する。先勝ちで 1 キーだけ見ると、無害な側だけを
     # 検査して後続キーの保護対象書き込みを素通りさせる。
-    commands = list(iter_bash_commands(data))
+    commands = list(iter_bash_commands(payload))
     # 検査予算（バイト数）を超える入力は走査せず止める（`MAX_COMMAND_BYTES` のコメント）。
     # argv 配列の要素の走査が積み上がらないよう、全候補を走査する前に検査する（上限内の要素 40 個で 6.79 秒）。
     if any(command_exceeds_scan_budget(command) for command in commands):

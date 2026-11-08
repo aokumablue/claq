@@ -84,8 +84,8 @@ API やエンドポイントごとに 1 ツールにしない（モデルが API
 - 戻り値の型を pydantic のモデルで書く（`outputSchema` が生成され、ホストの code mode が型として使う）。
 - 出力のモデルは閉じない。増えうる値（状態など）は `Literal` にせず、`str` と説明で示す
   （出力スキーマを閉じると、値や項目を足したときにキャッシュした古いスキーマでの検証が落ちる）。
-- 値が無い項目を出さないなら `Field(default=None, exclude_if=lambda value: value is None)`、
-  空の一覧を出さないなら `exclude_if=lambda value: not value`（SDK は None を null で出す）。
+- 値が無い項目を出さないなら `Field(default=None, exclude_if=_is_none)`、
+  空の一覧を出さないなら `exclude_if=_is_empty`（SDK は None を null で出す。述語は `facade-overlay/server.py` の見本を写す）。
 - 一覧の結果は `items`・`has_more`・`next_cursor`・`as_of`・`notes` を持たせる。
   部分失敗は `partial`、切り詰めは `notes` に書く。
 - 機械用の ID と人が読めるラベルを並べる。金額は `amount` と `currency` の組、日時は

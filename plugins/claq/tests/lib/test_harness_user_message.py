@@ -250,7 +250,7 @@ class TestScaffoldRemovalStaysLinear:
     複雑度クラスが戻ったときだけ落ちる。
     """
 
-    # 2MB 相当（`_read_tail` が 1 行として読みうる上限規模）。
+    # 2MB 相当（`read_tail_text` が 1 行として読みうる上限規模）。
     _PATHOLOGICAL_REPEATS = 120_000
     _BUDGET_SECONDS = 5.0
 

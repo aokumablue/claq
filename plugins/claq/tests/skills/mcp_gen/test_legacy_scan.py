@@ -64,7 +64,8 @@ class TestLegacyApiScan:
         hits, unscanned = smoke_static.legacy_api_hits(tmp_path, skip=(tmp_path / "smoke_check.py",))
         assert hits == ["server.py:1: " + legacy.strip()]
         assert [entry.split(" ")[0] for entry in unscanned] == ["link.py", "locked.txt", "pipe"]
-        assert "通常のファイルではない" in unscanned[0] and "通常のファイルではない" in unscanned[2]
+        assert "通常のファイルではない" in unscanned[0]
+        assert "通常のファイルではない" in unscanned[2]
         assert "Permission denied" in unscanned[1]
 
     def test_no_legacy_api_warns_unscanned(self, smoke_check: types.ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:

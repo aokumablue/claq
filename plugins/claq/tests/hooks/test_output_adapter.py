@@ -7,12 +7,8 @@ import json
 from claq.hooks import output_adapter
 
 
-def test_emit_block_returns_exit_2_deny_json_and_stderr_reason() -> None:
-    """常に exit 2 + stderr へ理由 + stdout へ permissionDecision: deny JSON を同時に返すこと。"""
-    exit_code, stdout, stderr = output_adapter.emit_block("dangerous flag")
+def test_adapt_deny_output_returns_deny_json() -> None:
+    """stdout 用の permissionDecision: deny JSON を返すこと。"""
+    stdout = output_adapter.adapt_deny_output("dangerous flag")
 
-    assert (exit_code, json.loads(stdout), stderr) == (
-        2,
-        {"permissionDecision": "deny", "permissionDecisionReason": "dangerous flag"},
-        "dangerous flag",
-    )
+    assert json.loads(stdout) == {"permissionDecision": "deny", "permissionDecisionReason": "dangerous flag"}

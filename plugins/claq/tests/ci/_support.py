@@ -1,7 +1,8 @@
-"""tests/ci のテストが共有する補助（ファイル書き出し・repo マーカー・HOME 隔離）。"""
+"""tests/ci のテストが共有する補助（ファイル書き出し・repo マーカー・`python -m` 起動・HOME 隔離）。"""
 
 from __future__ import annotations
 
+import runpy
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,16 @@ def _write_repo_markers(root: Path, *, include_harness: bool = True) -> None:
     (root / "skills").mkdir(exist_ok=True)
     if include_harness:
         _write_files(root, {"src/claq/ci/harness_audit.py": ""})
+
+
+def _exit_code_as_main(module_name: str) -> object:
+    """モジュールを `python -m` と同じく `__main__` として実行し、SystemExit の終了コードを返す。
+
+    SystemExit で終わらなければ `pytest.raises` がテストを落とす。
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_module(module_name, run_name="__main__")
+    return excinfo.value.code
 
 
 @pytest.fixture(autouse=True)

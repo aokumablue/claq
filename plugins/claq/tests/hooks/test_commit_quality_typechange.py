@@ -15,9 +15,7 @@ import pytest
 
 from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
 
-from ._support import _evaluate_in_repo, _git, _init_git_repo
-
-_SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
+from ._support import _SECRET_LINE, _evaluate_in_repo, _git, _init_git_repo
 
 
 def _make_repo(tmp_path: Path) -> Path:
@@ -55,7 +53,7 @@ def test_secret_hidden_behind_symlink_to_file_typechange_is_blocked(
     repo = _replace_committed_symlink_with_file(tmp_path, _SECRET_LINE)
     _git(repo, "add", "a.py")
 
-    assert _evaluate_in_repo(command, repo, monkeypatch)["exitCode"] == 2
+    assert _evaluate_in_repo(command, repo, monkeypatch) is not None
 
 
 @pytest.mark.parametrize("command", ["git commit -m x", "git commit -a -m x"])
@@ -70,7 +68,7 @@ def test_regular_file_to_symlink_typechange_is_not_blocked(
     (repo / "a.py").symlink_to(targets[kind])
     _git(repo, "add", "a.py")
 
-    assert _evaluate_in_repo(command, repo, monkeypatch)["exitCode"] == 0
+    assert _evaluate_in_repo(command, repo, monkeypatch) is None
 
 
 def test_staged_content_of_stage_prefixed_name_is_read_from_that_path(

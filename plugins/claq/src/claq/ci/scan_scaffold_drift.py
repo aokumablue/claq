@@ -26,8 +26,9 @@
 **コードスパン（``` フェンスとバッククォート）は判定前に落とす。** 依頼本文が
 コード片や正規表現を引用すると、その中の ``<document>`` ``<crm>`` ``<tag[^>]*>``
 がそのまま「対を成す未知タグ」になる。ホストの足場はメッセージ直下に生で載る
-ものであり、利用者が打ったコードフェンスの内側には現れない。フェンスが閉じていない場合はテキストを一切触らない（docs/adr/untrusted-input-prompt-boundary.md で
-閉じた「終端の来ない入力を EOF まで飲み込む」型を隣のモジュールで再現しないため）。
+ものであり、利用者が打ったコードフェンスの内側には現れない。フェンスが閉じていない
+場合はテキストを一切触らない（docs/adr/untrusted-input-prompt-boundary.md で閉じた
+「終端の来ない入力を EOF まで飲み込む」型を隣のモジュールで再現しないため）。
 
 CI へは組み込まない。コーパスは各利用者のローカルにしか無く、コミットできない
 （未サニタイズかつユーザー固有）。人間が ``maintain`` / ``release-verify`` から
@@ -49,6 +50,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
+from claq.lib.core_utils import read_tail_text
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, normalize_user_message
 from claq.mem.handoff import TRANSCRIPT_MAX_BYTES, is_trusted_transcript, trusted_transcript_roots
 from claq.mem.tag_stripping import STRIPPED_TAGS, drop_known_tag_blocks
@@ -69,6 +71,10 @@ DEFAULT_SCAN_LIMIT = 50
 
 # 報告するタグ名の上限。
 _REPORT_LIMIT = 20
+
+EXIT_OK = 0
+EXIT_DRIFT = 1
+EXIT_NOTHING_SCANNED = 2
 
 _TAG_PATTERN = re.compile(r"<(/?)([A-Za-z][\w:-]*)[^>]{0,512}>")
 
@@ -96,11 +102,6 @@ def strip_code_spans(text: str) -> str:
         コードスパンを取り除いたテキスト。
     """
     return _INLINE_CODE.sub("", _FENCE_BLOCK.sub("", text))
-
-
-EXIT_OK = 0
-EXIT_DRIFT = 1
-EXIT_NOTHING_SCANNED = 2
 
 
 def known_tags() -> frozenset[str]:
@@ -212,10 +213,7 @@ def scan(paths: Iterable[Path]) -> Counter[str]:
     counts: Counter[str] = Counter()
     for path in paths:
         try:
-            with path.open("rb") as stream:
-                stream.seek(0, 2)
-                stream.seek(max(0, stream.tell() - TRANSCRIPT_MAX_BYTES))
-                raw = stream.read().decode("utf-8", errors="replace")
+            raw = read_tail_text(path, TRANSCRIPT_MAX_BYTES)
         except OSError:
             continue
         names: set[str] = set()
@@ -241,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="実 transcript を走査し、足場タグ denylist の漏れを検出する。")
     parser.add_argument("--root", action="append", default=[], help="走査する root（既定: 既知 host の transcript root）")
     parser.add_argument("--limit", type=int, default=DEFAULT_SCAN_LIMIT, help="走査する transcript の最大件数")
-    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(argv)
     roots = [Path(root).expanduser() for root in args.root] or list(trusted_transcript_roots())
     paths = iter_transcripts(roots, args.limit)
     if not paths:

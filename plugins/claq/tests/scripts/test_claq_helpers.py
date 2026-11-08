@@ -17,9 +17,11 @@ from pathlib import Path
 
 import pytest
 
+from claq.mem.database import Database
+
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_HELPER = _REPO_ROOT / "plugins" / "claq" / "runtime" / "claq-helpers.sh"
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "claq"
+_HELPER = _PLUGIN_ROOT / "runtime" / "claq-helpers.sh"
 _FREQUENCY_HEADER = "# ファイルごとのコミット頻度"
 
 _NEEDS_ZSH = pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh が PATH 上に無い")
@@ -145,8 +147,6 @@ def test_claq_mem_learn_records_a_pending_agent_card(tmp_path: Path, shell: str)
     パイプを通る。引用符・改行・非 ASCII をエスケープなしで通せることが marshal を挟む理由なので、それらを
     含む値で見る。値はシングルクォートで渡し、シェル側の展開を通さない。
     """
-    from claq.mem.database import Database
-
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     title = '引用符 "quoted" と非 ASCII ✓ を含むタイトル'

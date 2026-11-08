@@ -79,6 +79,14 @@ class Catalog:
         self.entity = entity
         self._fields = list(fields)
         self._index = {spec.path: spec for spec in self._fields}
+        self._validate()
+
+    def _validate(self) -> None:
+        """項目の定義の誤りを、起動時に落とす。
+
+        Raises:
+            ValueError: `__init__` に挙げた定義の誤りがあるとき。
+        """
         malformed = [
             spec.path
             for spec in self._fields
@@ -86,23 +94,23 @@ class Catalog:
         ]
         if malformed:
             raise ValueError(
-                f"{entity}: {malformed} はパスの書式（{PATH_PATTERN}、{PATH_MAX_CHARS} 文字以下）に合わない"
+                f"{self.entity}: {malformed} はパスの書式（{PATH_PATTERN}、{PATH_MAX_CHARS} 文字以下）に合わない"
             )
         if len(self._index) != len(self._fields):
-            raise ValueError(f"{entity}: 項目のパスが重複している")
+            raise ValueError(f"{self.entity}: 項目のパスが重複している")
         non_scalar = [spec.path for spec in self._fields if spec.type not in FIELD_TYPES]
         if non_scalar:
-            raise ValueError(f"{entity}: {non_scalar} の型を JSON のスカラー（{' / '.join(FIELD_TYPES)}）にする")
+            raise ValueError(f"{self.entity}: {non_scalar} の型を JSON のスカラー（{' / '.join(FIELD_TYPES)}）にする")
         unknown = sorted({spec.sensitivity for spec in self._fields} - set(SENSITIVITY_LEVELS))
         if unknown:
-            raise ValueError(f"{entity}: 未知の機微区分 {unknown}")
+            raise ValueError(f"{self.entity}: 未知の機微区分 {unknown}")
         personal_in_views = [spec.path for spec in self._fields if spec.sensitivity == "personal" and spec.views]
         if personal_in_views:
-            raise ValueError(f"{entity}: personal の項目 {personal_in_views} をビューに入れない（fields で明示させる）")
+            raise ValueError(f"{self.entity}: personal の項目 {personal_in_views} をビューに入れない（fields で明示させる）")
         ancestors = sorted({ancestor for spec in self._fields for ancestor in _ancestors(spec.path)} & set(self._index))
         if ancestors:
             # 祖先を指定されると、その下の全体（区分の違う子を含む）が返ってしまう
-            raise ValueError(f"{entity}: {ancestors} は別の項目の祖先になっている。カタログには葉だけを載せる")
+            raise ValueError(f"{self.entity}: {ancestors} は別の項目の祖先になっている。カタログには葉だけを載せる")
 
     def view(self, name: str, *, allowed_sensitivity: Collection[str]) -> list[str]:
         """ビューに含まれる項目のうち、主体に返してよい機微区分のもののパスを返す。
@@ -171,6 +179,22 @@ class Catalog:
             "has_more": len(matched) > limit,
         }
 
+    def _unknown_path(self, path: str) -> FacadeError:
+        """未知のパスの失敗を、近いパスの候補を添えて作る。
+
+        Args:
+            path: カタログに無いパス。
+
+        Returns:
+            投げる FacadeError。
+        """
+        close = difflib.get_close_matches(path, list(self._index), n=3)
+        hint = f"近いパス: {'、'.join(close)}。" if close else ""
+        return FacadeError(
+            f"未知の項目パス {path!r} があります。{hint}"
+            f"使えるパスは fields_describe（entity: {self.entity}）で調べられます。"
+        )
+
     def resolve(self, paths: Sequence[str], *, for_search: bool, allowed_sensitivity: Collection[str]) -> list[str]:
         """指定された項目のパスを検証し、そのまま返す。
 
@@ -188,12 +212,7 @@ class Catalog:
         for path in paths:
             spec = self._index.get(path)
             if spec is None:
-                close = difflib.get_close_matches(path, list(self._index), n=3)
-                hint = f"近いパス: {'、'.join(close)}。" if close else ""
-                raise FacadeError(
-                    f"未知の項目パス {path!r} があります。{hint}"
-                    f"使えるパスは fields_describe（entity: {self.entity}）で調べられます。"
-                )
+                raise self._unknown_path(path)
             if for_search and not spec.in_search:
                 raise FacadeError(f"{path!r} は検索結果には付けられません。1 件ずつ取得するツールで指定してください。")
             if spec.sensitivity not in allowed_sensitivity:

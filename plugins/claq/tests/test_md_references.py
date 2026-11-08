@@ -1,8 +1,8 @@
-"""agents/skills/commands md 内の相対 .md 参照が実在することを検証する構造テスト。
+"""agents/skills/commands の md が名指しするものの実在と一致を検証する構造テスト。
 
-バッククォートで囲まれた `../` または `references/` 始まりの .md 参照を、
-記載ファイル自身の場所を基準に解決して存在を確認する。
-スキル本文の参照切れは実行時の Read 失敗（プロンプト破損）に直結するため CI で検出する。
+md の本文は import にも型検査にも現れないため、参照切れは実行時の Read 失敗（プロンプト破損）に
+直結する。相対 .md パス・節参照・コンポーネント名・モジュール名・関数名・シェルヘルパ・README の
+在庫表・tools 宣言・ルーブリック版・満点表記を、実体と突き合わせて CI で検出する。
 """
 
 from __future__ import annotations
@@ -10,11 +10,14 @@ from __future__ import annotations
 import functools
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+
+from claq.ci.harness_audit import RUBRIC_VERSION
 
 _ROOT = Path(__file__).resolve().parents[1]
 _TARGET_DIRS = ("agents", "skills", "commands")
@@ -43,6 +46,21 @@ def _md_corpus() -> tuple[tuple[Path, str], ...]:
     )
 
 
+def _broken_md_ref(md_file: Path, ref: str) -> str | None:
+    """md_file に書かれた .md 参照 1 件を検査し、壊れていれば報告行を、問題なければ None を返す。"""
+    if ref.startswith("~/") or any(ch in ref for ch in "{<*") or ref in _NON_REPO_MD_REFS:
+        return None
+    source = md_file.relative_to(_ROOT)
+    if ref.startswith(_REPO_ROOT_MD_REF_PREFIXES):
+        return None if (_REPO_ROOT / ref).is_file() else f"{source}: `{ref}`（リポジトリルート基準）"
+    resolved = (md_file.parent / ref).resolve()
+    if not resolved.is_file():
+        return f"{source}: `{ref}`"
+    if not resolved.is_relative_to(_ROOT):
+        return f"{source}: `{ref}` はプラグイン外へ抜ける（配布物に含まれず installed build では解決しない）"
+    return None
+
+
 def test_relative_md_references_resolve() -> None:
     """バッククォート内の .md 参照が、記載ファイルからの相対で実在に解決されること。
 
@@ -62,24 +80,12 @@ def test_relative_md_references_resolve() -> None:
     出典として ADR を挙げたい場合は ``docs/adr/`` 始まりのリポジトリルート基準表記
     を使う（``_REPO_ROOT_MD_REF_PREFIXES``）。
     """
-    broken: list[str] = []
-    for md_file, text in _md_corpus():
-        for match in _MD_REF_RE.finditer(text):
-            ref = match.group(1)
-            if ref.startswith("~/") or any(ch in ref for ch in "{<*") or ref in _NON_REPO_MD_REFS:
-                continue
-            if ref.startswith(_REPO_ROOT_MD_REF_PREFIXES):
-                if not (_REPO_ROOT / ref).is_file():
-                    broken.append(f"{md_file.relative_to(_ROOT)}: `{ref}`（リポジトリルート基準）")
-                continue
-            resolved = (md_file.parent / ref).resolve()
-            if not resolved.is_file():
-                broken.append(f"{md_file.relative_to(_ROOT)}: `{ref}`")
-            elif not resolved.is_relative_to(_ROOT):
-                broken.append(
-                    f"{md_file.relative_to(_ROOT)}: `{ref}` はプラグイン外へ抜ける"
-                    f"（配布物に含まれず installed build では解決しない）"
-                )
+    broken = [
+        problem
+        for md_file, text in _md_corpus()
+        for ref in _MD_REF_RE.findall(text)
+        if (problem := _broken_md_ref(md_file, ref)) is not None
+    ]
     assert broken == [], "解決できない md 参照:\n" + "\n".join(broken)
 
 
@@ -146,6 +152,13 @@ _BASH_FENCE_RE = re.compile(rf"```(?:{'|'.join(_SHELL_FENCE_LANGS)})\n(.*?)```",
 _ENV_POINTER_LINE = '. "$HOME/.claq/env.sh"'
 
 
+def _bash_fences() -> Iterator[tuple[Path, str]]:
+    """シェル系フェンスの本文を、記載ファイルと組にして列挙する。"""
+    for md_file, text in _md_corpus():
+        for block in _BASH_FENCE_RE.findall(text):
+            yield md_file, block
+
+
 def test_md_surfaces_have_no_vendor_specific_paths() -> None:
     """agents/skills/commands の md にベンダ固有パスが 1 件も出現しないこと。
 
@@ -168,8 +181,7 @@ def test_md_surfaces_have_no_vendor_specific_paths() -> None:
 
 
 def test_claq_run_bash_fences_bootstrap_in_same_block() -> None:
-    """``claq_run``/``claq_mem_learn`` を呼ぶ ```bash フェンスは、同一フェンス内に
-    ``. "$HOME/.claq/env.sh"`` の bootstrap を持つこと。
+    """``claq_run``/``claq_mem_learn`` を呼ぶ ```bash フェンスが、同一フェンス内に env.sh の bootstrap を持つこと。
 
     shell 関数は Bash tool 呼び出しを跨いで継続しない。「別のコードブロックで
     source 済み」という前提は実行時に ``claq_run: command not found``
@@ -177,8 +189,7 @@ def test_claq_run_bash_fences_bootstrap_in_same_block() -> None:
     """
     violations = [
         f"{md_file.relative_to(_ROOT)}: bootstrap を欠く bash フェンス: {block[:80]!r}"
-        for md_file, text in _md_corpus()
-        for block in _BASH_FENCE_RE.findall(text)
+        for md_file, block in _bash_fences()
         if ("claq_run" in block or "claq_mem_learn" in block) and _ENV_POINTER_LINE not in block
     ]
     assert violations == [], "\n".join(violations)
@@ -196,8 +207,7 @@ def test_mem_learn_invocations_pass_no_status_or_source_flag() -> None:
     """
     violations = [
         f"{md_file.relative_to(_ROOT)}: {line.strip()!r}"
-        for md_file, text in _md_corpus()
-        for block in _BASH_FENCE_RE.findall(text)
+        for md_file, block in _bash_fences()
         for line in re.sub(r"\\\n", " ", block).splitlines()
         if "claq_mem_learn" in line and ("--status" in line or "--source" in line)
     ]
@@ -302,6 +312,22 @@ def _resolves(ref: str, headings: tuple[set[str], set[str]]) -> bool:
     return any(head == ref or head.startswith(ref) for head in headings[0] | headings[1])
 
 
+@functools.cache
+def _file_headings(path: Path) -> tuple[set[str], set[str]]:
+    """ファイルの見出しを読む（同じファイルを参照のたびに読み直さない）。"""
+    return _collect_headings(path.read_text(encoding="utf-8"))
+
+
+def _section_ref_resolves(md_file: Path, ref: str, targets: tuple[str, ...]) -> bool:
+    """節参照が、記載ファイルか同一行で指した .md の見出しに解決するかを返す。
+
+    パス自体の実在は test_relative_md_references_resolve の担当なので、実在しない target は候補から外す。
+    """
+    target_paths = ((md_file.parent / target).resolve() for target in targets)
+    candidates = [md_file, *(path for path in target_paths if path.is_file())]
+    return any(_resolves(ref, _file_headings(path)) for path in candidates)
+
+
 def test_intra_document_section_references_resolve() -> None:
     """節参照が、同一ファイルまたは同一行で指した .md の見出しとして実在すること。
 
@@ -310,22 +336,12 @@ def test_intra_document_section_references_resolve() -> None:
     test_relative_md_references_resolve はバッククォート付きの相対 .md **ファイル**
     参照しか見ないため、文書内・文書間の節参照はここで検査する。
     """
-    broken: list[str] = []
-    cache: dict[Path, tuple[set[str], set[str]]] = {}
-    for md_file, text in _md_corpus():
-        cache[md_file] = _collect_headings(text)
-        for ref, targets in _iter_section_refs(text):
-            candidates = [cache[md_file]]
-            for target in targets:
-                target_path = (md_file.parent / target).resolve()
-                if not target_path.is_file():
-                    continue  # パス自体の実在は test_relative_md_references_resolve の担当
-                if target_path not in cache:
-                    cache[target_path] = _collect_headings(target_path.read_text(encoding="utf-8"))
-                candidates.append(cache[target_path])
-            if not any(_resolves(ref, headings) for headings in candidates):
-                where = f" (候補: {', '.join(targets)})" if targets else ""
-                broken.append(f"{md_file.relative_to(_ROOT)}: 「{ref}」{where}")
+    broken = [
+        f"{md_file.relative_to(_ROOT)}: 「{ref}」" + (f" (候補: {', '.join(targets)})" if targets else "")
+        for md_file, text in _md_corpus()
+        for ref, targets in _iter_section_refs(text)
+        if not _section_ref_resolves(md_file, ref, targets)
+    ]
     assert broken == [], "見つからない節参照:\n" + "\n".join(broken)
 
 
@@ -345,7 +361,8 @@ def test_section_ref_helpers_detect_and_accept() -> None:
     # 実見出しとフェンス内テンプレート見出しを取り違えない
     fenced = "## 出力形式\n\n```\n## 未確認・スコープ外\n```\n\n`## 未確認・スコープ外` に理由を明記する。\n"
     real, template = _collect_headings(fenced)
-    assert "## 未確認・スコープ外" in template and "## 未確認・スコープ外" not in real
+    assert "## 未確認・スコープ外" in template
+    assert "## 未確認・スコープ外" not in real
     assert _resolves("## 未確認・スコープ外", (real, template))
 
     # `#` が行コメントの言語フェンスは見出しを持たない
@@ -397,7 +414,7 @@ def test_plugin_component_references_exist() -> None:
 
 
 def test_claq_run_module_references_are_importable() -> None:
-    """md が `claq_run` に渡す Python モジュールが import 可能であること。
+    """md が `claq_run` / `python3 -m` で起動する Python モジュールが import 可能であること。
 
     hooks.json のドット区切り参照と同じく、モジュール名は Python の import 文
     に現れないため、リネームやモジュール削除で静かに壊れる。
@@ -412,8 +429,8 @@ def test_claq_run_module_references_are_importable() -> None:
 
 
 # ルーブリック版を書き写している md と、そこから版を取り出す正規表現。
-# 実装の定数を含めて 3 箇所が同じ文字列を持つ。1 箇所しか照合しないと
-# 残りが取り残され、版を上げても古い版のスコアと比較する助言が出せてしまう。
+# 実装の定数と md が同じ文字列を持つ。照合しないと md が取り残され、
+# 版を上げても古い版のスコアと比較する助言が出せてしまう。
 _RUBRIC_VERSION_SITES = ((Path("agents") / "harness-tuner.md", re.compile(r'"rubric_version":\s*"([^"]+)"')),)
 _RUBRIC_VERSION_ANY_RE = re.compile(r'(?:ルーブリック版: `|"rubric_version":\s*")(\d{4}-\d{2}-\d{2})')
 
@@ -427,8 +444,6 @@ def test_md_rubric_version_matches_audit_constant() -> None:
     照合箇所を列挙する方式は新しい書き写し先が増えたときに取りこぼすため、md 全体の
     「日付形式の rubric 版らしき文字列」も実装と照合し、`_RUBRIC_VERSION_SITES` の更新漏れ自体を検出する。
     """
-    from claq.ci.harness_audit import RUBRIC_VERSION
-
     for relative_path, pattern in _RUBRIC_VERSION_SITES:
         found = pattern.findall((_ROOT / relative_path).read_text(encoding="utf-8"))
         assert found, f"{relative_path} にルーブリック版の表記が見つからない（{pattern.pattern}）"
@@ -554,8 +569,7 @@ def test_md_shell_helper_invocations_are_defined() -> None:
     """
     missing = [
         f"{md_file.relative_to(_ROOT)}: {token}"
-        for md_file, text in _md_corpus()
-        for block in _BASH_FENCE_RE.findall(text)
+        for md_file, block in _bash_fences()
         for token in re.findall(r"(?<![\w./-])((?:claq|collect)_[a-z0-9_]+)", block)
         if token not in _shell_helpers()
     ]
@@ -582,6 +596,7 @@ def test_md_max_score_matches_real_audit() -> None:
         text=True,
         timeout=120,
         check=False,
+        env={**os.environ, "PYTHONPATH": str(_ROOT / "src")},
     )
     assert result.stdout.strip(), f"監査が JSON を出力しなかった（exit={result.returncode}）: {result.stderr.strip()}"
     real = json.loads(result.stdout)["max_score"]

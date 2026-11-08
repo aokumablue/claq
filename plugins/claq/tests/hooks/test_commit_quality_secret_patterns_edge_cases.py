@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from claq.hooks import commit_quality_scanner as commit_quality_scanner
+from claq.hooks import commit_quality_scanner
 
 _PEM_DELIMITER = "-" * 5
 _SSH_COM_DELIMITER = "-" * 4

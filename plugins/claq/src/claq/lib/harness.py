@@ -104,12 +104,10 @@ def extract_raw_tool_name(payload: dict[str, Any]) -> str:
     非空の ``tool_name`` を優先し、無ければ非空の ``toolName`` を使う。
     空文字・非文字列は無効として次候補へ倒す。どちらも無効なら空文字。
     """
-    tool_name = payload.get("tool_name")
-    if isinstance(tool_name, str) and tool_name:
-        return tool_name
-    camel_name = payload.get("toolName")
-    if isinstance(camel_name, str) and camel_name:
-        return camel_name
+    for key in ("tool_name", "toolName"):
+        tool_name = payload.get(key)
+        if isinstance(tool_name, str) and tool_name:
+            return tool_name
     return ""
 
 
@@ -210,16 +208,24 @@ def normalize_tool_name(tool_name: str) -> str:
 _IDENTIFIABLE_TOOL_NAMES = frozenset(name.lower() for name in _TOOL_NAME_MAP.values())
 
 
-def is_unidentifiable_tool(tool_name: str) -> bool:
-    """ツール名が既知のどれとも一致しないかを判定する。
+def is_known_tool_outside(tool_name: str, scope: frozenset[str]) -> bool:
+    """ツール名が既知のツールで、かつ検査対象 *scope* の外にあるかを判定する。
 
     ツール名で検査対象を絞るフックは、名前を特定できない payload（空文字へ倒れた
     ``{"tool_name": 123}`` や未知の ``mcp__fs__write``）を「対象外」と読み替えては
     ならない。ツール名の照合はハーネスの matcher が既に済ませているため、「既知の
     対象外ツール」だけを skip し、特定できない名前は検査側へ倒す
     （docs/adr/shell-analysis-boundary.md: 誤検出 > 誤通過）。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+        scope: 検査対象とする正規化後のツール名（小文字）。
+
+    Returns:
+        skip してよい（既知かつ対象外の）ツールなら True。
     """
-    return normalize_tool_name(tool_name).lower() not in _IDENTIFIABLE_TOOL_NAMES
+    normalized = normalize_tool_name(tool_name).lower()
+    return normalized not in scope and normalized in _IDENTIFIABLE_TOOL_NAMES
 
 
 def _extract_patch_text(tool_input: dict | str | None) -> str | None:
@@ -407,7 +413,7 @@ def tag_block_pattern(tag: str, *, capture: bool = False) -> re.Pattern[str]:
 # まとめられずタグ単位のリストになる。
 _SCAFFOLD_BLOCK_PATTERNS = [tag_block_pattern(tag) for tag in SCAFFOLD_TAGS]
 
-# ペア除去後に残った足場タグ。ハーネスは足場タグを必ず対で書き、`_read_tail` の
+# ペア除去後に残った足場タグ。ハーネスは足場タグを必ず対で書き、`read_tail_text` の
 # 前方切り詰めで壊れる先頭 1 行は `_parse_entry` が不正 JSON として捨てるため、
 # この段階で片側だけ残っているタグは、足場の中身に閉じタグリテラルを混ぜてブロックを
 # 早期終端させた細工とみなす。断片を救う利得より、細工した文字列が「直近の依頼」として

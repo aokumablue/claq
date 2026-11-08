@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from ._support import _Clock
+from ._support import _Clock, _scripted
 
 
 class TestQuota:
@@ -131,6 +131,14 @@ async def _settle() -> None:
         await asyncio.sleep(0)
 
 
+async def _released(gate: _Gate, calls: list[Any]) -> list[Any]:
+    """呼び出しを同時に走らせ、揃ってから gate を開けて、全員の結果を返す。"""
+    waiters = [asyncio.ensure_future(call) for call in calls]
+    await _settle()
+    gate.opened.set()
+    return await asyncio.gather(*waiters)
+
+
 class TestSingleFlight:
     """同じキーの同時の呼び出しを 1 本にまとめる。"""
 
@@ -138,29 +146,15 @@ class TestSingleFlight:
         """同じキーの同時の呼び出しは上流を 1 回だけ呼び、全員が同じ結果を受け取る。"""
         flights = facade.limits.SingleFlight()
         gate = _Gate()
-
-        async def scenario() -> list[Any]:
-            """同じキーで 3 本を同時に走らせ、揃ってから上流を完了させる。"""
-            waiters = [asyncio.ensure_future(flights.run("k", gate)) for _ in range(3)]
-            await _settle()
-            gate.opened.set()
-            return await asyncio.gather(*waiters)
-
-        assert (asyncio.run(scenario()), gate.calls) == (["ok", "ok", "ok"], 1)
+        calls = [flights.run("k", gate) for _ in range(3)]
+        assert (asyncio.run(_released(gate, calls)), gate.calls) == (["ok", "ok", "ok"], 1)
 
     def test_different_keys_do_not_merge(self, facade: types.SimpleNamespace) -> None:
         """キーが違えば、同時でもそれぞれ上流を呼ぶ。"""
         flights = facade.limits.SingleFlight()
         gate = _Gate()
-
-        async def scenario() -> list[Any]:
-            """違うキーで 2 本を同時に走らせる。"""
-            waiters = [asyncio.ensure_future(flights.run(key, gate)) for key in ("a", "b")]
-            await _settle()
-            gate.opened.set()
-            return await asyncio.gather(*waiters)
-
-        assert (asyncio.run(scenario()), gate.calls) == (["ok", "ok"], 2)
+        calls = [flights.run(key, gate) for key in ("a", "b")]
+        assert (asyncio.run(_released(gate, calls)), gate.calls) == (["ok", "ok"], 2)
 
     def test_key_released_after_success_and_after_failure(self, facade: types.SimpleNamespace) -> None:
         """終わった呼び出し（成功でも失敗でも）の直後に同じキーで呼べば、まとめずに上流を呼び直す。"""
@@ -319,23 +313,15 @@ class TestSingleFlight:
         assert asyncio.run(scenario()) == (True, 1, ["ok", "ok"])
 
 
-def _scripted(outcomes: list[Any]) -> Any:
-    """用意した順に、例外なら投げ、それ以外なら返す上流のメソッドを作る。"""
-
-    async def method(**arguments: Any) -> Any:
-        """次の結果を返すか投げる。"""
-        outcome = outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-    return method
-
-
 def _policy(facade: types.SimpleNamespace, clock: _Clock, **limits: Any) -> Any:
     """時計 clock の上で、上限を limits で上書きした UpstreamPolicy を作る（既定はどの上限にも当たらない値）。"""
     settings = {"rate_per_second": 1.0, "burst": 100, "max_concurrent": 100, "max_concurrent_per_principal": 100}
     return facade.limits.UpstreamPolicy(**{**settings, **limits}, clock=clock)
+
+
+def _call(policy: Any, clock: _Clock, method: Any, arguments: dict[str, Any], principal: str = "alice") -> Any:
+    """締切に余裕のある policy.call の coroutine を作る。"""
+    return policy.call(method, arguments, principal=principal, deadline=clock.now + 10)
 
 
 async def _outcome(facade: types.SimpleNamespace, call: Any) -> Any:
@@ -355,18 +341,8 @@ class TestUpstreamPolicy:
         policy = _policy(facade, clock)
         gate = _Gate()
         arguments = {"status_codes": [1, 2], "page": None}
-
-        async def scenario() -> list[Any]:
-            """同じ要求を 2 本同時に走らせる。"""
-            calls = [
-                asyncio.ensure_future(policy.call(gate, dict(arguments), principal="alice", deadline=clock.now + 10))
-                for _ in range(2)
-            ]
-            await _settle()
-            gate.opened.set()
-            return await asyncio.gather(*calls)
-
-        assert (asyncio.run(scenario()), gate.calls) == (["ok", "ok"], 1)
+        calls = [_call(policy, clock, gate, dict(arguments)) for _ in range(2)]
+        assert (asyncio.run(_released(gate, calls)), gate.calls) == (["ok", "ok"], 1)
 
     def test_policy_does_not_merge_across_principals_or_arguments(self, facade: types.SimpleNamespace) -> None:
         """主体か引数が違えば、同時でもまとめない（他の主体の結果を返さない）。"""
@@ -374,18 +350,8 @@ class TestUpstreamPolicy:
         policy = _policy(facade, clock)
         gate = _Gate()
         requests = [("alice", {"order_id": "a"}), ("bob", {"order_id": "a"}), ("alice", {"order_id": "b"})]
-
-        async def scenario() -> list[Any]:
-            """主体か引数の違う 3 本を同時に走らせる。"""
-            calls = [
-                asyncio.ensure_future(policy.call(gate, arguments, principal=principal, deadline=clock.now + 10))
-                for principal, arguments in requests
-            ]
-            await _settle()
-            gate.opened.set()
-            return await asyncio.gather(*calls)
-
-        assert (asyncio.run(scenario()), gate.calls) == (["ok", "ok", "ok"], 3)
+        calls = [_call(policy, clock, gate, arguments, principal) for principal, arguments in requests]
+        assert (asyncio.run(_released(gate, calls)), gate.calls) == (["ok", "ok", "ok"], 3)
 
     def test_policy_quota_is_shared_across_principals(self, facade: types.SimpleNamespace) -> None:
         """上流のクォータは主体をまたいで数え、使い切ったら別の主体も絞り、時間が経てば回復する。"""
@@ -396,11 +362,11 @@ class TestUpstreamPolicy:
         async def scenario() -> list[Any]:
             """3 つの主体が順に呼び、回復を待って 3 つめの主体が呼び直す。"""
             seen = [
-                await _outcome(facade, policy.call(method, {}, principal=principal, deadline=clock.now + 10))
+                await _outcome(facade, _call(policy, clock, method, {}, principal))
                 for principal in ("alice", "bob", "carol")
             ]
             clock.now += 1.0
-            seen.append(await policy.call(method, {}, principal="carol", deadline=clock.now + 10))
+            seen.append(await _call(policy, clock, method, {}, "carol"))
             return seen
 
         first, second, throttled, recovered = asyncio.run(scenario())
@@ -420,9 +386,7 @@ class TestUpstreamPolicy:
 
         async def scenario() -> list[Any]:
             """再試行を挟んで成功する呼び出しの後に、もう 1 回呼ぶ。"""
-            return [
-                await _outcome(facade, policy.call(method, {}, principal="alice", deadline=clock.now + 10)) for _ in range(2)
-            ]
+            return [await _outcome(facade, _call(policy, clock, method, {})) for _ in range(2)]
 
         succeeded, throttled = asyncio.run(scenario())
         assert (succeeded, type(throttled)) == ("ok", facade.limits.Throttled)
@@ -438,18 +402,14 @@ class TestUpstreamPolicy:
 
         async def scenario() -> tuple[list[str], Any]:
             """1 本で枠を塞いで同時実行で 5 回絞り、それを終えてクォータで 5 回絞り、回復を待って呼び直す。"""
-            holder = asyncio.ensure_future(policy.call(gate, {}, principal="alice", deadline=clock.now + 10))
+            holder = asyncio.ensure_future(_call(policy, clock, gate, {}))
             await _settle()
-            throttled = [
-                await _outcome(facade, policy.call(gate, {"n": n}, principal="bob", deadline=clock.now + 10)) for n in range(5)
-            ]
+            throttled = [await _outcome(facade, _call(policy, clock, gate, {"n": n}, "bob")) for n in range(5)]
             gate.opened.set()
             await holder
-            throttled += [
-                await _outcome(facade, policy.call(gate, {"n": n}, principal="bob", deadline=clock.now + 10)) for n in range(5)
-            ]
+            throttled += [await _outcome(facade, _call(policy, clock, gate, {"n": n}, "bob")) for n in range(5)]
             clock.now += 1.0
-            return [error.detail for error in throttled], await policy.call(gate, {}, principal="bob", deadline=clock.now + 10)
+            return [error.detail for error in throttled], await _call(policy, clock, gate, {}, "bob")
 
         assert asyncio.run(scenario()) == (["concurrency limit"] * 5 + ["upstream quota"] * 5, "ok")
 
@@ -461,7 +421,7 @@ class TestUpstreamPolicy:
 
         async def scenario() -> bool:
             """上流が終わる前に呼び出し元を取り消す。"""
-            call = asyncio.ensure_future(policy.call(gate, {}, principal="alice", deadline=clock.now + 10))
+            call = asyncio.ensure_future(_call(policy, clock, gate, {}))
             await _settle()
             call.cancel()
             await asyncio.gather(call, return_exceptions=True)
