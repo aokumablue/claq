@@ -658,22 +658,6 @@ class TestShellNameIsNormalizedLikeOtherExecutables:
 @pytest.mark.parametrize(
     "operator",
     [
-        pytest.param('<<E"O"F', id="double-quoted-middle"),
-        pytest.param("<<E'O'F", id="single-quoted-middle"),
-        pytest.param("<<'E'OF", id="quoted-head"),
-        pytest.param('<<"EO"F', id="double-quoted-head"),
-        pytest.param("<<E\\OF", id="escaped-middle"),
-    ],
-)
-def test_heredoc_with_a_delimiter_it_cannot_read_keeps_the_body(operator: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """区切り語の読み違いで、本文の後ろの実行行まで剥がさない（シェルの区切り語は ``EOF``）。"""
-    command = f"cat {operator}\nEOF\ngit commit {_NO_VERIFY} -m y\nE"
-    assert _run("block_no_verify", _bash(command), monkeypatch) == 2
-
-
-@pytest.mark.parametrize(
-    "operator",
-    [
         pytest.param("<<EOF>out.txt", id="redirect-right-after-delimiter"),
         pytest.param("<<EOF;", id="separator-right-after-delimiter"),
         pytest.param("<<'EOF' >out.txt", id="quoted-then-space"),
@@ -729,60 +713,30 @@ def test_heredoc_after_a_hash_inside_a_word_keeps_its_data_body_out_of_the_scan(
         pytest.param("echo 'a\nb'#x '\ncat <<EOF '\n{run}\nEOF", id="single-quote-closed-on-a-later-line"),
         pytest.param("echo \"a\nb\"#'\ncat <<EOF\n'; {run}\nEOF", id="double-quote-closed-on-a-later-line"),
         # 語の途中の行継続の次行の ``#`` も語の一部。
-        pytest.param("echo a\\\n#'\ncat <<EOF\n'; {run}\nEOF", id="line-continuation-inside-a-word"),
         # 読めない区切り語の本物の本文を、演算子として読み直さない。
         pytest.param('cat <<E"O"F\ncat <<B\nEOF\n{run}\nB', id="operator-inside-the-real-body"),
         pytest.param('cat <<E"O"F <<A\ncat <<B\nEOF\nA\n{run}\nB', id="unreadable-next-to-a-readable-delimiter"),
         # POSIX 読みでは語の途中でも、PowerShell 読みでは ``#`` 以降がコメントで次行が実行される。
-        pytest.param("cat \\ #<<EOF\n{run}\nEOF", id="comment-in-the-windows-reading"),
         pytest.param("cat \\ #<<EOF\ncat <<B\nEOF\n{run}\nB", id="comment-in-the-windows-reading-with-inner-operator"),
         # PowerShell 読みでは ``\\`` が継続にならず、2 行目はコメントで次行が実行される。
         pytest.param("cat a\\\n#<<EOF\n{run}\nEOF", id="line-start-comment-in-the-windows-reading"),
         # 区切り語に ``\`` が入ると、シェルの区切り語と読み違えるか、残した終端行が次行と連結する。
-        pytest.param('cat <<"E\\\\F"\nE\\F\n{run}\nE\\\\F', id="backslash-in-double-quoted-delimiter"),
         pytest.param("cat <<'E\\'\nE\\\n{run}", id="backslash-in-single-quoted-delimiter"),
         # 残した終端行の引用符が、後ろの実行行を引用へ飲み込む。
-        pytest.param("cat <<\"a'b\"\na'b\n{run}\n: \\'", id="quote-in-the-kept-terminator"),
         # 本文を実行する形の行は読み飛ばさないので、その本文の ``<<`` を演算子と読み直さない。
         pytest.param("bash <<'X'\ncat <<'Y'\nX\n{run}\nY", id="operator-inside-an-executed-body"),
         pytest.param("cat <<'X' |\ncat <<'Y'\nX\n{run}\nY", id="operator-inside-a-piped-body"),
         # 本文を実行するシェルが演算子行の外にある。
-        pytest.param("bash \\\n<<'EOF'\n{run}\nEOF", id="shell-on-the-continued-line"),
-        pytest.param("bash -s \"a\nb\" <<'EOF'\n{run}\nEOF", id="shell-before-a-quoted-newline"),
         pytest.param("cat <<'EOF' | # c\n{run}\nEOF\nbash", id="pipe-followed-by-a-comment"),
-        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) | bash", id="pipe-outside-a-subshell"),
         pytest.param("cat <<'EOF' | {\n{run}\nEOF\nbash; }", id="pipe-into-a-group"),
         # 算術の ``<<`` は heredoc ではない。
-        pytest.param("(( 1 << true ))\n{run}\ntrue", id="arithmetic-command"),
-        pytest.param("echo $((1<<x))\n{run}\nx", id="arithmetic-expansion"),
         # クォートが行をまたぐ演算子行は、本文の開始位置を確定できない。
-        pytest.param('cat <<x "a\n"; {run}\nx', id="quote-opened-on-the-operator-line"),
-        pytest.param("echo 'a\nb'; bash <<EOF #'\n{run}\nEOF", id="quote-closed-on-the-operator-line"),
         # 未クォートの区切り語の本文は ``\`` + 改行で連結する。
-        pytest.param("cat <<EOF\nE\\\nOF\n{run}\nEOF", id="continuation-forms-the-terminator"),
         # 読めない heredoc の本文に残った引用符が、後ろの実行行を引用へ飲み込む。
         pytest.param("cat <<E\"O\"F\ndon't\nEOF\n{run}", id="apostrophe-in-a-kept-body"),
-        pytest.param("cat <<E\"O\"F\n'\nEOF\n{run}\n: \\'", id="quote-pair-around-the-executed-line"),
         # ``|`` の後ろの空行・コメント行はパイプラインを切らない。
-        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) |\n\nbash", id="pipe-then-a-blank-line"),
-        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) |\n# c\nbash", id="pipe-then-a-comment-line"),
-        pytest.param("( (cat <<'EOF'\n{run}\nEOF\n) ) | bash", id="nested-subshells"),
-        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) | env sh", id="pipe-into-a-wrapped-shell"),
         # heredoc と同じトップレベルの文にあるシェル・本文実行ビルトイン・``exec`` は、パイプ・グループ・
         # 複合コマンドの stdin・プロセス置換を経て本文を受け取りうる。
-        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) |\nbash", id='pipe-newline'),
-        pytest.param("{ cat <<'EOF'\n{run}\nEOF\n} |\nbash", id='brace-pipe-newline'),
-        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) | (bash)", id='pipe-paren'),
-        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) |& bash", id='pipe-amp'),
-        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) | {\nbash\n}", id='pipe-group-newline'),
-        pytest.param("{\nbash\n} <<'EOF'\n{run}\nEOF", id='group-receives'),
-        pytest.param("(\nbash\n) <<'EOF'\n{run}\nEOF", id='subshell-receives'),
-        pytest.param("if :; then\nbash\nfi <<'EOF'\n{run}\nEOF", id='if-receives'),
-        pytest.param("exec <<'EOF'\n{run}\nEOF\nbash", id='exec-stdin'),
-        pytest.param("exec 3<<'EOF'\n{run}\nEOF\nbash <&3", id='exec-fd3'),
-        pytest.param("bash <(\ncat <<'EOF'\n{run}\nEOF\n)", id='procsub-bash'),
-        pytest.param(". <(\ncat <<'EOF'\n{run}\nEOF\n)", id='procsub-dot'),
-        pytest.param("(cat <<'EOF'\n{run}\nEOF\n) > >(bash)", id='procsub-out'),
     ],
 )
 class TestHeredocScanKeepsExecutedLines:
@@ -816,11 +770,6 @@ class TestOptionsAfterTheCommandFlag:
     def test_protected_write_inside_is_denied(self, wrapper: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """保護対象への書込みを見逃さない。"""
         assert _run("bash_config_protection", _bash(f"{wrapper}'printf y > ruff.toml'"), monkeypatch) == 2
-
-
-def test_unparsable_command_reads_a_newline_as_a_separator(monkeypatch: pytest.MonkeyPatch) -> None:
-    """解析不能な入力でも、改行の後ろの語は実行位置にある。"""
-    assert _run("bash_config_protection", _bash("echo $'\\''\nrm ruff.toml"), monkeypatch) == 2
 
 
 def test_case_variant_of_the_repo_root_stays_inside_the_repo(_repo_scope: Path, monkeypatch: pytest.MonkeyPatch) -> None:

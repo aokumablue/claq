@@ -36,10 +36,6 @@ COMMENT_PRECEDING_CHARS = frozenset(" \t\n;|&()<>")
 _SHELL_COMMAND_FLAG_RE = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 
 
-# 物理行の行末で、語の途中のまま行継続した状態。クォートの鎖に載せて次の非本文行へ渡す。
-CONTINUED_WORD = "\\"
-
-
 def basename_any_separator(path: str) -> str:
     """`/` と `\\` の**両方**を区切りとみなして basename を取り出します。
 
@@ -167,9 +163,9 @@ class QuoteState:
         """状態を作る。
 
         Args:
-            quote: 開始時点の未閉鎖クォート文字か `CONTINUED_WORD`。無ければ None。
+            quote: 開始時点の未閉鎖クォート文字。無ければ None。
         """
-        self.quote = None if quote == CONTINUED_WORD else quote
+        self.quote = quote
         self.escaped = False
         self.at_word_start = quote is None
 

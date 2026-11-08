@@ -91,12 +91,13 @@ from __future__ import annotations
 
 import re
 
-from claq.hooks.heredoc import command_readings, strip_data_heredoc_bodies
+from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     emit_block_output,
     is_git_executable_token,
 )
 from claq.hooks.shell_tokens import (
+    command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
     is_shell_wrapper_token,
@@ -591,7 +592,7 @@ def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix:
     command = strip_data_heredoc_bodies(command)
     return any(
         _has_bypass_flag_in_dialect(variant, _recursed=_recursed, _inherited_prefix=_inherited_prefix)
-        for variant in command_readings(command)
+        for variant in command_dialect_variants(command)
     )
 
 
@@ -653,7 +654,7 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
     """1 つのシェル方言の読み方で `has_bypass_flag` の判定を行う。
 
     Args:
-        command: `command_readings` が返した 1 通りの読み方。
+        command: `command_dialect_variants` が返した 1 通りの読み方。
         _recursed: ラッパー再帰済みかどうか。
         _inherited_prefix: 外側セグメントから引き継いだ前置トークン列（再帰先でのみ非空）。
 

@@ -30,11 +30,12 @@ from claq.hooks.commit_quality_scanner import (
     sanitize_untrusted_path,
 )
 from claq.hooks.commit_risk import _segment_mutates_worktree_or_index
-from claq.hooks.heredoc import command_readings, strip_data_heredoc_bodies
+from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.pre_bash_commit_quality import _detect_git_commit
 from claq.hooks.shell_tokens import (
     MAX_COMMAND_BYTES,
     _strip_line_continuations,
+    command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
     split_segments,
@@ -229,7 +230,7 @@ def test_command_at_byte_budget_is_still_inspected() -> None:
 )
 def test_shell_wrapper_command_is_never_longer_than_outer(command: str) -> None:
     """`sh -c` の中身は外側のバイト数を超えないこと（入口のバイト数の検査だけで再帰先も縛れる根拠）。"""
-    for variant in command_readings(strip_data_heredoc_bodies(command)):
+    for variant in command_dialect_variants(strip_data_heredoc_bodies(command)):
         for segment in split_segments(tokenize(variant)):
             wrapped = extract_shell_wrapper_command(segment)
             if wrapped is not None:

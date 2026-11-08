@@ -69,7 +69,7 @@ from claq.hooks.git_config_text import (
     GLOBAL_GITCONFIG_NAME,
     global_git_config_path,
 )
-from claq.hooks.heredoc import command_readings, strip_data_heredoc_bodies
+from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     DIRECTORY_CHANGE_COMMANDS,
@@ -86,6 +86,7 @@ from claq.hooks.hook_common import (
 from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
 from claq.hooks.shell_tokens import (
     WRITE_REDIRECT_OPERATORS,
+    command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
     normalize_executable_name,
@@ -553,7 +554,7 @@ def find_protected_write(command: str, *, _recursed: bool = False, _scope_certai
     # heredoc のデータ本文は方言展開の前に 1 回だけ落とす（`block_no_verify` と同じ順序に
     # しないと、同じ入力でも hook によって解析対象が変わる）。
     stripped = strip_data_heredoc_bodies(command)
-    for variant in command_readings(stripped):
+    for variant in command_dialect_variants(stripped):
         found = _find_protected_write_in_dialect(variant, _recursed=_recursed, _scope_certain=_scope_certain)
         if found is not None:
             return found
@@ -613,7 +614,7 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool, _scope_ce
     """1 つのシェル方言の読み方で保護対象書き込みを探す。
 
     Args:
-        command: `command_readings` が返した 1 通りの読み方
+        command: `command_dialect_variants` が返した 1 通りの読み方
             （heredoc のデータ本文は呼び出し元で除去済み）。
         _recursed: ラッパー再帰済みかどうか。
         _scope_certain: 外側のコマンドが cwd 基準の解決を信用できるなら True。

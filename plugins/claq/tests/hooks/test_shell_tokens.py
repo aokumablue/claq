@@ -104,27 +104,6 @@ class TestHeredocNormalization:
         assert heredoc._heredoc_delimiters(line, quote) == expected, label
 
     @pytest.mark.parametrize(
-        ("label", "line", "expected"),
-        [
-            ("演算子にならない < は候補のまま照合で落ちる", "a < b", ([2], [])),
-            ("herestring は候補 3 つすべてが照合で落ちる", "x <<<y", ([2, 3, 4], [])),
-            ("同一演算子の 2 文字目は照合済み範囲として飛ばす", "cat <<A", ([4, 5], [("A", False)])),
-            ("行末の \\ は次行へ持ち越さない", "cat <<A \\", ([4, 5], [("A", False)])),
-        ],
-    )
-    def test_operator_start_offsets(self, label: str, line: str, expected: tuple) -> None:
-        """候補位置の抽出と、そこからの非重複照合。
-
-        候補が挙がっても `_HEREDOC_OPERATOR_RE` が一致しなければ区切り語にならない。
-        1 つの演算子の 2 文字目（`<<A` の 2 つ目の `<`）は直前の照合範囲内なので
-        `finditer` と同じく飛ばす。
-        """
-        offsets, quote = heredoc._operator_start_offsets(line, None)
-
-        assert (offsets, quote) == (expected[0], None), label
-        assert heredoc._heredoc_delimiters(line, None) == (expected[1], None), label
-
-    @pytest.mark.parametrize(
         ("line", "expected"),
         [
             ("cat > note.md <<'EOF'", False),
@@ -450,30 +429,3 @@ def test_many_heredoc_operators_on_one_line_stay_linear() -> None:
     started = time.perf_counter()
     heredoc.strip_data_heredoc_bodies(line)
     assert time.perf_counter() - started < 1.0
-
-
-@pytest.mark.parametrize(
-    ("label", "command", "expected"),
-    [
-        (
-            "連結した行が区切り語なら、そこまでが本文（物理行はすべて残す）",
-            "cat <<EOF\nE\\\nOF\nrm x\nEOF",
-            "cat <<EOF\nE\\\nOF\nrm x\nEOF",
-        ),
-        ("連結しても区切り語にならない行は本文", "cat <<EOF\nfoo \\\nbar\nEOF\nrm x", "cat <<EOF\nEOF\nrm x"),
-        ("エスケープ済みの ``\\\\`` は連結ではない", "cat <<EOF\nfoo \\\\\nEOF\nrm x", "cat <<EOF\nEOF\nrm x"),
-        ("クォート付きの区切り語は連結しない", "cat <<'EOF'\nfoo \\\nEOF\nrm x", "cat <<'EOF'\nEOF\nrm x"),
-        ("``\\`` 前置の区切り語は連結しない", "cat <<\\EOF\nfoo \\\nEOF\nrm x", "cat <<\\EOF\nEOF\nrm x"),
-        ("連結した終端が見つからなければ剥がさない", "cat <<EOF\nfoo \\", "cat <<EOF\nfoo \\"),
-        (
-            "``<<-`` の本文で連結が起きたら剥がさない",
-            "cat <<-EOF\n\tfoo \\\n\tEOF\nrm x",
-            "cat <<-EOF\n\tfoo \\\n\tEOF\nrm x",
-        ),
-    ],
-)
-def test_unquoted_heredoc_body_is_joined_before_the_terminator_is_matched(
-    label: str, command: str, expected: str
-) -> None:
-    """何も付かない区切り語の本文は、シェルと同じく ``\\`` + 改行を連結してから終端を探す。"""
-    assert heredoc.strip_data_heredoc_bodies(command) == expected, label

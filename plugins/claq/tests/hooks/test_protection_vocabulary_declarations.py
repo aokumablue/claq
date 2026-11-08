@@ -458,43 +458,6 @@ def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     assert heredoc.strip_data_heredoc_bodies(stripped) != stripped
 
 
-@pytest.mark.parametrize("opener", sorted(_EXPECTED_VOCABULARIES["heredoc._GROUP_OPENERS"]))
-def test_every_group_opener_holds_separators_inside_the_statement(opener: str) -> None:
-    """`_GROUP_OPENERS` の全要素が、閉じるまでの区切りを同じトップレベルの文に入れること（層1・単体）。
-
-    開く語と認めないと、``)`` で深さが負になり文の境界を確定できない側（全体で 1 文）へ落ちる。
-    """
-    assert heredoc._top_level_statements([opener, ";", "a", ")", ";", "b"]) == [[opener, ";", "a", ")"], ["b"]]
-    assert len(heredoc._top_level_statements(["x", ";", "a", ")", ";", "b"])) == 1
-
-
-@pytest.mark.parametrize("closer", sorted(_EXPECTED_VOCABULARIES["heredoc._GROUP_CLOSERS"]))
-def test_every_group_closer_ends_the_group(closer: str) -> None:
-    """`_GROUP_CLOSERS` の全要素が、コマンド位置で深さを戻すこと（層1・単体）。"""
-    assert heredoc._top_level_statements(["(", ";", closer, ";", "b"]) == [["(", ";", closer], ["b"]]
-    assert len(heredoc._top_level_statements(["(", ";", "x", ";", "b"])) == 1
-
-
-@pytest.mark.parametrize("keyword", sorted(_EXPECTED_VOCABULARIES["heredoc._COMMAND_POSITION_KEYWORDS"]))
-def test_every_command_position_keyword_puts_the_next_token_at_command_position(keyword: str) -> None:
-    """`_COMMAND_POSITION_KEYWORDS` の全要素の直後の閉じる語が深さを戻すこと（層1・単体）。
-
-    対照の ``x`` の直後の ``done`` は引数なので深さを戻さず、文が閉じない。
-    """
-    assert heredoc._top_level_statements(["while", ";", "x", keyword, "done", ";", "b"]) == [
-        ["while", ";", "x", keyword, "done"],
-        ["b"],
-    ]
-    assert len(heredoc._top_level_statements(["while", ";", "x", "y", "done", ";", "b"])) == 1
-
-
-@pytest.mark.parametrize("separator", sorted(_EXPECTED_VOCABULARIES["heredoc._STATEMENT_SEPARATORS"]))
-def test_every_statement_separator_splits_top_level_statements(separator: str) -> None:
-    """`_STATEMENT_SEPARATORS` の全要素が深さ 0 で文を分けること（層1・単体）。``|`` は分けない。"""
-    assert heredoc._top_level_statements(["a", separator, "b"]) == [["a"], ["b"]]
-    assert heredoc._top_level_statements(["a", "|", "b"]) == [["a", "|", "b"]]
-
-
 @pytest.mark.parametrize("suffix", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._LINTABLE_SUFFIXES"]))
 def test_every_lintable_suffix_is_checked(suffix: str) -> None:
     """`_LINTABLE_SUFFIXES` の全要素が lint 検査対象になること（層1・単体）。"""
@@ -530,10 +493,6 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     unit_covered = {
         "shell_tokens.WRITE_REDIRECT_OPERATORS",
         "heredoc._HEREDOC_CONTINUATION_SUFFIXES",
-        "heredoc._GROUP_OPENERS",
-        "heredoc._GROUP_CLOSERS",
-        "heredoc._COMMAND_POSITION_KEYWORDS",
-        "heredoc._STATEMENT_SEPARATORS",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",

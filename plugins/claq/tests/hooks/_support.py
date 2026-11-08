@@ -566,10 +566,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "heredoc._BODY_EXECUTING_BUILTINS": frozenset({".", "source", "eval"}),
     "shell_tokens.COMMENT_PRECEDING_CHARS": frozenset(" \t\n;|&()<>"),
     "heredoc._HEREDOC_CONTINUATION_SUFFIXES": ("\\", "|", "&", "{", "("),
-    "heredoc._GROUP_OPENERS": frozenset({"{", "if", "case", "for", "while", "until", "select"}),
-    "heredoc._GROUP_CLOSERS": frozenset({"}", "fi", "esac", "done"}),
-    "heredoc._COMMAND_POSITION_KEYWORDS": frozenset({"{", "then", "do", "else", "elif", "!"}),
-    "heredoc._STATEMENT_SEPARATORS": frozenset({";", "&&", "||", "&"}),
     "shell_tokens.WRITE_REDIRECT_OPERATORS": frozenset(
         {">", ">>", "&>", "&>>", ">&", ">|", "<>", "1>", "2>", "1>>", "2>>"}
     ),

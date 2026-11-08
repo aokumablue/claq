@@ -55,13 +55,14 @@ from claq.hooks.commit_risk import (
     parse_git_commit_command,
     with_shell_wrapper_segments,
 )
-from claq.hooks.heredoc import command_readings, strip_data_heredoc_bodies
+from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
     emit_block_output,
     resolve_repo_root,
 )
 from claq.hooks.shell_tokens import (
+    command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_command,
     is_shell_wrapper_token,
@@ -329,7 +330,7 @@ def get_unstaged_modified_files() -> list[str] | None:
 
 
 def _detect_git_commit(command: str, *, shell_wrappers: bool = True) -> tuple[str, list[str]] | None:
-    """`command_readings` の各読み方で `git commit` 起動を探す。
+    """`command_dialect_variants` の各読み方で `git commit` 起動を探す。
 
     POSIX 読みだけだと ``C:\\Git\\bin\\git.exe commit -m x`` が ``C:Gitbingit.exe`` に
     潰れ、`block_no_verify` では検出されるのに品質ゲートだけ素通りする
@@ -346,7 +347,7 @@ def _detect_git_commit(command: str, *, shell_wrappers: bool = True) -> tuple[st
     Raises:
         例外は発生しません（`parse_git_commit_command` の契約に従う）。
     """
-    for variant in command_readings(command):
+    for variant in command_dialect_variants(command):
         is_commit, commit_args = parse_git_commit_command(variant, shell_wrappers=shell_wrappers)
         if is_commit:
             return variant, commit_args
@@ -719,7 +720,7 @@ def evaluate(raw_input: str) -> str | None:
             return MULTIPLE_COMMITS_MESSAGE
 
         command, commit_args = commits[0]
-        compound_risk = next(filter(None, map(compound_commit_risk, command_readings(command))), None)
+        compound_risk = next(filter(None, map(compound_commit_risk, command_dialect_variants(command))), None)
         if compound_risk is not None:
             log("[Hook] ERROR: commit content cannot be inspected before execution.")
             return compound_risk
