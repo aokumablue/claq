@@ -295,6 +295,26 @@ def resolve_effective_target(raw_path: str) -> Path | None:
         return None
 
 
+def effective_basename(raw_path: str) -> str:
+    """symlink を解決した実体 basename を返します。
+
+    raw path の basename だけを見ると ``alias -> pyproject.toml`` のような symlink 経由の
+    書込みがすり抜ける。解決不能（壊れた・循環した symlink 等）な場合は raw path の
+    basename にフォールバックする。解決不能を deny に倒すと正当な編集まで巻き込むため。
+
+    Args:
+        raw_path: 検査対象の生パス文字列。
+
+    Returns:
+        判定に使う basename。
+
+    Raises:
+        例外は発生しません。
+    """
+    resolved = resolve_effective_target(raw_path)
+    return resolved.name if resolved is not None else basename(raw_path)
+
+
 def emit_block_output(reason: str) -> int:
     """ツール実行ブロックを host 非依存の合併出力で stdout/stderr に書き出す。
 

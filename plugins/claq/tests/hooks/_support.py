@@ -484,7 +484,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "block_no_verify._VALUE_SHORT_OPTIONS": frozenset("CcmFt"),
     "block_no_verify._BOOLEAN_GLOBAL_SHORT_OPTIONS": frozenset("pPvh"),
     "block_no_verify._OPTIONAL_VALUE_SHORT_OPTIONS": frozenset("uS"),
-    "block_no_verify._SENSITIVE_CONFIG_KEY_PREFIXES": (
+    "git_config_text._SENSITIVE_CONFIG_KEY_PREFIXES": (
         "core.hookspath",
         "include.path",
         "includeif.",

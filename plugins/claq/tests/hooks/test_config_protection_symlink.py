@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from claq.hooks import bash_config_protection, config_protection
+from claq.hooks import bash_config_protection, hook_common
 
 from ._support import _repo_scope as _repo_scope
 from ._support import _run, _write
@@ -55,9 +55,9 @@ def test_write_through_symlink(
 
 def test_effective_basename_falls_back_when_target_is_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
     """resolve_effective_target が None を返す場合、raw path の basename にフォールバックする。"""
-    monkeypatch.setattr(config_protection, "resolve_effective_target", lambda _path: None)
+    monkeypatch.setattr(hook_common, "resolve_effective_target", lambda _path: None)
 
-    assert config_protection._effective_basename(".ruff.toml") == ".ruff.toml"
+    assert hook_common.effective_basename(".ruff.toml") == ".ruff.toml"
 
 
 @pytest.mark.parametrize(

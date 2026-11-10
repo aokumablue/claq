@@ -305,7 +305,7 @@ def _scan(text: str, deadline: float) -> tuple[list[str], list[str], list[str]]:
         if time.monotonic() >= deadline:
             log.warning("トランスクリプト走査がタイムアウトしました: 残りの行を捨てます")
             break
-        entry = _parse_entry(line)
+        entry = parse_entry(line)
         if entry is None:
             continue
         message = _user_message(entry)
@@ -347,7 +347,7 @@ def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
     return kept[::-1]
 
 
-def _parse_entry(line: str) -> dict[str, Any] | None:
+def parse_entry(line: str) -> dict[str, Any] | None:
     """トランスクリプト 1 行を JSON オブジェクトへ解析する。
 
     Args:
@@ -452,6 +452,25 @@ def _message_of(entry: dict[str, Any]) -> dict[str, Any]:
     return message if isinstance(message, dict) else {}
 
 
+def user_entry_content(entry: dict[str, Any]) -> object:
+    """ユーザー発話のエントリから ``content`` を取り出す。
+
+    host ごとに role の置き場所が違う（``type`` / ``role`` / ``message.role``）ため、どれかが
+    ``user`` ならユーザー発話とみなす。この知識の唯一の置き場所で、足場診断
+    （`scan_scaffold_drift`）も同じ判定を使う。
+
+    Args:
+        entry: トランスクリプトの 1 エントリ。
+
+    Returns:
+        ``content``（文字列・ブロック列など生の値）。ユーザー発話でない、または content が無ければ None。
+    """
+    message = _message_of(entry)
+    if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
+        return None
+    return message.get("content") or entry.get("content")
+
+
 def _user_message(entry: dict[str, Any]) -> str:
     """エントリがユーザー発話ならその本文を 1 行へ圧縮して返す。
 
@@ -480,11 +499,11 @@ def _user_message(entry: dict[str, Any]) -> str:
         圧縮済みのユーザー発話。ユーザー発話でない、中身が空、または
         ハーネス足場しか含まれていなければ空文字列。
     """
-    message = _message_of(entry)
-    if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
+    content = user_entry_content(entry)
+    if content is None:
         return ""
 
-    raw = strip_ansi(_text_content(message.get("content") or entry.get("content")))
+    raw = strip_ansi(_text_content(content))
     return compact_line(_sanitize_freeform(raw), _USER_MESSAGE_CHAR_LIMIT)
 
 

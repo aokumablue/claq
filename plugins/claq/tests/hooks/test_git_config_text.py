@@ -11,12 +11,6 @@ from claq.hooks.git_config_text import (
     parse_git_config,
 )
 
-
-def _sensitive(key: str) -> bool:
-    """テスト用の危険 key 判定（alias・core.hookspath・include.path）。"""
-    return key.lower().startswith(("alias.", "core.hookspath", "include.path"))
-
-
 # 解析結果の表: 本文 → (key, value) の列。key は section 名・key 名を小文字にし、subsection は大小を保つ。
 _PARSED = [
     # --- セクション見出し ---
@@ -184,10 +178,10 @@ def test_malformed_text_is_rejected(text: str) -> None:
 @pytest.mark.parametrize(("before", "after", "expected"), _SENSITIVE_CHANGES)
 def test_adds_sensitive_entries(before: str, after: str, expected: bool) -> None:
     """危険 key が置換前に無かった・値や順序が変わったときだけ True。"""
-    assert adds_sensitive_entries(before, after, _sensitive) is expected
+    assert adds_sensitive_entries(before, after) is expected
 
 
 def test_unparsable_after_raises() -> None:
     """置換後が解析できなければ例外を伝える。"""
     with pytest.raises(GitConfigParseError):
-        adds_sensitive_entries("", "garbage\n", _sensitive)
+        adds_sensitive_entries("", "garbage\n")

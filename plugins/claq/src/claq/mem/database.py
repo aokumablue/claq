@@ -320,20 +320,19 @@ class Database:
         ).fetchall()
         return [Knowledge.from_row(row) for row in rows]
 
-    def set_knowledge_status(self, knowledge_id: int, status: str, updated_at: str | None = None) -> bool:
+    def set_knowledge_status(self, knowledge_id: int, status: str) -> bool:
         """知識カードの status を更新する。
 
         Args:
             knowledge_id: 対象の ``knowledge.id``。
             status: ``active`` / ``pending`` / ``archived``。
-            updated_at: 更新時刻（ISO8601）。省略時は現在時刻。
 
         Returns:
             対象行が存在して更新できた場合 True、該当なしなら False。
         """
         return self._updated(
             "UPDATE knowledge SET status = ?, updated_at = ? WHERE id = ?",
-            (status, updated_at or utc_now_iso(), knowledge_id),
+            (status, utc_now_iso(), knowledge_id),
         )
 
     # --- sessions ---
@@ -368,20 +367,20 @@ class Database:
         )
         return Session.from_row(row)
 
-    def finish_session(self, session_uid: str, handoff: str, ended_at: str | None = None) -> bool:
+    def finish_session(self, session_uid: str, handoff: str, ended_at: str) -> bool:
         """セッションに引き継ぎと終了時刻を記録する。
 
         Args:
             session_uid: ハーネスが渡した session_id。
             handoff: 次セッションへの引き継ぎ（人間可読の散文）。
-            ended_at: 終了時刻（ISO8601）。省略時は現在時刻。
+            ended_at: 終了時刻（ISO8601）。
 
         Returns:
             対象セッションが存在して更新できた場合 True、該当なしなら False。
         """
         return self._updated(
             "UPDATE sessions SET handoff = ?, ended_at = ? WHERE session_uid = ?",
-            (handoff, ended_at or utc_now_iso(), session_uid),
+            (handoff, ended_at, session_uid),
         )
 
     def get_latest_session(self, repo_id: str) -> Session | None:

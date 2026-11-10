@@ -175,7 +175,7 @@ NFKC で `<` `/` `-` やタグ名になる文字で書かれた `claq-memory` �
   - `pre_bash_commit_quality` が問題のあるファイルごとに出す `[FILE] <path>` 行も、同じ
     `sanitize_untrusted_path` を通す。
   - TODO/FIXME の抜粋（`_sanitize_untrusted_excerpt`）は、許可リスト → `strip_tags` の後に行区切りを
-    空白 1 個へ畳み（パスと同じ `_fold_line_breaks`）、長さの上限を置く。`content.split("\n")` は
+    空白 1 個へ畳み（パスと同じ `_neutralize_one_line`）、長さの上限を置く。`content.split("\n")` は
     U+2028・NEL・単独 CR・VT・FF を行の中に残し、許可リストがそれらを LF に揃えるため、畳まないと
     抜粋が deny 出力で複数行になり、偽の行（`[Hook] PASS` など）を作れる。
 - 判定は実行系の `unicodedata` に依存する。実行系の Unicode 表より新しく割り当てられた文字は Cn

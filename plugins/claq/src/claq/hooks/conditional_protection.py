@@ -16,7 +16,6 @@ import re
 from pathlib import Path
 from typing import Any, NoReturn
 
-from claq.hooks.block_no_verify import is_sensitive_config_key
 from claq.hooks.git_config_text import (
     GitConfigParseError,
     adds_sensitive_entries,
@@ -529,7 +528,7 @@ def git_config_block_reason(tool_name: str, container: Any, file_path: str, disp
     if len(after) > _FULL_TEXT_MAX_BYTES:
         return _git_config_unparsable_message(display_name)
     try:
-        if adds_sensitive_entries(before, after, is_sensitive_config_key):
+        if adds_sensitive_entries(before, after):
             return _git_config_blocked_message(display_name)
     except GitConfigParseError:
         return _git_config_unparsable_message(display_name)

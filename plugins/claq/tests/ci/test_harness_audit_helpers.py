@@ -34,11 +34,10 @@ def test_safe_helpers_and_counting(tmp_path: Path) -> None:
     assert harness_audit.safe_parse_json('{"x": 1}') == {"x": 1}
     assert harness_audit.count_files(tmp_path, "dir", ".js") == 2
     assert harness_audit.count_files(tmp_path, "missing", ".js") == 0
-    assert harness_audit.has_file_with_extension(tmp_path, "dir", ".js")
+    assert harness_audit.has_file_with_extension(tmp_path, "dir", [".js"])
     assert harness_audit.has_file_with_extension(tmp_path, "dir", [".txt", ".js"])
-    assert not harness_audit.has_file_with_extension(tmp_path, "dir", ".py")
-    assert harness_audit_utils._has_any_file(tmp_path, ["missing", "dir/a.js"])
-    assert not harness_audit_utils._has_any_file(tmp_path, ["missing-a", "missing-b"])
+    assert not harness_audit.has_file_with_extension(tmp_path, "dir", [".py"])
+    assert not harness_audit.has_file_with_extension(tmp_path, "missing", [".js"])
 
     _write_files(tmp_path, {".gitlab-ci.yml": "dependency_scanning:\n  stage: test\n"})
     assert harness_audit.has_gitlab_security_scanning(tmp_path)

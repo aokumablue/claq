@@ -52,8 +52,6 @@ from claq.mem.settings import Settings
 
 log = mem_logger.get("CLI")
 
-# SessionStart フックで JSON 出力が必須なコマンドの集合。
-_SESSION_START_COMMANDS: frozenset[str] = frozenset({"context"})
 # WAL モードの接続が残す sidecar ファイルの拡張子。
 _DB_SIDECAR_SUFFIXES: tuple[str, ...] = ("-wal", "-shm", "-journal")
 
@@ -319,7 +317,7 @@ def main() -> int:
         print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
         return 1
 
-    if command in _SESSION_START_COMMANDS:
+    if command == "context":  # SessionStart フックは JSON 出力が必須
         print_session_start_output(additional_context)
     return 0
 

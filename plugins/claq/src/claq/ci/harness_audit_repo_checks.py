@@ -18,6 +18,7 @@ from claq.ci.harness_audit_utils import (
     safe_parse_json,
     safe_read,
 )
+from claq.hooks.shell_tokens import basename_any_separator
 
 _HOOK_WRAPPER_BASENAMES = {"claq-hook", "claq-hook.cmd"}
 
@@ -45,7 +46,7 @@ def _hook_command_argv(command: str) -> tuple[str, ...] | None:
         tokens = shlex.split(command)
     except ValueError:
         return None
-    if len(tokens) < 2 or tokens[0].replace("\\", "/").rsplit("/", 1)[-1] not in _HOOK_WRAPPER_BASENAMES:
+    if len(tokens) < 2 or basename_any_separator(tokens[0]) not in _HOOK_WRAPPER_BASENAMES:
         return None
     argv = tuple(tokens[1:])
     return argv[1:] if argv[0] == "--bg" else argv

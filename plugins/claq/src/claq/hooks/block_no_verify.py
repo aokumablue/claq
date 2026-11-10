@@ -91,6 +91,7 @@ from __future__ import annotations
 
 import re
 
+from claq.hooks.git_config_text import is_sensitive_config_key
 from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     emit_block_output,
@@ -188,29 +189,6 @@ _MIN_ABBREVIATED_LONG_OPTION_LENGTH = 3
 
 # ``git commit`` でのみ ``--no-verify`` の別名になる short フラグ。
 _BYPASS_SHORT_FLAG = "-n"
-
-# ``-c`` / ``--config-env`` の値が指す config key。git の config key 名は
-# 大小文字を区別しないため、比較は小文字化した上で行います。
-_HOOKS_PATH_CONFIG_KEY = "core.hookspath"
-
-# フック実行を左右しうる config key の前置。いずれも小文字で比較します。
-#
-# - ``core.hookspath``: フック置き場そのものの差し替え。
-# - ``include.path`` / ``includeif.``: 取り込んだ先で ``core.hooksPath`` を書けるため、
-#   直接指定と等価。
-# - ``alias.``: ``git -c alias.ci='commit --no-verify' ci`` は ``--no-verify`` が config
-#   **値**の中にあるためフラグ走査に掛からない。展開結果を解釈する術が無い以上、
-#   alias の定義そのものを deny する（誤検出 > 誤通過）。
-#
-# `is_sensitive_config_key` は `git config` / ``-c`` の key だけでなく、`conditional_protection` が
-# config ファイルの本文を解析して得た key の判定にも使う（key 集合を 1 本にするため）。
-_SENSITIVE_CONFIG_KEY_PREFIXES = (
-    _HOOKS_PATH_CONFIG_KEY,
-    "include.path",
-    "includeif.",
-    "alias.",
-)
-
 
 def _consume_long_option(
     token: str, next_token: str | None, flags: list[str], config_values: list[str]
@@ -329,25 +307,6 @@ def _is_no_verify_flag(flag: str) -> bool:
         例外は発生しません。
     """
     return len(flag) >= _MIN_ABBREVIATED_LONG_OPTION_LENGTH and _BYPASS_LONG_FLAG.startswith(flag)
-
-
-def is_sensitive_config_key(key: str) -> bool:
-    """config key がフック実行を左右しうるものかを判定する。
-
-    `conditional_protection` が config ファイルの本文から得た完全修飾 key（``section.sub.key``）にも
-    使うため公開名にしている。
-
-    Args:
-        key: config key 名（大小文字不問）。
-
-    Returns:
-        `_SENSITIVE_CONFIG_KEY_PREFIXES` のいずれかに前方一致すれば True。
-
-    Raises:
-        例外は発生しません。
-    """
-    normalized = key.strip().lower()
-    return any(normalized.startswith(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES)
 
 
 # ``NAME=value`` と追記代入 ``NAME+=value`` の両方を代入として読む。``+=`` は bash の追記で、

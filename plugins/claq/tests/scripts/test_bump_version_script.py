@@ -52,20 +52,19 @@ def _extract_script_version_targets() -> frozenset[Path]:
     return frozenset(targets)
 
 
-# `_read_versions` がフォーマット別（toml / json / json 入れ子 / Python 定数）に
+# `_read_versions` がフォーマット別（toml / json / json 入れ子）に
 # 読むため、順序と対応関係を持つタプルとして保持する。スクリプト側の定義との
 # 一致は `test_version_files_match_script_targets` が機械的に強制する。
 _VERSION_FILES = (
     Path("plugins/claq/pyproject.toml"),
     Path("plugins/claq/.claude-plugin/plugin.json"),
     Path(".claude-plugin/marketplace.json"),
-    Path("plugins/claq/src/claq/mem/__init__.py"),
 )
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """version-up.sh・bump-*.sh と 4 つの更新対象だけを複製した最小リポジトリ。"""
+    """version-up.sh・bump-*.sh と 3 つの更新対象だけを複製した最小リポジトリ。"""
     repo_root = tmp_path / "repo"
     bump_scripts = (Path(f"scripts/bump-{part}.sh") for part in ("major", "minor", "patch"))
     for rel in (Path("scripts/version-up.sh"), *bump_scripts, *_VERSION_FILES):
@@ -85,14 +84,13 @@ def _run_script(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]
     )
 
 
-def _read_versions(repo_root: Path) -> tuple[str, str, str, str]:
-    """4つのバージョン値を _VERSION_FILES の順で読む。"""
-    pyproject, plugin, marketplace, mem_init = ((repo_root / rel).read_text(encoding="utf-8") for rel in _VERSION_FILES)
+def _read_versions(repo_root: Path) -> tuple[str, str, str]:
+    """3つのバージョン値を _VERSION_FILES の順で読む。"""
+    pyproject, plugin, marketplace = ((repo_root / rel).read_text(encoding="utf-8") for rel in _VERSION_FILES)
     return (
         tomllib.loads(pyproject)["project"]["version"],
         json.loads(plugin)["version"],
         json.loads(marketplace)["plugins"][0]["version"],
-        mem_init.split('__version__ = "', 1)[1].split('"', 1)[0],
     )
 
 
@@ -110,19 +108,19 @@ def test_version_files_match_script_targets() -> None:
     件数の下限も同時に確認する。
     """
     extracted = _extract_script_version_targets()
-    assert len(extracted) >= 4, f"抽出結果が少なすぎる（抽出器の破損を疑う）: {extracted}"
+    assert len(extracted) >= 3, f"抽出結果が少なすぎる（抽出器の破損を疑う）: {extracted}"
     assert set(_VERSION_FILES) == extracted
 
 
 def test_bump_version_updates_all_targets(repo: Path) -> None:
-    """4箇所のバージョンを同時に更新できること。"""
+    """3箇所のバージョンを同時に更新できること。"""
     next_version = _next_patch(_read_versions(repo)[0])
 
     result = _run_script(repo, "--version", next_version)
 
     assert result.returncode == 0, result.stderr
     assert f"[version-up] Updated version to {next_version}" in result.stdout
-    assert _read_versions(repo) == (next_version,) * 4
+    assert _read_versions(repo) == (next_version,) * 3
 
 
 @pytest.mark.parametrize(
@@ -147,7 +145,7 @@ def test_bump_version_without_update(repo: Path, suffix_args: list[str], ok: boo
 
     assert (result.returncode == 0) is ok, result.stderr
     assert message in (result.stdout if ok else result.stderr)
-    assert _read_versions(repo) == (current,) * 4
+    assert _read_versions(repo) == (current,) * 3
 
 
 def test_bump_version_rejects_preexisting_version_drift(repo: Path) -> None:
@@ -161,7 +159,7 @@ def test_bump_version_rejects_preexisting_version_drift(repo: Path) -> None:
 
     assert result.returncode != 0
     assert "version mismatch before update" in result.stderr
-    assert _read_versions(repo) == (current, "0.0.99", current, current)
+    assert _read_versions(repo) == (current, "0.0.99", current)
 
 
 @pytest.mark.parametrize(
@@ -169,7 +167,7 @@ def test_bump_version_rejects_preexisting_version_drift(repo: Path) -> None:
     [("major", "{x}.0.0"), ("minor", "{major}.{y}.0"), ("patch", "{major}.{minor}.{z}")],
 )
 def test_bump_script_increments_the_named_part(repo: Path, part: str, expected: str) -> None:
-    """bump-<part>.sh は現在の版の該当部を 1 つ進め、下位を 0 に戻して 4 箇所を更新すること。"""
+    """bump-<part>.sh は現在の版の該当部を 1 つ進め、下位を 0 に戻して 3 箇所を更新すること。"""
     major, minor, patch = (int(n) for n in _read_versions(repo)[0].split("."))
     next_version = expected.format(major=major, minor=minor, x=major + 1, y=minor + 1, z=patch + 1)
 
@@ -178,4 +176,4 @@ def test_bump_script_increments_the_named_part(repo: Path, part: str, expected: 
     )
 
     assert result.returncode == 0, result.stderr
-    assert _read_versions(repo) == (next_version,) * 4
+    assert _read_versions(repo) == (next_version,) * 3

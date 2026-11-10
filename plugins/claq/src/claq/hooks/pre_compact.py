@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from claq.lib.core_utils import (
     append_file,
-    ensure_dir,
     get_datetime_string,
     get_sessions_dir,
     log,
@@ -24,7 +23,6 @@ def main() -> int:
         終了コード 0。
     """
     sessions_dir = get_sessions_dir()
-    ensure_dir(sessions_dir)
     append_file(sessions_dir / "compaction-log.txt", f"[{get_datetime_string()}] Context compaction triggered\n")
     log("[PreCompact] State saved before compaction")
     return 0

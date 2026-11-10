@@ -1139,11 +1139,14 @@ def _validate_stretched_svg_text(html: str) -> list[str]:
     Returns:
         違反メッセージの一覧
     """
-    return [
-        f"{index} 枚目の SVG が preserveAspectRatio=\"none\" のまま <text> を持つ（縦横独立に伸びるため文字が歪む）"
-        for index, svg in enumerate(_iter_svg_blocks(html), start=1)
-        if _is_stretched_svg(svg) and "<text" in svg
-    ]
+    return _each_svg(html, _stretched_svg_text_violations)
+
+
+def _stretched_svg_text_violations(index: int, svg: str) -> list[str]:
+    """潰し描画の SVG 1 枚が ``<text>`` を持つときの違反を返す。"""
+    if _is_stretched_svg(svg) and "<text" in svg:
+        return [f"{index} 枚目の SVG が preserveAspectRatio=\"none\" のまま <text> を持つ（縦横独立に伸びるため文字が歪む）"]
+    return []
 
 
 def _validate_chart_text(html: str) -> list[str]:

@@ -149,9 +149,9 @@ def popen_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     return calls
 
 
-@pytest.mark.parametrize("env", [{"X": "1"}, None], ids=["env-given", "env-inherited"])
-def test_detach_process_launches_watchdog(tmp_path: Path, popen_calls: list[dict], env: dict[str, str] | None) -> None:
+def test_detach_process_launches_watchdog(tmp_path: Path, popen_calls: list[dict]) -> None:
     """watchdog 越しに起動して stdin を一時ファイルで渡し、子の env へ bg ログのパスを足すこと。"""
+    env = {"X": "1"}
     detach_process(["python3", "-m", "claq.mem.cli", "observe"], "raw-payload", env=env)
 
     [call] = popen_calls
@@ -170,7 +170,7 @@ def test_detach_process_launches_watchdog(tmp_path: Path, popen_calls: list[dict
     assert call["start_new_session"] is True
     child_env = dict(call["env"])
     log_path = child_env.pop("CLAQ_BG_LOG_PATH")
-    assert child_env == (dict(os.environ) if env is None else env)
+    assert child_env == env
     assert Path(log_path).parent == tmp_path / ".claq" / "logs"
     assert Path(log_path).name.startswith("bg-")
     assert log_path.endswith(".log")
@@ -191,7 +191,7 @@ def test_detach_process_failures_are_raised(
     monkeypatch.setattr(target, name, _raise_oserror)
 
     with pytest.raises(OSError, match="injected"):
-        detach_process(["true"], "raw")
+        detach_process(["true"], "raw", env={})
     assert list((tmp_path / ".claq").glob("*.stdin")) == []
 
 
@@ -202,7 +202,7 @@ def test_detach_process_log_dir_failure_is_raised(tmp_path: Path) -> None:
     (tmp_path / ".claq" / "logs").write_text("not a directory", encoding="utf-8")
 
     with pytest.raises(OSError):
-        detach_process(["true"], "raw")
+        detach_process(["true"], "raw", env={})
 
 
 @pytest.mark.usefixtures("popen_calls")
@@ -210,7 +210,7 @@ def test_detach_process_unlink_failure_keeps_the_launch(monkeypatch: pytest.Monk
     """起動後の unlink 失敗は起動成功のまま（孤児の一時ファイルは次回の掃除で消える）。"""
     monkeypatch.setattr(os, "unlink", _raise_oserror)
 
-    detach_process(["true"], "raw")
+    detach_process(["true"], "raw", env={})
     assert len(list((tmp_path / ".claq").glob("*.stdin"))) == 1
 
 
@@ -224,7 +224,7 @@ def test_detach_process_keeps_claq_dir_private(tmp_path: Path, existing_mode: in
         if existing_mode is not None:
             claq.mkdir()
             claq.chmod(existing_mode)
-        detach_process(["true"], "raw")
+        detach_process(["true"], "raw", env={})
     finally:
         os.umask(old_umask)
 

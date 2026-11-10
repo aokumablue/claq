@@ -145,10 +145,8 @@ def _run_module_in_process(target: str, target_args: list[str]) -> int:
         # 同じ `claqProtectionDisabled` マーカーを出して**保護喪失を可視化**する。
         sys.stderr.write(f"ERROR: {target}: {exc}\n")
         if target in _PROTECTION_HOOKS:
-            sys.stderr.write(
-                '{"claqProtectionDisabled": true, "reason": "hook_raised", '
-                f'"module": "{target}"}}\n'
-            )
+            marker = {"claqProtectionDisabled": True, "reason": "hook_raised", "module": target}
+            sys.stderr.write(json.dumps(marker) + "\n")
         return 1
     return 0
 

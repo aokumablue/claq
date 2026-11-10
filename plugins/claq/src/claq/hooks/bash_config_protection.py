@@ -74,6 +74,7 @@ from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     DIRECTORY_CHANGE_COMMANDS,
     basename,
+    effective_basename,
     emit_block_output,
     fold_path_parts,
     is_inplace_edit_flag,
@@ -342,8 +343,7 @@ def _protected_target(token: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    resolved = resolve_effective_target(token)
-    name = resolved.name if resolved is not None else basename(token)
+    name = effective_basename(token)
     # 判定は畳んだ名前で行い、表示名は観測した綴りのままにする（`Path.resolve()` は
     # APFS / NTFS で綴りを実体の大小へ直さず、``rm Ruff.toml`` が素通りするため）。
     if normalize_protected_name(name) in _ALL_PROTECTED_BASENAMES:

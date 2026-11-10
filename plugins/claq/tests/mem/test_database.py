@@ -314,18 +314,14 @@ class TestKnowledge:
         rows = db.list_knowledge(scope="repo", repo_id="claq-dev", status="active")
         assert [row.key for row in rows] == ["hit"]
 
-    @pytest.mark.parametrize("updated_at", ["2026-05-05T00:00:00+00:00", None], ids=["explicit", "default-now"])
-    def test_set_status_updates_row(self, db: Database, updated_at: str | None) -> None:
-        """status と updated_at（省略時は現在時刻）を更新して True を返す。"""
+    def test_set_status_updates_row(self, db: Database) -> None:
+        """status と updated_at（現在時刻）を更新して True を返す。"""
         stored = db.upsert_knowledge(_knowledge())
         before = utc_now_iso()
-        assert db.set_knowledge_status(stored.id, "archived", updated_at=updated_at) is True
+        assert db.set_knowledge_status(stored.id, "archived") is True
         after = db.get_knowledge_by_key("use-python3")
         assert after.status == "archived"
-        if updated_at is None:
-            assert before <= after.updated_at <= utc_now_iso()
-        else:
-            assert after.updated_at == updated_at
+        assert before <= after.updated_at <= utc_now_iso()
 
     def test_set_status_returns_false_when_missing(self, db: Database) -> None:
         """該当行が無ければ False。"""
@@ -355,23 +351,19 @@ class TestSessions:
         with pytest.raises(sqlite3.IntegrityError):
             db.start_session(Session(session_uid="uid-1", repo_id="missing"))
 
-    @pytest.mark.parametrize("ended_at", ["2026-01-02T00:00:00+00:00", None], ids=["explicit", "default-now"])
-    def test_finish_session_records_handoff(self, db: Database, ended_at: str | None) -> None:
-        """handoff と ended_at（省略時は現在時刻）を記録して True を返す。"""
+    def test_finish_session_records_handoff(self, db: Database) -> None:
+        """handoff と ended_at を記録して True を返す。"""
         db.upsert_repo(_repo())
         db.start_session(Session(session_uid="uid-1", repo_id="claq-dev"))
-        before = utc_now_iso()
-        assert db.finish_session("uid-1", "次はテストを書く", ended_at=ended_at) is True
+        ended_at = "2026-01-02T00:00:00+00:00"
+        assert db.finish_session("uid-1", "次はテストを書く", ended_at) is True
         latest = db.get_latest_session("claq-dev")
         assert latest.handoff == "次はテストを書く"
-        if ended_at is None:
-            assert before <= latest.ended_at <= utc_now_iso()
-        else:
-            assert latest.ended_at == ended_at
+        assert latest.ended_at == ended_at
 
     def test_finish_session_returns_false_when_missing(self, db: Database) -> None:
         """未登録の session_uid では False。"""
-        assert db.finish_session("unknown", "引き継ぎ") is False
+        assert db.finish_session("unknown", "引き継ぎ", "2026-01-02T00:00:00+00:00") is False
 
     def test_get_latest_session_returns_newest_with_handoff(self, db: Database) -> None:
         """handoff が空のセッションは対象外で、引き継ぎを持つ中で開始の最も新しい 1 件を返す。"""
@@ -380,5 +372,5 @@ class TestSessions:
         assert db.get_latest_session("claq-dev") is None
         for uid, month in (("uid-1", "01"), ("uid-2", "03"), ("uid-3", "02")):
             db.start_session(Session(session_uid=uid, repo_id="claq-dev", started_at=f"2026-{month}-01T00:00:00+00:00"))
-            db.finish_session(uid, f"handoff for {uid}")
+            db.finish_session(uid, f"handoff for {uid}", "2026-04-01T00:00:00+00:00")
         assert db.get_latest_session("claq-dev").session_uid == "uid-2"

@@ -127,13 +127,13 @@ class TestGcRoots:
         monkeypatch.setattr(mod, "_pid_is_alive", lambda _pid: False)
         monkeypatch.setattr(Path, "unlink", _raise(OSError("boom")))
 
-        mod._gc_roots(roots_dir)
+        mod._gc_roots(roots_dir, keep_pids=frozenset())
 
         assert entry.exists()
 
     def test_missing_dir_is_noop(self, tmp_path: Path) -> None:
         """列挙できないディレクトリでは roots GC も env.sh tmp GC も例外を送出しない。"""
-        mod._gc_roots(tmp_path / "does-not-exist")
+        mod._gc_roots(tmp_path / "does-not-exist", keep_pids=frozenset())
         mod._gc_stale_temp_files(tmp_path / "does-not-exist", time.time())
 
     def test_stale_temp_gc_removes_only_old_env_sh_tmp(self, tmp_path: Path) -> None:
@@ -485,7 +485,7 @@ class TestEnvShRealExecution:
         dead_entry.write_text(f"{tmp_path / 'stale-root'}\nsome-lstart\n", encoding="utf-8")
         _age(dead_entry, _PAST_GRACE)
 
-        mod._gc_roots(roots_dir)
+        mod._gc_roots(roots_dir, keep_pids=frozenset())
         assert not dead_entry.exists()
 
         _assert_unresolved(_run_env_sh(_isolate_home))

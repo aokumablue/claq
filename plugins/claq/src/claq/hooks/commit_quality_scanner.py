@@ -31,7 +31,6 @@ import time
 from pathlib import Path
 
 from claq.lib.core_utils import log
-from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
 
 # deny 出力へ載せる不信データ（ステージされたファイルの行内容）の最大文字数。
 # stderr はモデルへ提示されるチャネルなので、長さ無制限の抜粋はコンテキストを
@@ -406,22 +405,29 @@ def should_scan_secrets(file_path: str) -> bool:
 _LINE_BREAKS = re.compile(r"\n+")
 
 
-def _fold_line_breaks(text: str) -> str:
-    """連続する改行を空白 1 個へ畳み、deny 出力の 1 項目が 1 行に収まるようにする。
+def _neutralize_one_line(text: str) -> str:
+    """不信テキストを deny 出力の 1 項目（1 行）へ無害化する。
 
-    行区切りを残すと、抜粋やパスに続けて `[Hook] PASS` のような行を偽装できる。呼び出し側は
-    `keep_allowed_chars` を先に掛け、U+2028・NEL・CR などを LF に揃えておく。
+    許可した文字だけを `keep_allowed_chars` で残し（不可視文字で分断したタグを `strip_tags` が
+    見られる形へ戻す）、囲いを偽装するタグを `strip_tags` で倒し、行区切りを空白 1 個へ畳む。
+    行区切りを残すと、抜粋やパスに続けて `[Hook] PASS` のような行を偽装できる。この順序（許可リスト
+    →タグ→改行畳み）は抜粋と表示パスで共通なので、1 箇所に閉じる。
+
+    `claq.mem.tag_stripping` は commit の検査結果を整形するときだけ要る。全 Bash 起動で読み込むと
+    import 時間に効くため、ここで遅延 import する。
 
     Args:
-        text: 許可リスト処理済みの文字列。
+        text: 不信な文字列。
 
     Returns:
-        改行を含まない文字列。
+        改行を含まない無害化済みの文字列。
 
     Raises:
         例外は発生しません。
     """
-    return _LINE_BREAKS.sub(" ", text)
+    from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
+
+    return _LINE_BREAKS.sub(" ", strip_tags(keep_allowed_chars(text)))
 
 
 def _sanitize_untrusted_excerpt(text: str) -> str:
@@ -442,7 +448,7 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
     Raises:
         例外は発生しません。
     """
-    sanitized = _fold_line_breaks(strip_tags(keep_allowed_chars(text.strip()))).strip()
+    sanitized = _neutralize_one_line(text.strip()).strip()
     if len(sanitized) > _UNTRUSTED_EXCERPT_MAX_CHARS:
         return sanitized[:_UNTRUSTED_EXCERPT_MAX_CHARS] + "…"
     return sanitized
@@ -470,7 +476,7 @@ def sanitize_untrusted_path(path: str) -> str:
     Raises:
         例外は発生しません。
     """
-    return _fold_line_breaks(strip_tags(keep_allowed_chars(path)))
+    return _neutralize_one_line(path)
 
 
 def _issue(kind: str, message: str, *, line: int, severity: str) -> dict:
