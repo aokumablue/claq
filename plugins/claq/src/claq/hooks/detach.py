@@ -183,7 +183,7 @@ def gc_detach_stdin_orphans() -> None:
             continue
 
 
-def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None = None) -> None:
+def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str]) -> None:
     """コマンドを detached（新セッション）で起動し stdin を一時ファイル経由で渡す。
 
     起動前に `gc_detach_stdin_orphans` で過去の孤児を掃除する。一時ファイルは
@@ -197,7 +197,7 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
     Args:
         cmd: subprocess に渡すコマンドリスト。
         raw_stdin: 子プロセスへ渡す stdin の内容。
-        env: 子プロセスの環境変数。None なら親の環境を継承する。
+        env: 子プロセスの環境変数。
 
     Raises:
         OSError: 一時ファイル・ログディレクトリを作れない、または起動できない場合。
@@ -211,7 +211,7 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str] | None
         stdin_file.write(raw_stdin)
         stdin_file.flush()
         stdin_file.seek(0)
-        child_env = dict(os.environ if env is None else env)
+        child_env = dict(env)
         child_env["CLAQ_BG_LOG_PATH"] = str(_detach_log_path())
         subprocess.Popen(
             [

@@ -10,7 +10,6 @@ def run_text(
     cmd: list[str],
     *,
     timeout: float | None,
-    input_text: str | None = None,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """UTF-8 text モードで subprocess.run を実行する。
@@ -18,7 +17,6 @@ def run_text(
     Args:
         cmd: 実行コマンド。
         timeout: タイムアウト秒数。
-        input_text: 標準入力に渡す文字列。
         extra_env: 追加で設定する環境変数。
 
     Returns:
@@ -29,7 +27,6 @@ def run_text(
         env.update(extra_env)
     return subprocess.run(
         cmd,
-        input=input_text,
         text=True,
         encoding="utf-8",
         errors="replace",

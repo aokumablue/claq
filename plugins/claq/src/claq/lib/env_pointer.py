@@ -356,7 +356,7 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
-def _gc_roots(roots_dir: Path, *, keep_pids: frozenset[int] = frozenset()) -> None:
+def _gc_roots(roots_dir: Path, *, keep_pids: frozenset[int]) -> None:
     """``roots/`` を掃除する。実行中ホストのポインタは残す。
 
     ``keep_pids`` に含まれるファイル名は削除しない（同じ呼び出しで書いたばかりの
