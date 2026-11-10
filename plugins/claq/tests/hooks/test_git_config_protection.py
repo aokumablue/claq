@@ -12,7 +12,13 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import bash_config_protection, block_no_verify, conditional_protection, config_protection
+from claq.hooks import (
+    bash_config_protection,
+    block_no_verify,
+    conditional_protection,
+    config_protection,
+    git_config_text,
+)
 
 from ._support import _bash
 from ._support import _run as _run_hook
@@ -323,14 +329,14 @@ def test_write_is_allowed(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
 
 
 def test_each_sensitive_prefix_is_blocked_in_a_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    """危険 key の集合は block_no_verify の `_SENSITIVE_CONFIG_KEY_PREFIXES` と 1 本で、全要素がファイル本文上でも deny される。"""
+    """危険 key の集合は `git_config_text._SENSITIVE_CONFIG_KEY_PREFIXES` と 1 本で、全要素がファイル本文上でも deny される。"""
     samples = {
         "core.hookspath": "[core]\nhookspath=x",
         "include.path": "[include]\npath = x",
         "includeif.": '[includeIf "gitdir:/"]\nany = y',
         "alias.": "[alias]\nany = y",
     }
-    assert set(samples) == set(block_no_verify._SENSITIVE_CONFIG_KEY_PREFIXES)
+    assert set(samples) == set(git_config_text._SENSITIVE_CONFIG_KEY_PREFIXES)
     for text in samples.values():
         assert _run(monkeypatch, _write(text)) == 2, text
 

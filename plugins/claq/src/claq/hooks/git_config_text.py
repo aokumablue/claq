@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -291,12 +290,48 @@ def parse_git_config(text: str) -> list[ConfigEntry]:
     return entries
 
 
-def _sensitive_entries(text: str, is_sensitive: Callable[[str], bool]) -> list[ConfigEntry]:
+# フック実行を左右しうる config key の前置。いずれも小文字で比較する。git の config key 名は
+# 大小文字を区別しない。
+#
+# - ``core.hookspath``: フック置き場そのものの差し替え。
+# - ``include.path`` / ``includeif.``: 取り込んだ先で ``core.hooksPath`` を書けるため、
+#   直接指定と等価。
+# - ``alias.``: ``git -c alias.ci='commit --no-verify' ci`` は ``--no-verify`` が config
+#   **値**の中にあるためフラグ走査に掛からない。展開結果を解釈する術が無い以上、
+#   alias の定義そのものを deny する（誤検出 > 誤通過）。
+#
+# `is_sensitive_config_key` は `git config` / ``-c`` の key（`block_no_verify`）にも、config ファイルの
+# 本文を解析して得た key（`conditional_protection`）にも使う。key 集合を 1 本にするため、
+# 両者が共有するここに置く。
+_SENSITIVE_CONFIG_KEY_PREFIXES = (
+    "core.hookspath",
+    "include.path",
+    "includeif.",
+    "alias.",
+)
+
+
+def is_sensitive_config_key(key: str) -> bool:
+    """config key がフック実行を左右しうるものかを判定する。
+
+    Args:
+        key: config key 名（完全修飾 ``section.sub.key`` でもよい。大小文字不問）。
+
+    Returns:
+        `_SENSITIVE_CONFIG_KEY_PREFIXES` のいずれかに前方一致すれば True。
+
+    Raises:
+        例外は発生しません。
+    """
+    normalized = key.strip().lower()
+    return any(normalized.startswith(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES)
+
+
+def _sensitive_entries(text: str) -> list[ConfigEntry]:
     """本文の中の危険 key のエントリを、現れた順に返す。
 
     Args:
         text: 解析対象の本文。
-        is_sensitive: 完全修飾 key を受け取り、危険かを返す関数。
 
     Returns:
         危険なエントリの列。
@@ -304,10 +339,10 @@ def _sensitive_entries(text: str, is_sensitive: Callable[[str], bool]) -> list[C
     Raises:
         GitConfigParseError: 本文を解析できない。
     """
-    return [entry for entry in parse_git_config(text) if is_sensitive(entry.key)]
+    return [entry for entry in parse_git_config(text) if is_sensitive_config_key(entry.key)]
 
 
-def adds_sensitive_entries(before: str, after: str, is_sensitive: Callable[[str], bool]) -> bool:
+def adds_sensitive_entries(before: str, after: str) -> bool:
     """置換後の本文が、置換前に無かった危険 key（または変わった実効値）を持つか判定する。
 
     置換後の危険エントリが置換前の部分列で、かつ key ごとの最後の値（実効値）が変わらない
@@ -319,7 +354,6 @@ def adds_sensitive_entries(before: str, after: str, is_sensitive: Callable[[str]
     Args:
         before: 置換前の全文。
         after: 置換後の全文。
-        is_sensitive: 完全修飾 key を受け取り、危険かを返す関数。
 
     Returns:
         新しく現れた、または実効値の変わった危険 key があれば True。
@@ -327,9 +361,9 @@ def adds_sensitive_entries(before: str, after: str, is_sensitive: Callable[[str]
     Raises:
         GitConfigParseError: 置換後の本文を解析できない。
     """
-    new = _sensitive_entries(after, is_sensitive)
+    new = _sensitive_entries(after)
     try:
-        old = _sensitive_entries(before, is_sensitive)
+        old = _sensitive_entries(before)
     except GitConfigParseError:
         old = []
     remaining = iter(old)

@@ -196,7 +196,7 @@ _VOCABULARY_DENY_ALLOW_CASES = (
     # 区切りが効かないとセグメントが融合し、後続コマンドが実行位置に来ない。
     ("shell_tokens.SHELL_SEPARATORS", "bash_config_protection", "cat notes.txt {item} rm ruff.toml", "cat notes.txt {item} rm app.py"),
     # --- block_no_verify の config 注入経路 ---
-    ("block_no_verify._SENSITIVE_CONFIG_KEY_PREFIXES", "block_no_verify", "git -c {item}=x commit -m y", "git -c user.name=x commit -m y"),
+    ("git_config_text._SENSITIVE_CONFIG_KEY_PREFIXES", "block_no_verify", "git -c {item}=x commit -m y", "git -c user.name=x commit -m y"),
     ("block_no_verify._GIT_CONFIG_INJECTION_ENV_NAMES", "block_no_verify", "{item}=x git commit -m y", "SOME_VAR=x git commit -m y"),
     ("block_no_verify._GIT_CONFIG_WRITE_FLAGS", "block_no_verify", "git config {item} core.hooksPath x", "git config {item} user.name x"),
     ("block_no_verify._GIT_CONFIG_NEW_WRITE_OPS", "block_no_verify", "git config {item} core.hooksPath x", "git config {item} user.name x"),
