@@ -192,7 +192,7 @@ def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
         raw_bytes = _read_stdin_bytes(max_bytes)
     except StdinUnavailableError:
         return ""
-    return raw_bytes[:max_bytes].decode("utf-8", errors="replace")
+    return raw_bytes.decode("utf-8", errors="replace")
 
 
 def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[str, bool]:
@@ -279,8 +279,6 @@ def parse_json_object(raw: str) -> dict[str, Any] | None:
     Raises:
         例外は発生せず、パースエラー時は None を返します。
     """
-    if not raw or not raw.strip():
-        return None
     try:
         parsed = json.loads(raw)
     except JSON_PARSE_FAILURES:

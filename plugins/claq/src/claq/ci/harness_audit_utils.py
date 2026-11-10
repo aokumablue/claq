@@ -17,9 +17,7 @@ REPO_CORE_MARKERS = [
     "agents",
     "skills",
 ]
-HARNESS_MARKERS = [
-    "src/claq/ci/harness_audit.py",
-]
+HARNESS_MARKER = "src/claq/ci/harness_audit.py"
 
 
 def make_check(
@@ -142,8 +140,6 @@ def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
 def count_files(root_dir: str | Path, relative_dir: str, extension: str | None) -> int:
     """指定ディレクトリ以下の、``extension`` で終わる（None なら全）ファイル数を数える。"""
     dir_path = Path(root_dir, relative_dir)
-    if not dir_path.exists():
-        return 0
     return sum(1 for entry in _walk_dir(dir_path) if extension is None or entry.name.endswith(extension))
 
 
@@ -163,28 +159,20 @@ def safe_parse_json(text: str) -> Any | None:
         return None
 
 
-def _has_any_file(root_dir: str | Path, relative_paths: Sequence[str]) -> bool:
-    """候補パスのどれか 1 つでも存在するかを調べる。"""
-    return any(file_exists(root_dir, relative_path) for relative_path in relative_paths)
-
-
-def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions: str | Sequence[str]) -> bool:
+def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions: Sequence[str]) -> bool:
     """指定拡張子のファイルが 1 つでもあるかを調べる。"""
-    dir_path = Path(root_dir, relative_dir)
-    if not dir_path.exists():
-        return False
-    suffixes = (extensions,) if isinstance(extensions, str) else tuple(extensions)
-    return any(entry.name.endswith(suffixes) for entry in _walk_dir(dir_path))
+    suffixes = tuple(extensions)
+    return any(entry.name.endswith(suffixes) for entry in _walk_dir(Path(root_dir, relative_dir)))
 
 
 def detect_target_mode(root_dir: str | Path) -> str:
     """repo か consumer かを判定する。
 
     判定材料はプラグイン提供元としての構造（``REPO_CORE_MARKERS`` と
-    ``HARNESS_MARKERS``）だけに置く。``package.json`` の ``name`` のような
+    ``HARNESS_MARKER``）だけに置く。``package.json`` の ``name`` のような
     プラグイン名で判定すると、claq 自身と無関係な名前で repo 判定しうる。
     """
-    if all(file_exists(root_dir, marker) for marker in REPO_CORE_MARKERS) and _has_any_file(root_dir, HARNESS_MARKERS):
+    if all(file_exists(root_dir, marker) for marker in REPO_CORE_MARKERS) and file_exists(root_dir, HARNESS_MARKER):
         return "repo"
     return "consumer"
 
