@@ -12,6 +12,7 @@ import re
 
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
+    INPLACE_EDIT_EXECUTABLES,
     is_git_executable_token,
     is_inplace_edit_flag,
 )
@@ -140,9 +141,6 @@ _WORKTREE_MUTATING_EXECUTABLES = frozenset(
         "unlink",
     }
 )
-# `-i` を伴うときだけ書き込みになるコマンド。フラグ無しでも書き込むコマンド（`ed` 等）を
-# ここへ置くとフラグ判定に落ちて allow になるため、`ALWAYS_MUTATING_EDIT_EXECUTABLES` に置く。
-_INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl"})
 # `>&` は直後が fd 番号（数字のみ）か `-` のとき、fd の複製・クローズでありファイルへ書かない。
 # それ以外（`>&file`）は `&>file` の別綴りで書き込み。`2>&1` も `2`・`>&`・`1` に割れる。
 _FD_DUP_OPERATOR = ">&"
@@ -208,7 +206,7 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
         name = normalize_executable_name(token)
         if name in _WORKTREE_MUTATING_EXECUTABLES or name in ALWAYS_MUTATING_EDIT_EXECUTABLES:
             return True
-        if name in _INPLACE_EDIT_EXECUTABLES:
+        if name in INPLACE_EDIT_EXECUTABLES:
             return any(is_inplace_edit_flag(arg) for arg in segment[i + 1 :])
 
     return False

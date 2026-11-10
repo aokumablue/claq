@@ -198,8 +198,13 @@ _BLOCKED_CASES = [
         "pre_bash_commit_quality",
         _bash("perl -0pi -e s/a/b/ app.py && git commit -m 'fix: x'"),
     ),
+    (
+        "ruby の in-place",
+        "pre_bash_commit_quality",
+        _bash("ruby -pi -e 1 app.py && git commit -m 'fix: x'"),
+    ),
     # フラグ無しでファイルを書き換えるエディタ。`ed` をフラグを要求する
-    # `_INPLACE_EDIT_EXECUTABLES` に置くと、``ed app.py && git commit``
+    # `INPLACE_EDIT_EXECUTABLES` に置くと、``ed app.py && git commit``
     # が mutation-before-commit ガードを素通りする。
     ("ed の commit 前編集", "pre_bash_commit_quality", _bash("ed app.py && git commit -m 'fix: x'")),
     ("ex の commit 前編集", "pre_bash_commit_quality", _bash("ex app.py && git commit -m 'fix: x'")),

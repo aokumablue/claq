@@ -169,13 +169,6 @@ _VOCABULARY_DENY_ALLOW_CASES = (
     ("bash_config_protection._TOUCH_COMMANDS", "bash_config_protection", "{item} ruff.toml", "{item} app.py"),
     ("bash_config_protection._LN_COMMANDS", "bash_config_protection", "{item} -s weak.toml ruff.toml", "{item} -s weak.toml app.py"),
     ("bash_config_protection._DD_COMMANDS", "bash_config_protection", "{item} if=/dev/null of=ruff.toml", "{item} if=/dev/null of=app.py"),
-    # in-place 側は「フラグを外すと allow」を対にする（フラグ判定が生きている証拠）。
-    (
-        "bash_config_protection._INPLACE_EDIT_COMMANDS",
-        "bash_config_protection",
-        "{item} -i s/x/y/ ruff.toml",
-        "{item} s/x/y/ ruff.toml",
-    ),
     # wrapper は「実行位置に無ければ allow」を対にする（実行位置の判定軸）。
     ("bash_config_protection._COMMAND_POSITION_WRAPPERS", "bash_config_protection", "{item} rm ruff.toml", "echo {item} rm ruff.toml"),
     (
@@ -186,6 +179,19 @@ _VOCABULARY_DENY_ALLOW_CASES = (
     ),
     # --- hook_common / shell_tokens の共有語彙 ---
     ("hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES", "bash_config_protection", "{item} ruff.toml", "{item} app.py"),
+    # in-place 側は「フラグを外すと allow」を対にする（フラグ判定が生きている証拠）。共有する両フックで測る。
+    (
+        "hook_common.INPLACE_EDIT_EXECUTABLES",
+        "bash_config_protection",
+        "{item} -i s/x/y/ ruff.toml",
+        "{item} s/x/y/ ruff.toml",
+    ),
+    (
+        "hook_common.INPLACE_EDIT_EXECUTABLES",
+        "pre_bash_commit_quality",
+        "{item} -i s/a/b/ app.py && git commit -m 'fix: x'",
+        "{item} s/a/b/ app.py && git commit -m 'fix: x'",
+    ),
     ("shell_tokens.SHELL_WRAPPER_EXECUTABLES", "block_no_verify", "{item} -c '" + _NO_VERIFY + "'", "{item} -c 'git commit -m x'"),
     (
         "heredoc._BODY_EXECUTING_BUILTINS",
@@ -212,12 +218,6 @@ _VOCABULARY_DENY_ALLOW_CASES = (
         "pre_bash_commit_quality",
         "{item} app.py && git commit -m 'fix: x'",
         "cat app.py && git commit -m 'fix: x'",
-    ),
-    (
-        "commit_risk._INPLACE_EDIT_EXECUTABLES",
-        "pre_bash_commit_quality",
-        "{item} -i s/a/b/ app.py && git commit -m 'fix: x'",
-        "{item} s/a/b/ app.py && git commit -m 'fix: x'",
     ),
 )
 

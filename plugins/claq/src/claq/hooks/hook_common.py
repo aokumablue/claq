@@ -207,6 +207,13 @@ def is_git_executable_token(token: str) -> bool:
 # 割れると、片方だけずれた語彙を持って静かなバイパスになる。
 ALWAYS_MUTATING_EDIT_EXECUTABLES = frozenset({"ed", "red", "ex", "sponge"})
 
+# in-place 編集フラグ（`is_inplace_edit_flag`）を**伴うときだけ**引数のファイルを書き換えるコマンド。
+# `ruby -pi` は `perl -pi` と同じ in-place 編集。`python3 -c` のような任意インタプリタは非目標で、
+# ここには入れない。フラグ無しでも書き込むコマンド（`ed` 等）をここへ置くとフラグ判定に落ちて
+# allow になるため、`ALWAYS_MUTATING_EDIT_EXECUTABLES` に置く。
+# `bash_config_protection` と `pre_bash_commit_quality` が共有する。
+INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl", "ruby"})
+
 # カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
 # 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
 # `bash_config_protection` と `pre_bash_commit_quality` が共有する。
