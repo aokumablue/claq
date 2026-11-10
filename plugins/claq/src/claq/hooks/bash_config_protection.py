@@ -73,6 +73,7 @@ from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     DIRECTORY_CHANGE_COMMANDS,
+    INPLACE_EDIT_EXECUTABLES,
     basename,
     effective_basename,
     emit_block_output,
@@ -151,10 +152,6 @@ _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
 _TEE_COMMANDS = frozenset(
     {"tee", "set-content", "add-content", "out-file", "new-item", "sc", "ac", "ni"}
 )
-# in-place 編集で**フラグを伴うときだけ**書き込みになるコマンド。フラグ無しでも書き込む
-# エディタは `ALWAYS_MUTATING_EDIT_EXECUTABLES` の側。`ruby -pi` は `perl -pi` と同じ
-# in-place 編集。`python3 -c` のような任意インタプリタは非目標で、ここには入れない。
-_INPLACE_EDIT_COMMANDS = frozenset({"sed", "perl", "ruby"})
 # `-f` の有無で区別しない。保護対象がまだ無い状態での `ln -s weak.toml ruff.toml` も、
 # その名前を読む処理をリンク先の内容へ差し替える実質的な書き込みである。
 _LN_COMMANDS = frozenset({"ln"})
@@ -444,7 +441,7 @@ def _redirect_targets(segment: list[str]) -> list[str]:
 # 実行位置だけで照合し、``echo tee pyproject.toml`` のような非実行位置の言及は見ない。
 _EXECUTED_COMMAND_TARGET_RULES = (
     (_TEE_COMMANDS, _non_option_args),
-    (_INPLACE_EDIT_COMMANDS, _inplace_edit_args),
+    (INPLACE_EDIT_EXECUTABLES, _inplace_edit_args),
     (ALWAYS_MUTATING_EDIT_EXECUTABLES, _non_option_args),
     (_TOUCH_COMMANDS, _non_option_args),
     (_LAST_ARG_WRITE_COMMANDS, _last_non_option_arg),

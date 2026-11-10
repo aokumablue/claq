@@ -396,7 +396,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "bash_config_protection._TEE_COMMANDS": frozenset(
         {"ac", "add-content", "new-item", "ni", "out-file", "sc", "set-content", "tee"}
     ),
-    "bash_config_protection._INPLACE_EDIT_COMMANDS": frozenset({"perl", "ruby", "sed"}),
     "bash_config_protection._LN_COMMANDS": frozenset({"ln"}),
     "bash_config_protection._DD_COMMANDS": frozenset({"dd"}),
     "bash_config_protection._TOUCH_COMMANDS": _EXPECTED_TOUCH_COMMANDS,
@@ -571,6 +570,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     ),
     # --- hook_common ---
     "hook_common.ALWAYS_MUTATING_EDIT_EXECUTABLES": frozenset({"ed", "red", "ex", "sponge"}),
+    "hook_common.INPLACE_EDIT_EXECUTABLES": frozenset({"perl", "ruby", "sed"}),
     "hook_common.DIRECTORY_CHANGE_COMMANDS": _EXPECTED_DIRECTORY_CHANGE_COMMANDS,
     # --- commit_risk ---
     "commit_risk._INDEX_MUTATING_GIT_SUBCOMMANDS": frozenset(
@@ -611,7 +611,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "unlink",
         }
     ),
-    "commit_risk._INPLACE_EDIT_EXECUTABLES": frozenset({"perl", "sed"}),
 }
 
 # 完全一致で固定**しない**語彙と、その代わりに何が固定しているか。
