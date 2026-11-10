@@ -121,8 +121,8 @@ def coerce_confidence(value: Any) -> float:
     return confidence
 
 
-def _fixed_choice(payload: dict[str, Any], name: str, fixed_value: str) -> str:
-    """generic learn 経路で常に固定値を返し、payload の非既定値を authority として拒否する。
+def _reject_override(payload: dict[str, Any], name: str, fixed_value: str) -> None:
+    """generic learn 経路の固定値について、payload の非既定値を authority として拒否する。
 
     payload が *name* を明示的に指定していて、かつその値が *fixed_value* と
     異なる場合は ``KnowledgeInputError`` にする。未指定、または *fixed_value*
@@ -133,9 +133,6 @@ def _fixed_choice(payload: dict[str, Any], name: str, fixed_value: str) -> str:
         name: 項目名。ペイロードのキーとエラーメッセージに使う。
         fixed_value: この経路が常に使う固定値。
 
-    Returns:
-        常に *fixed_value*。
-
     Raises:
         KnowledgeInputError: payload が *fixed_value* と異なる値を明示した場合。
     """
@@ -144,7 +141,6 @@ def _fixed_choice(payload: dict[str, Any], name: str, fixed_value: str) -> str:
         raise KnowledgeInputError(
             f"{name} は generic learn からは指定できません（常に {fixed_value!r} 固定）: {raw!r}"
         )
-    return fixed_value
 
 
 def _short_digest(text: str) -> str:
@@ -246,8 +242,6 @@ class KnowledgeDraft:
         body: why / how の補足。空でよい。
         domain: ``testing`` ``git`` ``build`` 等。任意。
         confidence: 0.0〜1.0 の確信度。
-        status: ``active`` / ``pending`` / ``archived``。
-        source: ``agent`` / ``observer`` / ``human``。
         source_ref: 出所の自由記述（ファイルパス等）。
     """
 
@@ -258,8 +252,6 @@ class KnowledgeDraft:
     body: str
     domain: str | None
     confidence: float
-    status: str
-    source: str
     source_ref: str | None
 
     def to_knowledge(self, repo_id: str | None) -> Knowledge:
@@ -274,7 +266,9 @@ class KnowledgeDraft:
         """
         now = utc_now_iso()
         draft = {field.name: getattr(self, field.name) for field in fields(self)}
-        return Knowledge(**draft, repo_id=repo_id, created_at=now, updated_at=now)
+        return Knowledge(
+            **draft, status=_FIXED_STATUS, source=_FIXED_SOURCE, repo_id=repo_id, created_at=now, updated_at=now
+        )
 
 
 def _stripped_optional(value: Any) -> str | None:
@@ -307,7 +301,7 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     redaction を素通りする穴を作らない）。
 
     ``source``/``status`` は常に ``agent``/``pending`` に固定し、payload が
-    それ以外の値を明示した場合は拒否する（`_fixed_choice`）。
+    それ以外の値を明示した場合は拒否する（`_reject_override`）。
 
     Args:
         payload: 知識カードを表す dict。
@@ -328,8 +322,8 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
 
     kind = validate_choice("kind", str(payload.get("kind") or ""), KINDS)
     scope = validate_choice("scope", str(payload.get("scope") or "repo"), SCOPES)
-    source = _fixed_choice(payload, "source", _FIXED_SOURCE)
-    status = _fixed_choice(payload, "status", _FIXED_STATUS)
+    _reject_override(payload, "source", _FIXED_SOURCE)
+    _reject_override(payload, "status", _FIXED_STATUS)
 
     raw_key = keep_allowed_chars(str(payload.get("key") or "")).strip()
     # 明示 key もシークレット断片を持ち込みうるため、生成 key と同じく
@@ -351,7 +345,5 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
         body=redact_knowledge_text(body),
         domain=redact_knowledge_text(domain) if domain else None,
         confidence=coerce_confidence(payload.get("confidence")),
-        status=status,
-        source=source,
         source_ref=redact_knowledge_text(source_ref) if source_ref else None,
     )

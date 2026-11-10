@@ -124,15 +124,16 @@ class TestParseKnowledgePayload:
             body="",
             domain=None,
             confidence=DEFAULT_CONFIDENCE,
-            status="pending",
-            source="agent",
             source_ref=None,
         )
+        card = draft.to_knowledge(None)
+        assert (card.source, card.status) == ("agent", "pending")
 
     def test_explicit_default_source_and_status_are_kept(self) -> None:
         """既定値と同じ値の明示（source=agent, status=pending）は無害なので許可する。"""
         draft = parse_knowledge_payload({"kind": "fact", "title": "t", "source": "agent", "status": "pending"})
-        assert (draft.source, draft.status) == ("agent", "pending")
+        card = draft.to_knowledge(None)
+        assert (card.source, card.status) == ("agent", "pending")
 
     def test_explicit_key_and_fields_are_kept(self) -> None:
         """明示された key と任意項目はそのまま残る。"""
