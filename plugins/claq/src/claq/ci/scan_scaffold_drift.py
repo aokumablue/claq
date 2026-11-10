@@ -42,7 +42,6 @@ CI へは組み込まない。コーパスは各利用者のローカルにし�
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from collections import Counter
@@ -52,7 +51,13 @@ from typing import Any
 
 from claq.lib.core_utils import read_tail_text
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, normalize_user_message
-from claq.mem.handoff import TRANSCRIPT_MAX_BYTES, is_trusted_transcript, trusted_transcript_roots
+from claq.mem.handoff import (
+    TRANSCRIPT_MAX_BYTES,
+    is_trusted_transcript,
+    parse_entry,
+    trusted_transcript_roots,
+    user_entry_content,
+)
 from claq.mem.tag_stripping import STRIPPED_TAGS, drop_known_tag_blocks
 
 # 依頼本文に現れても足場ではないタグ。ここが古びると「誤検知 1 件」として
@@ -162,17 +167,9 @@ def _user_texts(raw: str) -> Iterator[str]:
         user エントリのプレーンテキスト。
     """
     for line in raw.splitlines():
-        try:
-            entry = json.loads(line.strip())
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(entry, dict):
-            continue
-        message = entry.get("message")
-        message = message if isinstance(message, dict) else {}
-        if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
-            continue
-        yield from _content_texts(message.get("content") or entry.get("content"))
+        entry = parse_entry(line)
+        if entry is not None:
+            yield from _content_texts(user_entry_content(entry))
 
 
 def iter_transcripts(roots: Iterable[Path], limit: int) -> list[Path]:

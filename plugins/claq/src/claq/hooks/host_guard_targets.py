@@ -76,9 +76,9 @@ def match_folded_path_window(
     Raises:
         例外は発生しません。
     """
-    folded_parts = tuple(normalize_protected_name(part) for part in parts)
+    folded_parts = fold_path_parts(parts)
     for segments in candidates:
-        folded_segments = tuple(normalize_protected_name(part) for part in segments)
+        folded_segments = fold_path_parts(segments)
         width = len(folded_segments)
         for index in range(len(folded_parts) - width + 1):
             if folded_parts[index : index + width] == folded_segments:

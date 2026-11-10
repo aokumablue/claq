@@ -10,7 +10,6 @@ import contextlib
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -202,6 +201,10 @@ def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str]) -> No
     Raises:
         OSError: 一時ファイル・ログディレクトリを作れない、または起動できない場合。
     """
+    # 遅延 import: tempfile は shutil 経由で圧縮モジュール群を引き込む。SessionStart は
+    # 起動のたびに本モジュールを import するが、一時ファイルが要るのは --bg で起動するときだけ。
+    import tempfile
+
     gc_detach_stdin_orphans()
     private_dir = ensure_private_dir(get_claq_dir())
     stdin_file = tempfile.NamedTemporaryFile(

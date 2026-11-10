@@ -19,7 +19,7 @@ from typing import Any
 from claq.hooks.conditional_protection import conditional_block_reason, git_config_block_reason
 from claq.hooks.git_config_text import GLOBAL_GIT_CONFIG_DISPLAY_NAMES, global_git_config_path
 from claq.hooks.hook_common import (
-    basename,
+    effective_basename,
     emit_block_output,
     fold_path_parts,
     memoized_in_scan,
@@ -232,26 +232,6 @@ def repo_git_config_path(file_path: str) -> str | None:
     return _match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS, _GIT_CONFIG_REPO_SEGMENTS_FOLDED)
 
 
-def _effective_basename(file_path: str) -> str:
-    """symlink を解決した実体 basename を返す。
-
-    raw path の basename だけを見ると ``alias -> pyproject.toml`` のような symlink 経由の
-    書込みがすり抜ける。解決不能（壊れた・循環した symlink 等）な場合は raw path の
-    basename にフォールバックする。解決不能を deny に倒すと正当な編集まで巻き込むため。
-
-    Args:
-        file_path: 検査対象の生パス文字列。
-
-    Returns:
-        判定に使う basename。
-
-    Raises:
-        例外は発生しません。
-    """
-    resolved = resolve_effective_target(file_path)
-    return resolved.name if resolved is not None else basename(file_path)
-
-
 def blocked_message_for_file(file_name: str) -> str:
     """保護されたファイルに対するブロックメッセージを生成する。
 
@@ -415,7 +395,7 @@ def _block_reason_for_file(tool_name: str, container: Any, file_path: str) -> st
         reason = git_config_block_reason(tool_name, container, file_path, git_config)
         if reason:
             return reason
-    file_name = _effective_basename(file_path)
+    file_name = effective_basename(file_path)
     # 判定は畳んだ名前、メッセージは観測した綴り（利用者が書いた通りの名前が
     # 出ないと、なぜ止まったのかが読み取れなくなる）。
     folded_name = normalize_protected_name(file_name)
