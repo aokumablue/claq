@@ -70,7 +70,7 @@ for event, groups in d['hooks'].items():
 
 委譲元（ステップ2 で委譲経路そのものを測る回だけ経由させる）:
 
-- `loop-dev` ← `feat-dev` / `bugfix` / `refactor` / `test-gen` / `plan` / `review`
+- `loop-dev` ← `feat-dev` / `bugfix` / `refactor` / `test-gen` / `package-upgrade` / `plan` / `review`
 - `skill-make` ← `skill-gen`
 - `refactor-prep` / `refactor-rollback` ← `refactor`
 
@@ -120,6 +120,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
 |---|---|
 | commands | `/<name>` として起動する（`user-invocable` の制約は無い） |
 | skills（`user-invocable: true`） | 同じく `/<name>` で直接起動する |
+| skills（`disable-model-invocation: true`） | モデルからは起動できない。利用者に `/<name>` の実行を依頼し、結果が貼られるまでは `Not run` に数える。依頼は全件を 1 回にまとめる |
 | skills（`user-invocable: false`） | Skill ツールへスキル名を指定して起動する（`/` 補完には出ないが Skill ツール経由は妨げられない）。委譲経路そのものを測る回だけ、ステップ1 の委譲元コマンドを経由させる |
 | agents | Agent ツールで `subagent_type` に名前を指定して起動する。起動の前提を持つ agent（`grader` はトランスクリプト、`comparator` は同一課題の 2 出力、`bench-analyzer` は決着済みの比較）は、前提を満たす実材料を用意してから呼ぶ。前提を捏造して呼ぶと「起動した」記録だけが残る |
 
