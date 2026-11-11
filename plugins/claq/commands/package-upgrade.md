@@ -14,6 +14,7 @@ command: /package-upgrade
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `package upgrade {package}` / `migration pitfall {package}`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: ステップ4 の基準で `claq_mem_learn` を使う
+- 相対パスの md: このファイルは `commands/` にある。プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 
 ## ステップ1: 対象と目標版の確定
 
