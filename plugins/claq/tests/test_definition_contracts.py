@@ -22,6 +22,7 @@ _PLANNER_MODE_RE = re.compile(r"mode: (?:evaluate|decide)")
 _RELATIVE_MD_HINT = '`. "$HOME/.claq/env.sh" && claq_plugin_root`'
 _DELEGATORS_LINE_RE = re.compile(r"^- `loop-dev` ← (.+)$", re.M)
 _DESCRIPTION_DELEGATORS_RE = re.compile(r"^description: .*?。([a-z/-]+) からの委譲専用。$", re.M)
+_SKILL_INVOCATION_RE = re.compile(r"`([a-z-]+)` skill")
 
 
 def _corpus() -> list[tuple[Path, str]]:
@@ -112,3 +113,21 @@ def test_commands_with_relative_md_reference_state_base() -> None:
         if path.parts[0] == "commands" and re.search(r"`\.\./[^`\n]+\.md`", text) and _RELATIVE_MD_HINT not in text
     ]
     assert not missing, "相対 md 参照の基準が書かれていない:\n" + "\n".join(missing)
+
+
+def test_forked_skills_invoked_by_commands_run_in_foreground() -> None:
+    """command が名指しして起動する fork の skill は `background: false` を持つ（既定は後のターンに結果が届く）。"""
+    invoked = {
+        name
+        for path, text in _corpus()
+        if path.parts[0] == "commands"
+        for name in _SKILL_INVOCATION_RE.findall(text)
+    }
+    assert invoked, "Skill ツールで skill を起動する command が見つからない"
+    missing = [
+        name
+        for name in sorted(invoked)
+        if "\ncontext: fork\n" in (text := (_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8"))
+        and "\nbackground: false\n" not in text
+    ]
+    assert not missing, "fork の skill に background: false が無い:\n" + "\n".join(missing)

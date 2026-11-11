@@ -2,6 +2,7 @@
 name: loop-dev
 description: 合意済み要件を受けて plan→generate→evaluate を最大2反復で収束させる実装ループ。feat-dev/bugfix/refactor/test-gen/package-upgrade/plan/review からの委譲専用。
 context: fork
+background: false
 user-invocable: false
 ---
 
