@@ -71,7 +71,7 @@
 | C5 | クローズ | `refactor-fix` は loop-dev の列挙内で、review も同じ値を使う。誤選択の再現が無い | — |
 | C6 | 実施（一部） | rollback は prep の出力を入力に取る。reviewer / security-auditor は INFO を返すのに要約で落ちていた | 起動順を明記、`Issues` に INFO を追加。節の並べ替えは P3 として見送り |
 | C7 | クローズ | 散文のレポートで壊れる振る舞いを示せない（好みの問題） | — |
-| S2 | クローズ | `user-invocable: false` は「/ メニューに出さないだけで Claude は起動できる」（skills）。adr・checkpoint は自動起動で成立する。secure は description がモデルに見えないだけで実害なし | — |
+| S2 | クローズ | `user-invocable: false` は "Only Claude can invoke"、"hides it from the `/` menu"（skills）。adr・checkpoint は自動起動で成立する。secure は description がモデルに見えないだけで実害なし | — |
 | S3 | 実施 | 出力は `n.n / 10` を求めるが式が無く、同じ履歴から値が揺れる | 満たした基準の数から決まる式を追加。blocker 0 件の履歴は満点、実行 0 件は `N/A` |
 | V1 | 実施（V1-e を除く） | 下の「CI に足す検査」 | `tests/test_definition_contracts.py` |
 
@@ -84,7 +84,7 @@
 
 ### 新たに見つけた点（提案）
 
-- fork skill（loop-dev / search / skill-make / maintain / skill-tune / learn / refactor-prep / loop-audit）の frontmatter に `background:` が無い。skills の文書は fork を既定でバックグラウンド実行とし、`background: false` で起動したターンに結果を待つとする。commands は loop-dev の報告を受け取ってから次へ進む前提で書かれている。`validate_skills` は未知キーを拒否しないので 1 行で足せるが、他のハーネスでの扱いを確かめてから決める
+- fork skill（loop-dev / search / skill-make / maintain / skill-tune / learn / refactor-prep / loop-audit）の frontmatter に `background:` が無い。skills の文書には「The forked subagent runs in the background」とあり、`background: false` で起動したターンに結果を待つとする（**実機未確認**。公式ドキュメント由来）。commands は loop-dev の報告を受け取ってから次へ進む前提で書かれている。`validate_skills` は未知キーを拒否しないので 1 行で足せるが、他のハーネスでの扱いを確かめてから決める
 
 ### 出典
 
@@ -530,7 +530,7 @@ ADR は「定義に書いた検証規則は CI で実測する」としている
 再調査を避けるために残す。
 
 - fork skill（loop-dev / search / skill-make / maintain / skill-tune）は停止文言と `run_in_background: false` を持つ
-- `learn` / `loop-audit` / `refactor-prep` は子を起動しないので background 規定は不要
+- `learn` / `loop-audit` / `refactor-prep` は子を起動しないので、子の `run_in_background` の規定は不要（fork 自身の `background:` は「新たに見つけた点」で扱う）
 - loop-dev は「委譲先には注入が届かない。渡したい知識は依頼文に書く」と明記しており、Bash を持たない agent へのメモリ経路は手当て済み
 - `harness-tuner.md` の `rubric_version`・`max_score` の例は `tests/test_md_references.py` が実値との一致を検査している
 - agents の `tools` 宣言は同テストが期待値との完全一致を検査している
