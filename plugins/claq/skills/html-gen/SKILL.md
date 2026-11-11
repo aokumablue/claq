@@ -165,7 +165,7 @@ python3 /abs/path/to/dest/check_site.py /abs/path/to/dest
 
 ## 完了条件
 
-手順4 の `check_site.py` PASS・`e2e_contrast.js` GREEN・確認 3〜6 がすべて通り、一覧に主要項目の絞り込みが生成されている（生成されなくても検査は落ちないので目で確かめる）。
+手順4 の `check_site.py` PASS・`e2e_contrast.js` GREEN・確認 3〜6 がすべて通り、一覧に主要項目の絞り込みが生成されている（生成されなくても検査は落ちないので目で確かめる）。完了報告に `追加した防御`（file:line と引用した根拠）と `提案`（理由と出典）を書く。無ければ「なし」と書く。
 
 ## 永続メモリ
 

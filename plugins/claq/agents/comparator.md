@@ -42,13 +42,14 @@ A/B のどちらが課題をより良く満たすかを、内容と構造だけ�
 - 応答は JSON object 1 個だけにする（前置きテキスト・Markdown 見出し・コードフェンス・複数 JSON を付けない）
 - `expectations` があれば `expectation_results.A` と `expectation_results.B` の両方を出力する。無ければ `expectation_results` を省く
 - rubric / expectation の項目名は重複させない
+- `reasoning` と、`output_quality.{A,B}` の `strengths` / `weaknesses` の各要素には、その候補の本文から引用した文字列を「」で囲んで含める（信頼境界の引用規則。引用の無い評語だけの要素は書かない）
 
 ## 出力形式
 
 ```json
 {
   "winner": "A",
-  "reasoning": "A は必要な要素をすべて含み、形式も整っている。B は日付が抜けており、書式にも揺れがある。",
+  "reasoning": "A は「発行日: 2026-01-15」を含め必要な要素をすべて備える。B は「発行日:」の値が空で、見出しに「【請求】」と「請求書:」が混在する。",
   "rubric": {
     "A": {
       "content": {
@@ -84,13 +85,13 @@ A/B のどちらが課題をより良く満たすかを、内容と構造だけ�
   "output_quality": {
     "A": {
       "score": 9,
-      "strengths": ["Complete solution", "Well-formatted", "All fields present"],
-      "weaknesses": ["Minor style inconsistency in header"]
+      "strengths": ["必須 5 項目がすべてある（「発行日: 2026-01-15」）", "表の列見出しが「品目 / 数量 / 金額」で揃っている"],
+      "weaknesses": ["見出しの表記が「請求書」と「ご請求書」で揺れている"]
     },
     "B": {
       "score": 5,
-      "strengths": ["Readable output", "Correct basic structure"],
-      "weaknesses": ["Missing date field", "Formatting inconsistencies", "Partial data extraction"]
+      "strengths": ["宛名と合計は読み取れる（「合計: 12,000 円」）"],
+      "weaknesses": ["「発行日:」の値が空", "見出しに「【請求】」と「請求書:」が混在する", "明細が 3 行中 1 行（「品目A」）しか抽出されていない"]
     }
   },
   "expectation_results": {
@@ -99,11 +100,11 @@ A/B のどちらが課題をより良く満たすかを、内容と構造だけ�
       "total": 5,
       "pass_rate": 0.80,
       "details": [
-        {"text": "Output includes name", "passed": true},
-        {"text": "Output includes date", "passed": true},
-        {"text": "Format is PDF", "passed": true},
-        {"text": "Contains signature", "passed": false},
-        {"text": "Readable text", "passed": true}
+        {"text": "宛名を含む", "passed": true},
+        {"text": "発行日を含む", "passed": true},
+        {"text": "形式が PDF", "passed": true},
+        {"text": "署名を含む", "passed": false},
+        {"text": "本文が読み取れる", "passed": true}
       ]
     },
     "B": {
@@ -111,11 +112,11 @@ A/B のどちらが課題をより良く満たすかを、内容と構造だけ�
       "total": 5,
       "pass_rate": 0.40,
       "details": [
-        {"text": "Output includes name", "passed": true},
-        {"text": "Output includes date", "passed": false},
-        {"text": "Format is PDF", "passed": true},
-        {"text": "Contains signature", "passed": false},
-        {"text": "Readable text", "passed": false}
+        {"text": "宛名を含む", "passed": true},
+        {"text": "発行日を含む", "passed": false},
+        {"text": "形式が PDF", "passed": true},
+        {"text": "署名を含む", "passed": false},
+        {"text": "本文が読み取れる", "passed": false}
       ]
     }
   }

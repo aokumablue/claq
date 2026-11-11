@@ -18,10 +18,11 @@ command: /plan
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `{要件のキーワード}` / `risk blocker error {関連キーワード}`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
+- 相対パスの md: このファイルは `commands/` にある。プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 
 ## ステップ1: planner 起動
 
-`claq:planner` を評価モード（既定。リスクと代替案を列挙する）で起動する。要件の言い換え（何を作るか・なぜ作るか・成功条件）・手順分解・依存関係・複雑度見積もりと、アーキテクチャへの影響・技術リスク・代替設計案を一体で出させる。
+`claq:planner` を起動する（依頼文に `mode: evaluate` を書く。リスクと代替案を列挙するモード）。要件の言い換え（何を作るか・なぜ作るか・成功条件）・手順分解・依存関係・複雑度見積もりと、アーキテクチャへの影響・技術リスク・代替設計案を一体で出させる。
 
 planner の出力が手元に届いていることを、ステップ2へ進む条件にする。出力が無ければ「リスクなし」とは解釈せず、計画を完了扱いにしない。planner を再起動するか、起動できない理由を書いて `BLOCKED` で止まる。
 

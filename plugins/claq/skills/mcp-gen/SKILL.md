@@ -144,7 +144,7 @@ cp -R /abs/skill/mcp-gen/assets/facade-overlay/facade /abs/path/to/dest/facade
 "$PY" /abs/path/to/dest/smoke_check.py
 ```
 
-exit code 0 を確認するまで完了報告しない。`FAIL` の文面には直し方が書いてある。
+exit code 0 を確認するまで完了報告しない。完了報告には `追加した防御`（file:line と引用した根拠）と `提案`（理由と出典）を書く。無ければ「なし」と書く。`FAIL` の文面には直し方が書いてある。
 旧仕様の名前が当たったときは、その意味を `references/spec-2026-07-28.md` の表で確かめる。
 `WARN` は文面に従う（走査できなかったファイルは、そのファイルに旧仕様の名前が無いかを確かめる。版の不一致なら、
 スケルトンを信じず先に SDK の changelog を読み直す）。

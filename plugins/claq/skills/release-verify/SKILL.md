@@ -70,7 +70,7 @@ for event, groups in d['hooks'].items():
 
 委譲元（ステップ2 で委譲経路そのものを測る回だけ経由させる）:
 
-- `loop-dev` ← `feat-dev` / `bugfix` / `refactor` / `test-gen` / `plan` / `review`
+- `loop-dev` ← `feat-dev` / `bugfix` / `refactor` / `test-gen` / `package-upgrade` / `plan` / `review`
 - `skill-make` ← `skill-gen`
 - `refactor-prep` / `refactor-rollback` ← `refactor`
 
@@ -120,6 +120,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
 |---|---|
 | commands | `/<name>` として起動する（`user-invocable` の制約は無い） |
 | skills（`user-invocable: true`） | 同じく `/<name>` で直接起動する |
+| skills（`disable-model-invocation: true`） | モデルからは起動できない。利用者に `/<name>` の実行を依頼し、結果が貼られるまでは `Not run` に数える。依頼は全件を 1 回にまとめる |
 | skills（`user-invocable: false`） | Skill ツールへスキル名を指定して起動する（`/` 補完には出ないが Skill ツール経由は妨げられない）。委譲経路そのものを測る回だけ、ステップ1 の委譲元コマンドを経由させる |
 | agents | Agent ツールで `subagent_type` に名前を指定して起動する。起動の前提を持つ agent（`grader` はトランスクリプト、`comparator` は同一課題の 2 出力、`bench-analyzer` は決着済みの比較）は、前提を満たす実材料を用意してから呼ぶ。前提を捏造して呼ぶと「起動した」記録だけが残る |
 
@@ -251,6 +252,7 @@ Learned:    {知識カードの key} / なし
 - 行の恒等式は `Findings 合計 = Fixed + NO-FIX + Pending + Unadjudicated`。どの指摘（エージェントの主張を含む）も 4 行のどれかに入る。恒等式の母集合は `Findings` 行で、単位は指摘。`= {合計}` には 4 スロットすべての和を書く。コンポーネント単位の数（`Invoked` / `Not run` / `Unspecified`）は恒等式に入れない
 - `Scaffold-Drift` の `DRIFT` / `NOT-RUN` は BLOCKED の条件に加えない。`DRIFT` は通常の指摘として恒等式に入るので `Pending` / `Unadjudicated` 経由で判定に効く。`NOT-RUN` は単独では BLOCKED にしない（コーパスが無いホストや root ポインタが未記録のホストで常に BLOCKED になるのを避けるため）
 - 末尾に記録した知識カードの key を 1 行書く（無ければ `Learned: なし`）
+- ステップ5 で修正したときは、`Learned` の前に `追加した防御`（file:line と引用した根拠）と `提案`（理由と出典）を書く。無ければ「なし」と書く
 
 ## 引数
 

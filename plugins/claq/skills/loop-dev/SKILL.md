@@ -2,6 +2,7 @@
 name: loop-dev
 description: 合意済み要件を受けて plan→generate→evaluate を最大2反復で収束させる実装ループ。feat-dev/bugfix/refactor/test-gen/package-upgrade/plan/review からの委譲専用。
 context: fork
+background: false
 user-invocable: false
 ---
 
@@ -33,7 +34,7 @@ user-invocable: false
 
 ### 反復1（一発収束を狙う）
 
-1. plan: `claq:planner` を決定モードで起動し、単一のブループリントを確定させる。`approved_plan` があれば省く
+1. plan: `claq:planner` を起動し（依頼文に `mode: decide` を書く）、単一のブループリントを確定させる。`approved_plan` があれば省く
 2. baseline: 検出したテストコマンドでフルスイートを 1 回実行し、既存 red のテスト失敗シグネチャ集合を checkpoint の `## ベースライン` に記録する（形式と記録ルールは `../checkpoint/SKILL.md`）。run ごとに 1 回で、記録後は変えない。収束判定と circuit breaker には本 step で自ら取得した集合を使い、checkpoint から読み戻した値は使わない（記載は再開用）
 3. generate: 下表でエージェントを選ぶ
 

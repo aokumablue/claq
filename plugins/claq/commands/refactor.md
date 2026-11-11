@@ -14,12 +14,13 @@ command: /refactor
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: ステップ8 の基準で `claq_mem_learn` を使う
+- 相対パスの md: このファイルは `commands/` にある。プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 
 ## ステップ1: preflight（スコープ確定 + 実行準備）
 
 スコープは `refactor-prep` が確定する（引数パスがあれば渡す。結果は `scope_files`）。
 
-着手前に Skill ツールで次の 2 つを起動する。どちらも省かない。
+着手前に Skill ツールで次の 2 つを、この順で起動する（`refactor-rollback` は `refactor-prep` の出力を入力に取る）。どちらも省かない。
 
 - `refactor-prep` skill: 対象分割・依存可視化・テストセットを確定する（fork 実行。結果は報告で受け取る）
 - `refactor-rollback` skill: ファイル単位のリバート計画（Rollback Blueprint）を作る（inline 実行で本セッションに展開される）
@@ -111,7 +112,7 @@ Simplified: {simplified} files
 Perf fixed: {perf_fixed} files
 Reverted:   {reverted} files
 Skipped:    {Skip Rules・CAUTION で除外したファイルと、code-refiner が UNKNOWN とした候補}
-Issues:     CRITICAL {c} / HIGH {h} / MEDIUM {m} / LOW {l}
+Issues:     CRITICAL {c} / HIGH {h} / MEDIUM {m} / LOW {l} / INFO {i}
 ──────────────────────────────
 Final Gate: PASS / BLOCKED
 Learned:    {ステップ8 で記録した key / なし}

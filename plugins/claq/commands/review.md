@@ -14,6 +14,7 @@ command: /review
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `review violation security` / `{変更ファイル名}`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`。既存カードと同じ違反が再発していれば「繰り返し違反」と注記する（深刻度は上げない。繰り返しは severity の根拠にならない）
 - 記録: ステップ5 の基準で `claq_mem_learn` を使う
+- 相対パスの md: このファイルは `commands/` にある。プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 
 ## READ-ONLY（ステップ1〜3）
 
