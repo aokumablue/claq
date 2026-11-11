@@ -168,7 +168,7 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
     return collected
 
 
-def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
+def read_raw_stdin() -> str:
     """標準入力から生のテキストをバイト単位の上限つきで読み取ります。
 
     読み取れなかった場合も空文字列を返す。非保護経路（launcher の ``--bg`` 中継・
@@ -176,11 +176,8 @@ def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     区別しても採れる別の行動が無い。保護 hook は `read_raw_stdin_with_truncation` を
     使い、`StdinUnavailableError` を捕捉して fail-closed に倒すこと。
 
-    Args:
-        max_bytes: 読み取る最大バイト数です。
-
     Returns:
-        読み取られた文字列（max_bytes バイトで切り捨て済み）。読む対象が
+        読み取られた文字列（`MAX_STDIN_BYTES` バイトで切り捨て済み）。読む対象が
         無い場合・読み取れなかった場合は空文字列。
 
     Raises:
@@ -189,32 +186,29 @@ def read_raw_stdin(max_bytes: int = MAX_STDIN_BYTES) -> str:
     if _stdin_is_absent():
         return ""
     try:
-        raw_bytes = _read_stdin_bytes(max_bytes)
+        raw_bytes = _read_stdin_bytes(MAX_STDIN_BYTES)
     except StdinUnavailableError:
         return ""
     return raw_bytes.decode("utf-8", errors="replace")
 
 
-def read_raw_stdin_with_truncation(max_bytes: int = MAX_STDIN_BYTES) -> tuple[str, bool]:
+def read_raw_stdin_with_truncation() -> tuple[str, bool]:
     """標準入力を読み取り、切り捨ての有無を返します（保護 hook 用）。
 
     読む対象が無い場合（tty 起動・``sys.stdin`` が None・即 EOF）は ``("", False)``。
     呼び出し側の保護 hook は `StdinUnavailableError` を捕捉して deny に倒すこと
     （docs/adr/hook-failure-direction.md）。
 
-    Args:
-        max_bytes: 読み取る最大バイト数です。
-
     Returns:
-        読み取った文字列と、切り捨てが発生したかどうかのタプル。
+        `MAX_STDIN_BYTES` バイトまでの文字列と、切り捨てが発生したかどうかのタプル。
 
     Raises:
         StdinUnavailableError: payload があるはずなのに読み取れなかった場合。
     """
     if _stdin_is_absent():
         return "", False
-    raw_bytes = _read_stdin_bytes(max_bytes + 1)
-    return raw_bytes[:max_bytes].decode("utf-8", errors="replace"), len(raw_bytes) > max_bytes
+    raw_bytes = _read_stdin_bytes(MAX_STDIN_BYTES + 1)
+    return raw_bytes[:MAX_STDIN_BYTES].decode("utf-8", errors="replace"), len(raw_bytes) > MAX_STDIN_BYTES
 
 
 def stdin_unreadable_message(hook_name: str, reason: object) -> str:

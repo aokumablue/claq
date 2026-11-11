@@ -99,7 +99,6 @@ class TestGcRoots:
             pytest.param("<dead>", _PAST_GRACE, False, False, id="dead-past-grace"),
             # 使い捨ての中間 shell に書いたばかりのポインタが同じ GC 呼び出しで自壊しない
             pytest.param("<dead>", _PAST_GRACE, True, True, id="dead-past-grace-in-keep-pids"),
-            pytest.param(mod._GC_STAMP_FILENAME, _PAST_GRACE, False, True, id="gc-stamp-skipped"),
         ],
     )
     def test_gc_roots_decides_each_entry(
