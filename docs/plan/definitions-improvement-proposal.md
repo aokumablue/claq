@@ -49,6 +49,49 @@
 
 ---
 
+## 判定結果（P1・P2）
+
+公式ドキュメント（下の「出典」）と実機で裏づけを取り、項目ごとに実施かクローズかを決めた。
+
+| ID | 判定 | 根拠 | 実施内容 |
+|---|---|---|---|
+| X1 | 実施 | 呼び出し側と受け側で合図が違うと planner が既定モードで動く（定義の不一致） | `mode: evaluate` / `mode: decide` に統一 |
+| X2 | 実施 | 委譲元一覧と loop-dev description の食い違い | `package-upgrade` を追加 |
+| A5 | 実施 | サブエージェントは cwd で始まり、定義ファイルの場所を基準にした解決は無い（sub-agents） | 相対参照を外し、本文だけで完結させた |
+| A9 | 実施 | security-auditor の tools は Read/Grep/Glob で、1 行出力と「コード例を添える」が両立しない | 置き換え先の API を名指す形に |
+| S1 | 実施 | `disable-model-invocation: true` は「Claude can't invoke the skill on its own」（skills）。Skill ツールで `claq:quick-review` を呼ぶと拒否されることを実測 | 利用者へ `/<name>` を依頼し、結果が貼られるまで `Not run`。Gate の意味を変える `Manual` 区分は採らない |
+| C2 | 実施 | 停止文言・永続メモリ・Assumptions が他の command と不揃い | 学びの記録は既存のため追加なし |
+| X3 | 実施 | command の本文にベースディレクトリは付かない（`claq:instinct` を Skill で起動して実測）。`${CLAUDE_PLUGIN_ROOT}` は本文で置換されるが（plugins-reference）、ベンダ固有パスは ADR とテストで禁止 | 各 command の永続メモリ節に、`claq_plugin_root` の `commands/` を基準に読む旨を追加 |
+| X4 | 実施 | 手順 6 が指す欄が返却形式に無い（定義内の矛盾） | quick-debug / quick-refactor / quick-review に加え、同じ欠落のあった html-gen / mcp-gen / release-verify にも追加 |
+| A3 | 実施 | 信頼境界は本文引用を求め、引用の無い判定は破棄される。出力例が引用なし | 出力例を引用つきの評語にし、引用を入れるフィールドを出力契約に明記 |
+| A4 | クローズ | 入力欠落・判断不能は既存の「FAIL」規則（`:47`・`:56`）で扱える。`No suggestions, evals look solid` を読む箇所は grader.md 以外に無く、英語であることによる不具合は再現できない | — |
+| A7・C3 | 実施 | harness-tuner が FAIL でも再監査へ進む手順で、「適用して効果なし」と区別できない | FAIL の先頭行を決め、/harness は `BLOCKED` で終える。停止点節を追加、再監査は `--format json` 固定 |
+| A8 | 実施 | description は「When Claude should delegate」（sub-agents）。計画フォーマットに、設計原則と loop-dev が前提にする「変更ファイル一覧」が無い | 呼ばない条件の形に直し、「変更ファイル一覧」「テストコマンド」欄を追加 |
+| A10 | クローズ | カバレッジ 100% は利用者の規約で、変えるのは仕様変更。「統合（常に）」は API・DB 操作を対象にした文として読める | — |
+| C5 | クローズ | `refactor-fix` は loop-dev の列挙内で、review も同じ値を使う。誤選択の再現が無い | — |
+| C6 | 実施（一部） | rollback は prep の出力を入力に取る。reviewer / security-auditor は INFO を返すのに要約で落ちていた | 起動順を明記、`Issues` に INFO を追加。節の並べ替えは P3 として見送り |
+| C7 | クローズ | 散文のレポートで壊れる振る舞いを示せない（好みの問題） | — |
+| S2 | クローズ | `user-invocable: false` は「/ メニューに出さないだけで Claude は起動できる」（skills）。adr・checkpoint は自動起動で成立する。secure は description がモデルに見えないだけで実害なし | — |
+| S3 | 実施 | 出力は `n.n / 10` を求めるが式が無く、同じ履歴から値が揺れる | 満たした基準の数から決まる式を追加。blocker 0 件の履歴は満点、実行 0 件は `N/A` |
+| V1 | 実施（V1-e を除く） | 下の「CI に足す検査」 | `tests/test_definition_contracts.py` |
+
+### CI に足す検査の実施結果
+
+定義 md は互いを import しないため、片方だけ書き換えた食い違いが実行時まで残る。これを pytest の構造テストで検出する。
+
+- 実施: V1-a（停止文言の一部を書く定義は 4 種を同じ文言で書く）、V1-b（loop-dev の description・release-verify の委譲元一覧・loop-dev を起動する command の 3 者一致）、V1-c（agents に `../` の md 参照が無い）、V1-d（報告の「追加した防御」を求める定義はその欄を持つ）、V1-f（planner を起動する定義は `mode:` を書く）、X3 の検査（`../` の md 参照を持つ command は基準の求め方を書く）
+- 見送り: V1-e。commands の `command:` は Claude Code が黙って無視するフィールドで（skills の「ignores a field it doesn't recognize」）、許可一覧を決めるのは P3 の C1 を直すときになる
+
+### 新たに見つけた点（提案）
+
+- fork skill（loop-dev / search / skill-make / maintain / skill-tune / learn / refactor-prep / loop-audit）の frontmatter に `background:` が無い。skills の文書は fork を既定でバックグラウンド実行とし、`background: false` で起動したターンに結果を待つとする。commands は loop-dev の報告を受け取ってから次へ進む前提で書かれている。`validate_skills` は未知キーを拒否しないので 1 行で足せるが、他のハーネスでの扱いを確かめてから決める
+
+### 出典
+
+- https://code.claude.com/docs/en/skills
+- https://code.claude.com/docs/en/sub-agents
+- https://code.claude.com/docs/en/plugins-reference
+
 ## 横断課題
 
 ### X1. planner のモード指定が呼び出し側と一致しない（P1）
@@ -307,7 +350,7 @@ argument-hint: "<症状・再現手順> [scope]"
 |---|---|---|
 | 「## 永続メモリ」節 | あり | なし |
 | 停止 4 種文言 | あり | 独自文言（`:11`） |
-| 「学びの記録」ステップ | あり | なし |
+| 「学びの記録」ステップ | あり | あり（ステップ4 の `claq_mem_learn --kind pitfall`。当初「なし」としたのは誤り） |
 | loop-dev が未判定で返したときの扱い | あり | なし |
 
 また `:20` は「リリースノート・CHANGELOG・移行ガイドを読み」と書くが、取得手段（インストール済みパッケージ内の CHANGELOG・レジストリのメタデータ・WebFetch）と、取得できなかった場合の扱いが無い。
@@ -501,9 +544,9 @@ ADR は「定義に書いた検証規則は CI で実測する」としている
 
 ## 要確認事項（実機で 1 回確かめれば決まるもの）
 
-1. command 展開時に `../skills/learn/SKILL.md` を主会話が Read できるか（X3 の優先度が決まる）
-2. `disable-model-invocation: true` の skill を Skill ツールで呼んだときの挙動（S1）
-3. grader の既定文言 `No suggestions, evals look solid` を文字列一致で読む箇所が `skill-make/references/` にあるか（A4）
+1. command 展開時に `../skills/learn/SKILL.md` を主会話が Read できるか → 本文にベースディレクトリは付かない（X3 を実施）
+2. `disable-model-invocation: true` の skill を Skill ツールで呼んだときの挙動 → 拒否される（S1 を実施）
+3. grader の既定文言 `No suggestions, evals look solid` を文字列一致で読む箇所が `skill-make/references/` にあるか → 無い（A4 をクローズ）
 4. `command:` frontmatter を読む外部ツールの有無（C1）
 5. `maintain`・`loop-audit` が `/claq:<name>` で起動できるか（S4）
 
