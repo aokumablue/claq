@@ -6,6 +6,10 @@ command: /harness
 
 # ハーネス管理
 
+## 停止点
+
+止まるのは、`--audit-only` のステップ1 終了、`--apply` 無しのステップ2 終了、ステップ3 の `BLOCKED` だけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えず、ステップ5 まで進む。報告や未決事項への推奨は次のツール呼び出しと同じ応答に書く。
+
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `harness audit score` / `harness config optimization audit`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`
@@ -36,12 +40,16 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 
 `claq:harness-tuner` を起動し、ステップ1 の JSON 出力をそのまま渡す（トップ3はその `top_actions`）。
 
+harness-tuner の出力が届かない、または先頭行が `FAIL:` なら、ステップ4・5 へ進まず `BLOCKED: {理由}` として終える（適用されていない状態の再監査は baseline と同じ値になり、「適用して効果なし」と区別できない）。
+
 ## ステップ4: 改善後スコア（`--apply` 指定時のみ）
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127
-claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
+claq_run claq.ci.harness_audit <scope> --format json --root <path> --target-kind <repo|consumer>
 ```
+
+ステップ1 と同じ `--format json` で採取する（カテゴリ別の差分を両方の JSON から計算するため）。
 
 ## ステップ5: 差分要約（`--apply` 指定時のみ）
 

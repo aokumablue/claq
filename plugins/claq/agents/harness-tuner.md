@@ -63,6 +63,8 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 - 推定影響（estimated）
 - 残存リスク
 
+**FAIL** のときは先頭行を `FAIL: {理由}` にし、その時点までに適用した変更があれば続けて書く（呼び出し元は先頭行で再監査へ進むかを決める）。
+
 ## 永続メモリ
 
 知識カードは自動注入されない。過去の判断が要るときは `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."` で自分で引く（クエリ例 `harness config optimization audit` / `harness improvement score`）。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す。
