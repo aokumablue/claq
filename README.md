@@ -194,7 +194,7 @@ flowchart LR
 
   subgraph loopdev["🔁 loop-dev 内部"]
     direction TB
-    LP["📐 planner<br/>決定モード"]:::agent --> LG["🧪 tdd-writer<br/>または code-refiner"]:::agent
+    LP["📐 planner<br/>mode: decide"]:::agent --> LG["🧪 tdd-writer<br/>または code-refiner"]:::agent
     LG --> LR["✅ reviewer"]:::agent
     LG -.-> LS["🛡️ security-auditor<br/>認証・入力・秘匿・外部由来文字列に触れるときだけ"]:::agent
   end
