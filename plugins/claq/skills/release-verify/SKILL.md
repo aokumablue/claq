@@ -252,6 +252,7 @@ Learned:    {知識カードの key} / なし
 - 行の恒等式は `Findings 合計 = Fixed + NO-FIX + Pending + Unadjudicated`。どの指摘（エージェントの主張を含む）も 4 行のどれかに入る。恒等式の母集合は `Findings` 行で、単位は指摘。`= {合計}` には 4 スロットすべての和を書く。コンポーネント単位の数（`Invoked` / `Not run` / `Unspecified`）は恒等式に入れない
 - `Scaffold-Drift` の `DRIFT` / `NOT-RUN` は BLOCKED の条件に加えない。`DRIFT` は通常の指摘として恒等式に入るので `Pending` / `Unadjudicated` 経由で判定に効く。`NOT-RUN` は単独では BLOCKED にしない（コーパスが無いホストや root ポインタが未記録のホストで常に BLOCKED になるのを避けるため）
 - 末尾に記録した知識カードの key を 1 行書く（無ければ `Learned: なし`）
+- ステップ5 で修正したときは、`Learned` の前に `追加した防御`（file:line と引用した根拠）と `提案`（理由と出典）を書く。無ければ「なし」と書く
 
 ## 引数
 
