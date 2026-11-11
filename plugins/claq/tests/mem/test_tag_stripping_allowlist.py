@@ -181,9 +181,10 @@ class TestKeepAllowedChars:
         """CGJ・異体字セレクタ・ハングル filler・点字空白で分断した鍵も 1 本に戻る。"""
         assert keep_allowed_chars(f"{_KEY_HEAD}{filler}api03-{filler}" + "A" * 20) == _KEY_HEAD + "api03-" + "A" * 20
 
-    def test_table_does_not_cache_beyond_its_cap(self) -> None:
+    def test_table_does_not_cache_beyond_its_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """判定表の記憶は上限で止まり、上限を超えた文字も同じ規則で判定される。"""
-        table = _AllowlistTable(max_entries=2)
+        monkeypatch.setattr(tag_stripping, "_MAX_CACHED_CODEPOINTS", 2)
+        table = _AllowlistTable()
         text = "ab\u200bc日本\u202e"
 
         assert text.translate(table) == "abc日本"

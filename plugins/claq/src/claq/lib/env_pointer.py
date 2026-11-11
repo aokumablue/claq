@@ -371,7 +371,7 @@ def _gc_roots(roots_dir: Path, *, keep_pids: frozenset[int]) -> None:
 
     keep_names = {str(pid) for pid in keep_pids}
     for entry in entries:
-        if entry.name == _GC_STAMP_FILENAME or entry.name in keep_names:
+        if entry.name in keep_names:
             continue
         try:
             _gc_one(entry, now)

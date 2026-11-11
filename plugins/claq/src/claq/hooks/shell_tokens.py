@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from typing import NamedTuple
 
 # 1 コマンドに許すバイト数の上限。
 # `shlex` の走査コストは単一の巨大トークンでバイト数の二次になり、1MB で hooks.json の timeout（15 秒）に
@@ -92,11 +93,25 @@ def is_shell_wrapper_token(token: str) -> bool:
     return normalize_executable_name(token) in SHELL_WRAPPER_EXECUTABLES
 
 
-def extract_shell_wrapper_command(segment: list[str]) -> str | None:
-    """セグメント内の既知シェル ``-c`` 呼び出しから、ラップされた文字列コマンドを取り出す。
+class ShellWrapperCall(NamedTuple):
+    """1 セグメント内の既知シェル ``-c`` 呼び出し。
 
-    既知シェルのトークンに続く ``-c`` を含む短フラグを探し、その次のトークンを返す。
-    `block_no_verify`・`bash_config_protection`・`commit_risk` が共有する。片方だけがラッパー再帰を
+    Attributes:
+        prefix: 最初のシェル起動トークンより前のトークン列。``HOME=/tmp/h sh -c '...'`` や
+            ``env HOME=/tmp/h sh -c '...'`` の ``HOME=/tmp/h`` は内側のコマンドにも環境として渡る。
+            ``-c`` の文字列より後ろの位置引数（``sh -c '...' HOME=/tmp/h``）は環境ではないため含めない。
+        command: ``-c`` に続く、ラップされた文字列コマンド。
+    """
+
+    prefix: tuple[str, ...]
+    command: str
+
+
+def extract_shell_wrapper_call(segment: list[str]) -> ShellWrapperCall | None:
+    """セグメント内の既知シェル ``-c`` 呼び出しを取り出す。
+
+    既知シェルのトークンに続く ``-c`` を含む短フラグを探し、その次のトークンをコマンドとする。
+    `block_no_verify` と `bash_config_protection` が共有する。片方だけがラッパー再帰を
     持つと、同じコマンドが片方のフックだけを素通りする。再帰の段数は呼び出し側が
     決める（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。
 
@@ -104,7 +119,7 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        ラップされた文字列コマンド。見つからなければ None。
+        シェル起動より前のトークン列とラップされた文字列コマンド。見つからなければ None。
 
     Raises:
         例外は発生しません。
@@ -113,9 +128,9 @@ def extract_shell_wrapper_command(segment: list[str]) -> str | None:
     start = next((i for i, token in enumerate(segment) if is_shell_wrapper_token(token)), None)
     if start is None:
         return None
-    for position in range(start + 1, len(segment)):
+    for position in range(start + 1, len(segment) - 1):
         if _SHELL_COMMAND_FLAG_RE.fullmatch(segment[position]):
-            return segment[position + 1] if position + 1 < len(segment) else None
+            return ShellWrapperCall(tuple(segment[:start]), segment[position + 1])
     return None
 
 

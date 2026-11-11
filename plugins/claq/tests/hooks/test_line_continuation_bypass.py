@@ -37,7 +37,7 @@ from claq.hooks.shell_tokens import (
     _strip_line_continuations,
     command_dialect_variants,
     command_exceeds_scan_budget,
-    extract_shell_wrapper_command,
+    extract_shell_wrapper_call,
     split_segments,
     tokenize,
 )
@@ -232,9 +232,11 @@ def test_shell_wrapper_command_is_never_longer_than_outer(command: str) -> None:
     """`sh -c` の中身は外側のバイト数を超えないこと（入口のバイト数の検査だけで再帰先も縛れる根拠）。"""
     for variant in command_dialect_variants(strip_data_heredoc_bodies(command)):
         for segment in split_segments(tokenize(variant)):
-            wrapped = extract_shell_wrapper_command(segment)
+            wrapped = extract_shell_wrapper_call(segment)
             if wrapped is not None:
-                assert len(wrapped.encode("utf-8", "surrogatepass")) <= len(command.encode("utf-8", "surrogatepass"))
+                assert len(wrapped.command.encode("utf-8", "surrogatepass")) <= len(
+                    command.encode("utf-8", "surrogatepass")
+                )
 
 
 def test_block_no_verify_main_blocks_oversized_command_in_process(

@@ -44,7 +44,7 @@ def _remote_host(url: str) -> str:
     return ""
 
 
-def detect_git_hosting_service(cwd: str | Path | None = None) -> str | None:
+def detect_git_hosting_service(cwd: str | Path) -> str | None:
     """`git remote get-url origin` の URL から hosting service を推測する。
 
     判定は **URL 全体ではなくホスト部だけ**で行う。URL 全体の部分一致にすると
@@ -58,7 +58,7 @@ def detect_git_hosting_service(cwd: str | Path | None = None) -> str | None:
     含まれる場合（日本語グループ名、IDN ホスト）に `UnicodeDecodeError` になる。
 
     Args:
-        cwd: 判定対象の作業ディレクトリ。省略時は現在のディレクトリです。
+        cwd: 判定対象の作業ディレクトリ。
 
     Returns:
         `github` か `gitlab`。git が無い・origin が無い・どちらのホストでもない（自前の Gitea、
@@ -67,9 +67,8 @@ def detect_git_hosting_service(cwd: str | Path | None = None) -> str | None:
     Raises:
         subprocess.TimeoutExpired: git が時間内に終わらない場合。
     """
-    check_dir = str(cwd) if cwd is not None else "."
     try:
-        result = run_text(["git", "-C", check_dir, "remote", "get-url", "origin"], timeout=5)
+        result = run_text(["git", "-C", str(cwd), "remote", "get-url", "origin"], timeout=5)
     except FileNotFoundError:
         return None
     if result.returncode != 0:

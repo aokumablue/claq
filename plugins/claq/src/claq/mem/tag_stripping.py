@@ -254,17 +254,10 @@ class _AllowlistTable(dict):
     以後は C の辞書引きで済む（1MB の日本語でも速い）。
     """
 
-    def __init__(self, max_entries: int = _MAX_CACHED_CODEPOINTS) -> None:
-        """判定表を作る。
-
-        Args:
-            max_entries: 判定結果を覚える件数の上限。超えた文字は覚えずに毎回判定する。
-        """
-        super().__init__()
-        self._max_entries = max_entries
-
     def __missing__(self, codepoint: int) -> str | None:
-        """未判定のコードポイントを許可リストで判定し、上限まで結果を覚える。
+        """未判定のコードポイントを許可リストで判定し、``_MAX_CACHED_CODEPOINTS`` 件まで結果を覚える。
+
+        上限を超えた文字は覚えずに毎回判定する。
 
         Args:
             codepoint: 判定する文字のコードポイント。
@@ -273,7 +266,7 @@ class _AllowlistTable(dict):
             残す文字（行区切りは ``\\n``）。落とすなら ``None``。
         """
         verdict = _allowlist_verdict(chr(codepoint))
-        if len(self) < self._max_entries:
+        if len(self) < _MAX_CACHED_CODEPOINTS:
             self[codepoint] = verdict
         return verdict
 

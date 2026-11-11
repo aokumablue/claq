@@ -64,13 +64,13 @@ def test_detect_git_hosting_service_infers_from_remote_host(
         git_hosting, "run_text", lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, returncode, stdout, "")
     )
 
-    assert detect_git_hosting_service() == expected
+    assert detect_git_hosting_service(".") == expected
 
 
 def test_detect_git_hosting_service_without_git_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     """git が無ければ不明（None）を返す。"""
     monkeypatch.setattr(git_hosting, "run_text", _raise(FileNotFoundError("git")))
-    assert detect_git_hosting_service() is None
+    assert detect_git_hosting_service(".") is None
 
 
 @pytest.mark.parametrize("error", [PermissionError("git"), subprocess.TimeoutExpired("git", 5)])
@@ -80,7 +80,7 @@ def test_detect_git_hosting_service_propagates_other_failures(
     """起動できない（git 不在以外）・時間切れは、既定値で続けずにそのまま伝える。"""
     monkeypatch.setattr(git_hosting, "run_text", _raise(error))
     with pytest.raises(type(error)):
-        detect_git_hosting_service()
+        detect_git_hosting_service(".")
 
 
 def test_detect_git_hosting_service_accepts_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

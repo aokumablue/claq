@@ -268,12 +268,6 @@ _VOCABULARY_WRITE_CASES = (
         _write_content("docs/config", "[core]\n\thooksPath = /dev/null\n"),
     ),
     (
-        # 畳み済みの複製は大文字綴りで引く（APFS / NTFS では同じファイル）。
-        "config_protection._GIT_CONFIG_REPO_SEGMENTS_FOLDED",
-        lambda item: _write_content("/".join(item).replace("*", "wt").upper(), "[core]\n\thooksPath = /dev/null\n"),
-        _write_content("docs/config", "[core]\n\thooksPath = /dev/null\n"),
-    ),
-    (
         "conditional_protection._SETTINGS_GUARDED_SUBTREES",
         lambda item: _write_content(".claude/settings.json", '{"' + item + '": {}}'),
         _write_content(".claude/settings.json", '{"model": "x"}'),
@@ -300,7 +294,6 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "config_protection.CONDITIONALLY_PROTECTED_FILES": "test_every_conditionally_protected_file_denies_only_lint_signals",
     "config_protection.PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
-    "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": "_BLOCKED_CASES の保護 path の大文字（Bash）",
     "conditional_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
     "conditional_protection._LINT_KEYS": "test_every_lint_key_is_detected",
     "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": "test_every_running_plugin_guarded_dir_is_denied_on_write_and_bash (test_running_plugin_protection)",

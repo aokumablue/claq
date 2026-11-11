@@ -238,9 +238,8 @@ class Database:
         row = self._returning(
             """INSERT INTO knowledge
                  (key, scope, repo_id, kind, title, body, domain, confidence,
-                  status, source, source_ref, session_id, superseded_by,
-                  created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  status, source, source_ref, superseded_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(COALESCE(repo_id, ''), key) DO UPDATE SET
                  scope = excluded.scope,
                  kind = excluded.kind,
@@ -251,7 +250,6 @@ class Database:
                  status = excluded.status,
                  source = excluded.source,
                  source_ref = excluded.source_ref,
-                 session_id = excluded.session_id,
                  superseded_by = excluded.superseded_by,
                  updated_at = excluded.updated_at
                RETURNING *""",
@@ -267,7 +265,6 @@ class Database:
                 knowledge.status,
                 knowledge.source,
                 knowledge.source_ref,
-                knowledge.session_id,
                 knowledge.superseded_by,
                 knowledge.created_at,
                 knowledge.updated_at,
@@ -340,8 +337,9 @@ class Database:
     def start_session(self, session: Session) -> Session:
         """セッションを開始登録する。
 
-        同一 ``session_uid`` の再入は ``harness`` の更新のみ行い、
-        ``started_at`` は初回の値を保持する。
+        同一 ``session_uid`` の再入は既存行を書き換えずに返す（``started_at`` は
+        初回の値のまま）。衝突時の ``DO UPDATE`` は、``RETURNING`` に既存行を
+        返させるための無変更の代入。
 
         Args:
             session: 開始するセッション。
@@ -351,15 +349,14 @@ class Database:
         """
         row = self._returning(
             """INSERT INTO sessions
-                 (session_uid, repo_id, harness, handoff, started_at, ended_at)
-               VALUES (?, ?, ?, ?, ?, ?)
+                 (session_uid, repo_id, handoff, started_at, ended_at)
+               VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(session_uid) DO UPDATE SET
-                 harness = excluded.harness
+                 session_uid = excluded.session_uid
                RETURNING *""",
             (
                 session.session_uid,
                 session.repo_id,
-                session.harness,
                 session.handoff,
                 session.started_at,
                 session.ended_at,

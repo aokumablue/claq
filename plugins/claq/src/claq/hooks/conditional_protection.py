@@ -16,12 +16,8 @@ import re
 from pathlib import Path
 from typing import Any, NoReturn
 
-from claq.hooks.git_config_text import (
-    GitConfigParseError,
-    adds_sensitive_entries,
-    git_config_text_after,
-    read_current_text,
-)
+from claq.hooks.edit_text import read_current_text, text_after_edit
+from claq.hooks.git_config_text import GitConfigParseError, adds_sensitive_entries
 from claq.hooks.hook_common import memoized_in_scan, normalize_protected_name
 from claq.hooks.stdin_io import MAX_STDIN_BYTES
 from claq.lib.harness import normalize_tool_name
@@ -409,7 +405,7 @@ def _settings_block_reason(tool_name: str, container: Any, file_path: str, file_
     before = read_current_text(file_path, _FULL_TEXT_MAX_BYTES + 1)
     if len(before) > _FULL_TEXT_MAX_BYTES:
         return _settings_unverifiable_message(file_name)
-    after = git_config_text_after(tool_name, container, before, _FULL_TEXT_MAX_BYTES)
+    after = text_after_edit(tool_name, container, before, _FULL_TEXT_MAX_BYTES)
     if after is None or len(after) > _FULL_TEXT_MAX_BYTES:
         return _settings_unverifiable_message(file_name)
     # 深い入れ子は解析・直列化で RecursionError になる。貫通すると exit 1（PreToolUse では allow）。
@@ -522,7 +518,7 @@ def git_config_block_reason(tool_name: str, container: Any, file_path: str, disp
     before = read_current_text(file_path, _FULL_TEXT_MAX_BYTES + 1)
     if len(before) > _FULL_TEXT_MAX_BYTES:
         return _git_config_unparsable_message(display_name)
-    after = git_config_text_after(tool_name, container, before, _FULL_TEXT_MAX_BYTES)
+    after = text_after_edit(tool_name, container, before, _FULL_TEXT_MAX_BYTES)
     if after is None:
         return _unverifiable_conditional_message(display_name)
     if len(after) > _FULL_TEXT_MAX_BYTES:

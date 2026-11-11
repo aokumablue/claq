@@ -79,18 +79,19 @@ from claq.hooks.hook_common import (
     emit_block_output,
     fold_path_parts,
     is_inplace_edit_flag,
+    match_folded_path_window,
     memoized_in_scan,
     normalize_protected_name,
     resolve_effective_target,
     resolve_repo_root,
     scan_memo,
 )
-from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
+from claq.hooks.host_guard_targets import find_host_guard_match
 from claq.hooks.shell_tokens import (
     WRITE_REDIRECT_OPERATORS,
     command_dialect_variants,
     command_exceeds_scan_budget,
-    extract_shell_wrapper_command,
+    extract_shell_wrapper_call,
     normalize_executable_name,
     scan_budget_message,
     split_segments,
@@ -628,10 +629,10 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
                 return found
         if _recursed:
             continue
-        wrapper_command = extract_shell_wrapper_command(segment)
-        if wrapper_command is None:
+        wrapper = extract_shell_wrapper_call(segment)
+        if wrapper is None:
             continue
-        found = find_protected_write(wrapper_command, _recursed=True)
+        found = find_protected_write(wrapper.command, _recursed=True)
         if found is not None:
             return found
     return None

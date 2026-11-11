@@ -351,13 +351,13 @@ class TestContext:
         assert _inject(monkeypatch, tmp_path) == ""
 
     def test_records_session_row(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """hook の session_id で sessions 行を作る（harness は既定値 unknown）。"""
+        """hook の session_id で sessions 行を作る。"""
         _inject(monkeypatch, tmp_path, {"session_id": "abc-123"})
 
         with Database(tmp_path / "mem.db") as db:
             row = db.conn.execute("SELECT * FROM sessions").fetchone()
         assert row is not None
-        assert (row["session_uid"], row["harness"], row["handoff"]) == ("abc-123", "unknown", "")
+        assert (row["session_uid"], row["handoff"]) == ("abc-123", "")
         assert row["repo_id"] == _repo_id(tmp_path)
 
     def test_missing_session_id_records_no_row(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -419,7 +419,7 @@ class TestHandoff:
 
         rows = self._sessions(tmp_path)
         assert len(rows) == 1
-        assert (rows[0]["session_uid"], rows[0]["harness"]) == ("orphan", "unknown")
+        assert rows[0]["session_uid"] == "orphan"
         assert rows[0]["started_at"] == rows[0]["ended_at"]
         assert rows[0]["repo_id"] == _repo_id(tmp_path)
 

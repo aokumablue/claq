@@ -181,6 +181,34 @@ def fold_path_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(normalize_protected_name(part) for part in parts)
 
 
+def match_folded_path_window(
+    parts: tuple[str, ...], candidates: tuple[tuple[str, ...], ...]
+) -> tuple[str, ...] | None:
+    """パス要素の連続した並びが候補のいずれかに一致するかを、畳んだ名前で判定する。
+
+    候補の要素 ``*`` は任意の 1 要素に一致する。
+
+    Args:
+        parts: 判定するパスの要素列。
+        candidates: 連続一致を探す要素列の候補（畳む前の綴り）。
+
+    Returns:
+        一致した候補（畳む前の綴り）。一致しなければ None。
+
+    Raises:
+        例外は発生しません。
+    """
+    folded_parts = fold_path_parts(parts)
+    for segments in candidates:
+        folded_segments = fold_path_parts(segments)
+        width = len(folded_segments)
+        for index in range(len(folded_parts) - width + 1):
+            window = folded_parts[index : index + width]
+            if all(want in ("*", got) for want, got in zip(folded_segments, window, strict=True)):
+                return segments
+    return None
+
+
 def is_git_executable_token(token: str) -> bool:
     """トークンが git 実行ファイルを指すかを判定します。
 

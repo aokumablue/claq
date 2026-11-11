@@ -2,8 +2,7 @@
 
 host 判定は一切行わない。フィールド名の union を無条件に受理する寛容パーサ
 のみを提供する（tool_input / toolArgs、tool_name / toolName 等の複数命名を
-同一の意味へ正規化する）。すべて純 stdlib のみに依存する（venv 不在時の
-フォールバック実行を保証するため）。
+同一の意味へ正規化する）。標準ライブラリだけに依存する（ランタイムは venv を作らない）。
 """
 
 from __future__ import annotations
@@ -414,7 +413,7 @@ def tag_block_pattern(tag: str, *, capture: bool = False) -> re.Pattern[str]:
 _SCAFFOLD_BLOCK_PATTERNS = [tag_block_pattern(tag) for tag in SCAFFOLD_TAGS]
 
 # ペア除去後に残った足場タグ。ハーネスは足場タグを必ず対で書き、`read_tail_text` の
-# 前方切り詰めで壊れる先頭 1 行は `_parse_entry` が不正 JSON として捨てるため、
+# 前方切り詰めで壊れる先頭 1 行は `mem.handoff.parse_entry` が不正 JSON として捨てるため、
 # この段階で片側だけ残っているタグは、足場の中身に閉じタグリテラルを混ぜてブロックを
 # 早期終端させた細工とみなす。断片を救う利得より、細工した文字列が「直近の依頼」として
 # 次セッションへ注入される損失のほうが大きいため、メッセージごと破棄する。

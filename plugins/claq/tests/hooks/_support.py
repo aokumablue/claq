@@ -538,15 +538,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     ),
     "host_guard_targets._RUNTIME_ENTRYPOINT_NAMES": ("claq-hook", "claq-hook.cmd"),
     "config_protection._PROTECTED_PATH_SEGMENTS": _EXPECTED_PROTECTED_PATH_SEGMENTS,
-    "config_protection._PROTECTED_PATH_SEGMENTS_FOLDED": tuple(
-        tuple(hook_common.normalize_protected_name(part) for part in segments)
-        for segments in _EXPECTED_PROTECTED_PATH_SEGMENTS
-    ),
     "config_protection._GIT_CONFIG_REPO_SEGMENTS": _EXPECTED_GIT_CONFIG_REPO_SEGMENTS,
-    "config_protection._GIT_CONFIG_REPO_SEGMENTS_FOLDED": tuple(
-        tuple(hook_common.normalize_protected_name(part) for part in segments)
-        for segments in _EXPECTED_GIT_CONFIG_REPO_SEGMENTS
-    ),
     "config_protection.GIT_CONFIG_DISPLAY_NAMES": frozenset("/".join(segments) for segments in _EXPECTED_GIT_CONFIG_REPO_SEGMENTS)
     | _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,
     "git_config_text.GLOBAL_GIT_CONFIG_DISPLAY_NAMES": _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,

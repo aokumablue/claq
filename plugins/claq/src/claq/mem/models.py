@@ -1,4 +1,4 @@
-"""mem サブシステムのデータクラス定義群（database.py から分離）。
+"""mem サブシステムのデータクラス定義群。
 
 ``repos`` / ``sessions`` / ``knowledge`` の 3 テーブルに 1 対 1 対応する
 dataclass を定義し、``sqlite3.Row`` からの復元を ``from_row`` で提供する。
@@ -62,12 +62,11 @@ class Repo(_RowModel):
 
 @dataclass
 class Session(_RowModel):
-    """セッション履歴 1 行。knowledge の出所であり引き継ぎを持つ。
+    """セッション履歴 1 行。次セッションへの引き継ぎを持つ。
 
     Attributes:
         session_uid: ハーネスが渡す session_id。
         repo_id: 所属リポジトリの ``repos.id``。
-        harness: ``claude`` / ``codex`` / ``copilot`` / ``unknown``。
         handoff: 次セッションへの引き継ぎ（人間可読の散文）。
         started_at: 開始時刻（ISO8601）。
         ended_at: 終了時刻（ISO8601）。未終了なら None。
@@ -76,7 +75,6 @@ class Session(_RowModel):
 
     session_uid: str
     repo_id: str
-    harness: str = "unknown"
     handoff: str = ""
     started_at: str = field(default_factory=utc_now_iso)
     ended_at: str | None = None
@@ -105,7 +103,6 @@ class Knowledge(_RowModel):
             生まれる。呼び出し側に毎回明示させることでその経路を作らせない。
             generic learn 経路の値は ``knowledge_input`` が ``pending`` に固定する。
         source_ref: 出所の自由記述（ファイルパス等）。
-        session_id: 出所セッションの ``sessions.id``。
         superseded_by: この行を置き換えた ``knowledge.id``。
         created_at: 作成時刻（ISO8601）。
         updated_at: 更新時刻（ISO8601）。
@@ -123,7 +120,6 @@ class Knowledge(_RowModel):
     domain: str | None = None
     confidence: float = 0.5
     source_ref: str | None = None
-    session_id: int | None = None
     superseded_by: int | None = None
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)

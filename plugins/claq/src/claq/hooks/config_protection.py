@@ -22,6 +22,7 @@ from claq.hooks.hook_common import (
     effective_basename,
     emit_block_output,
     fold_path_parts,
+    match_folded_path_window,
     memoized_in_scan,
     normalize_protected_name,
     resolve_effective_target,
@@ -107,11 +108,6 @@ PROTECTED_FILES = frozenset({
 # `/harness --apply` が正当に書き込む先）。
 _PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
 
-# 大小無視で比較するための畳み済み複製。`.GIT/HOOKS` は APFS / NTFS では
-# `.git/hooks` そのものを指すため、素の比較では保護 path が素通りする。
-# 表示名には畳む前の綴りを使うので、両者を対で持つ。
-_PROTECTED_PATH_SEGMENTS_FOLDED = tuple(fold_path_parts(segments) for segments in _PROTECTED_PATH_SEGMENTS)
-
 # 内容次第で保護する git config のパス。remote / branch / user の通常編集が正当にあるため
 # 無条件では塞がず、置換後の全文を解析して ``core.hooksPath`` / ``include`` / ``alias`` のように
 # フック実行を左右する key（`block_no_verify` が ``git config`` 経由で塞ぐものと同じ集合）が
@@ -125,7 +121,6 @@ _GIT_CONFIG_REPO_SEGMENTS = (
     (".git", "worktrees", "*", "config"),
     (".git", "worktrees", "*", "config.worktree"),
 )
-_GIT_CONFIG_REPO_SEGMENTS_FOLDED = tuple(fold_path_parts(segments) for segments in _GIT_CONFIG_REPO_SEGMENTS)
 
 # git config として扱う保護 path の表示名の全体（ホーム側を含む）。ブロック文言を選ぶ鍵として公開する。
 GIT_CONFIG_DISPLAY_NAMES = frozenset(
@@ -162,20 +157,16 @@ RUNNING_PLUGIN_DISPLAY_NAMES = frozenset("/".join(segments) + "/" for segments i
 
 
 @memoized_in_scan
-def _match_path_segments(
-    file_path: str,
-    candidates: tuple[tuple[str, ...], ...],
-    folded_candidates: tuple[tuple[str, ...], ...],
-) -> str | None:
+def _match_path_segments(file_path: str, candidates: tuple[tuple[str, ...], ...]) -> str | None:
     """パスの連続した要素が候補のいずれかに一致するか判定する。
 
-    symlink は解決してから判定し、解決不能なら生パスで判定する。比較は畳んだ側だけで行い、
-    返す表示名は畳む前の綴りを使う。候補の要素 ``*`` は任意の 1 要素に一致する。
+    symlink は解決してから判定し、解決不能なら生パスで判定する。比較は大小無視で行い
+    （`.GIT/HOOKS` は APFS / NTFS では `.git/hooks` そのものを指す）、返す表示名は畳む前の
+    綴りを使う。候補の要素 ``*`` は任意の 1 要素に一致する。
 
     Args:
         file_path: 検査対象の生パス文字列。
-        candidates: 表示名用の候補（畳む前の綴り）。
-        folded_candidates: ``candidates`` を同じ順序で畳んだ複製。
+        candidates: 連続一致を探す要素列の候補（畳む前の綴り）。
 
     Returns:
         一致した候補の表示名（``/`` 区切り）。一致しなければ None。
@@ -185,14 +176,8 @@ def _match_path_segments(
     """
     resolved = resolve_effective_target(file_path)
     parts = resolved.parts if resolved is not None else Path(file_path).parts
-    folded_parts = fold_path_parts(parts)
-    for segments, folded_segments in zip(candidates, folded_candidates, strict=True):
-        width = len(segments)
-        for index in range(len(folded_parts) - width + 1):
-            window = folded_parts[index : index + width]
-            if all(want in ("*", got) for want, got in zip(folded_segments, window, strict=True)):
-                return "/".join(segments)
-    return None
+    segments = match_folded_path_window(parts, candidates)
+    return None if segments is None else "/".join(segments)
 
 
 def protected_path_segment(file_path: str) -> str | None:
@@ -211,7 +196,7 @@ def protected_path_segment(file_path: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    return _match_path_segments(file_path, _PROTECTED_PATH_SEGMENTS, _PROTECTED_PATH_SEGMENTS_FOLDED)
+    return _match_path_segments(file_path, _PROTECTED_PATH_SEGMENTS)
 
 
 def repo_git_config_path(file_path: str) -> str | None:
@@ -229,7 +214,7 @@ def repo_git_config_path(file_path: str) -> str | None:
     Raises:
         例外は発生しません。
     """
-    return _match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS, _GIT_CONFIG_REPO_SEGMENTS_FOLDED)
+    return _match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS)
 
 
 def blocked_message_for_file(file_name: str) -> str:

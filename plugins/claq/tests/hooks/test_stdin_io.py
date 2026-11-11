@@ -134,11 +134,12 @@ def test_read_raw_stdin_and_with_truncation(
     with_truncation: tuple[str, bool],
 ) -> None:
     """2 つの読み口がバイト単位の上限で切り（保護 hook 用は切り捨ての有無も返す）、TTY は読まずに空にすること。"""
+    monkeypatch.setattr(stdin_io, "MAX_STDIN_BYTES", max_bytes)
     monkeypatch.setattr(stdin_io.sys, "stdin", make_stdin())
-    assert stdin_io.read_raw_stdin(max_bytes) == raw
+    assert stdin_io.read_raw_stdin() == raw
 
     monkeypatch.setattr(stdin_io.sys, "stdin", make_stdin())
-    assert stdin_io.read_raw_stdin_with_truncation(max_bytes) == with_truncation
+    assert stdin_io.read_raw_stdin_with_truncation() == with_truncation
 
 
 def test_unreadable_stdin_is_empty_for_raw_reader_and_raises_for_protection(monkeypatch: pytest.MonkeyPatch) -> None:
