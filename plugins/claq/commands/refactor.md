@@ -19,7 +19,7 @@ command: /refactor
 
 スコープは `refactor-prep` が確定する（引数パスがあれば渡す。結果は `scope_files`）。
 
-着手前に Skill ツールで次の 2 つを起動する。どちらも省かない。
+着手前に Skill ツールで次の 2 つを、この順で起動する（`refactor-rollback` は `refactor-prep` の出力を入力に取る）。どちらも省かない。
 
 - `refactor-prep` skill: 対象分割・依存可視化・テストセットを確定する（fork 実行。結果は報告で受け取る）
 - `refactor-rollback` skill: ファイル単位のリバート計画（Rollback Blueprint）を作る（inline 実行で本セッションに展開される）
@@ -111,7 +111,7 @@ Simplified: {simplified} files
 Perf fixed: {perf_fixed} files
 Reverted:   {reverted} files
 Skipped:    {Skip Rules・CAUTION で除外したファイルと、code-refiner が UNKNOWN とした候補}
-Issues:     CRITICAL {c} / HIGH {h} / MEDIUM {m} / LOW {l}
+Issues:     CRITICAL {c} / HIGH {h} / MEDIUM {m} / LOW {l} / INFO {i}
 ──────────────────────────────
 Final Gate: PASS / BLOCKED
 Learned:    {ステップ8 で記録した key / なし}
