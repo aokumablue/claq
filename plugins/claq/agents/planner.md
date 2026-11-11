@@ -1,6 +1,6 @@
 ---
 name: planner
-description: 実装計画を立てるときに使う（機能実装・アーキテクチャ変更・複雑なリファクタ・テスト設計の着手前）。コード変更は行わない。
+description: 実装計画を立てるときに使う（機能実装・アーキテクチャ変更・複雑なリファクタ・テスト設計の着手前）。コードを変更する作業では呼ばない。
 tools: Read, Grep, Glob
 ---
 
@@ -68,6 +68,10 @@ ComponentName: 入力型 → 出力型
 
 ## テスト戦略 / リスクと緩和策 / 成功条件
 
+## 変更ファイル一覧（正確なパス。削除するファイルを含む。loop-dev がスコープ照合に使う）
+
+## テストコマンド（そのまま実行できる形）
+
 ## Assumptions（不確定前提。確定事実と分離して列挙。なければ「なし」）
 
 ## 提案（要件に無い改善。採否は利用者が決める。なければ省く）
@@ -108,6 +112,14 @@ ComponentName: 入力型 → 出力型
 
 ## 成功条件
 `--days 1` で1日以内更新分のみ返る / `--days` 未指定時の挙動不変
+
+## 変更ファイル一覧
+- plugins/claq/src/claq/mem/cli.py
+- plugins/claq/src/claq/mem/cmd_knowledge.py
+- plugins/claq/tests/mem/test_cmd_knowledge.py
+
+## テストコマンド
+`cd plugins/claq && python3 -m pytest -q`
 
 ## Assumptions
 - `updated_at` は既存スキーマに存在する前提（`mem/schema.py` 未確認、Phase 1着手前に要確認）
