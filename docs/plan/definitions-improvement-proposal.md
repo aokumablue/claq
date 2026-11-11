@@ -82,9 +82,18 @@
 - 実施: V1-a（停止文言の一部を書く定義は 4 種を同じ文言で書く）、V1-b（loop-dev の description・release-verify の委譲元一覧・loop-dev を起動する command の 3 者一致）、V1-c（agents に `../` の md 参照が無い）、V1-d（報告の「追加した防御」を求める定義はその欄を持つ）、V1-f（planner を起動する定義は `mode:` を書く）、X3 の検査（`../` の md 参照を持つ command は基準の求め方を書く）
 - 見送り: V1-e。commands の `command:` は Claude Code が黙って無視するフィールドで（skills の「ignores a field it doesn't recognize」）、許可一覧を決めるのは P3 の C1 を直すときになる
 
-### 新たに見つけた点（提案）
+### 新たに見つけた点: fork skill の `background`
 
-- fork skill（loop-dev / search / skill-make / maintain / skill-tune / learn / refactor-prep / loop-audit）の frontmatter に `background:` が無い。skills の文書には「The forked subagent runs in the background」とあり、`background: false` で起動したターンに結果を待つとする（**実機未確認**。公式ドキュメント由来）。commands は loop-dev の報告を受け取ってから次へ進む前提で書かれている。`validate_skills` は未知キーを拒否しないので 1 行で足せるが、他のハーネスでの扱いを確かめてから決める
+skills の文書の frontmatter 表は `background` を「Default: `true`」とし、本文は "The forked subagent runs in the background" と書く。sub-agents の文書は、バックグラウンドの結果は後のターンの完了通知で届くとする。
+
+| skill | 判定 | 根拠 |
+|---|---|---|
+| `loop-dev` | 実施（`background: false`） | 7 本の command が起動し、報告を受けて Loop-Dev Result を転記する。結果が起動したターンに届かないと次の手順が成り立たない |
+| `refactor-prep` | 実施（`background: false`） | `/refactor` は出力を直後の `refactor-rollback` の入力に使う |
+| `skill-make` | 実施（`background: false`） | `/skill-gen` が起動し、結果を受けて報告する |
+| `learn` / `search` / `loop-audit` / `maintain` / `skill-tune` | クローズ | 結果を次の手順の入力に使う呼び出し元が無い。利用者・モデルが直接起動し、結果が後のターンに届いても成り立つ |
+
+あわせて、`validate_skills` で `background` を真偽値として検査し（`"false"` は効かず既定へ戻る）、command が名指しする fork の skill に `background: false` があることを構造テストで検査する。判断基準は ADR `definition-and-subagent-design.md` の決定 7 に追記した。
 
 ### 出典
 
