@@ -25,8 +25,9 @@ _REQUIRED_FRONTMATTER_FIELDS = ("name", "description")
 # 見ないので、`"true"`（引用符付き）/ `yes` / `1` は**宣言したつもりで効かない**。
 # 自前パーサはそれらを str / int として読むため、型を見ない限り素通りする。
 # 実害: `disable-model-invocation` が効かなければ、スラッシュ起動専用にしたはずの
-# skill がモデルの推測で自動発火する。`user-invocable` も同じ形で裏返る。
-_BOOLEAN_FRONTMATTER_FIELDS = ("user-invocable", "disable-model-invocation")
+# skill がモデルの推測で自動発火する。`user-invocable` も同じ形で裏返る。`background` が効かなければ
+# fork が既定のバックグラウンド実行に戻り、起動したターンに結果が届かない。
+_BOOLEAN_FRONTMATTER_FIELDS = ("user-invocable", "disable-model-invocation", "background")
 
 # 綴りを間違えても自前パーサは「別のキー」として黙って受理する。ハイフンと
 # アンダースコアの取り違えが唯一現実的な誤りなので、その形だけを名指しで拒否する。

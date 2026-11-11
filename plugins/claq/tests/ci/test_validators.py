@@ -158,6 +158,8 @@ _SKILL_HEAD = "---\nname: planner\ndescription: 説明\n"
         pytest.param(f'{_SKILL_HEAD}disable-model-invocation: "true"\n---\n', "真偽値でない", id="quoted-true"),
         pytest.param(f"{_SKILL_HEAD}disable-model-invocation: yes\n---\n", "真偽値でない", id="yes"),
         pytest.param(f"{_SKILL_HEAD}disable-model-invocation: 1\n---\n", "真偽値でない", id="number"),
+        # background が効かなければ fork が既定のバックグラウンド実行に戻る。
+        pytest.param(f'{_SKILL_HEAD}background: "false"\n---\n', "真偽値でない", id="quoted-background"),
         # 綴り違いは自前パーサが「別のキー」として黙って受理し、宣言が丸ごと無視される。
         pytest.param(
             f"{_SKILL_HEAD}disable_model_invocation: true\n---\n",
