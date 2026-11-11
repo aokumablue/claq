@@ -43,6 +43,9 @@ _MUTATION_BEFORE_COMMIT_MESSAGE = (
     "`git add` in a separate tool call, then commit."
 )
 
+# トークン列として読めない入力（閉じていない引用符・壊れた JSON）にだけ当てる、生文字列上の `git commit`。
+RAW_GIT_COMMIT_RE = re.compile(r"\bgit\s+commit\b")
+
 
 def find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     """1 セグメント（シェル区切りを含まないトークン列）内の `git commit` 呼び出しを探します。
@@ -95,7 +98,7 @@ def parse_git_commit_command(command: str) -> tuple[bool, list[str]]:
         if commit_args is not None:
             return True, commit_args
 
-    if not parsed_cleanly and re.search(r"\bgit\s+commit\b", command):
+    if not parsed_cleanly and RAW_GIT_COMMIT_RE.search(command):
         return True, []
     return False, []
 

@@ -41,6 +41,7 @@ from claq.hooks.config_protection import (
 from claq.hooks.hook_common import (
     basename,
     fold_path_parts,
+    match_folded_path_window,
     memoized_in_scan,
     normalize_protected_name,
     resolve_effective_target,
@@ -59,31 +60,6 @@ _RUNTIME_DIR_DISPLAY = "runtime/"
 
 # ホスト設定の置き場（``.claude/`` 直下）と名前の構造一致。
 _HOST_SETTINGS_PATH_SEGMENTS = ((".claude", "settings.json"), (".claude", "settings.local.json"))
-
-
-def match_folded_path_window(
-    parts: tuple[str, ...], candidates: tuple[tuple[str, ...], ...]
-) -> tuple[str, ...] | None:
-    """パス要素の連続した並びが候補のいずれかに一致するかを、畳んだ名前で判定する。
-
-    Args:
-        parts: 判定するパスの要素列。
-        candidates: 連続一致を探す要素列の候補（畳む前の綴り）。
-
-    Returns:
-        一致した候補（畳む前の綴り）。一致しなければ None。
-
-    Raises:
-        例外は発生しません。
-    """
-    folded_parts = fold_path_parts(parts)
-    for segments in candidates:
-        folded_segments = fold_path_parts(segments)
-        width = len(folded_segments)
-        for index in range(len(folded_parts) - width + 1):
-            if folded_parts[index : index + width] == folded_segments:
-                return segments
-    return None
 
 
 @memoized_in_scan

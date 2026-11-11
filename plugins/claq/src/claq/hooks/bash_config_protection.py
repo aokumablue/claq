@@ -79,13 +79,14 @@ from claq.hooks.hook_common import (
     emit_block_output,
     fold_path_parts,
     is_inplace_edit_flag,
+    match_folded_path_window,
     memoized_in_scan,
     normalize_protected_name,
     resolve_effective_target,
     resolve_repo_root,
     scan_memo,
 )
-from claq.hooks.host_guard_targets import find_host_guard_match, match_folded_path_window
+from claq.hooks.host_guard_targets import find_host_guard_match
 from claq.hooks.shell_tokens import (
     WRITE_REDIRECT_OPERATORS,
     command_dialect_variants,

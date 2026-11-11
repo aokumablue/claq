@@ -49,6 +49,7 @@ from claq.hooks.commit_quality_scanner import (
 )
 from claq.hooks.commit_risk import (
     MULTIPLE_COMMITS_MESSAGE,
+    RAW_GIT_COMMIT_RE,
     compound_commit_risk,
     find_git_commit_args_in_segment,
     is_commit_all_flag,
@@ -610,7 +611,7 @@ def _malformed_input_reason(raw_input: str) -> str | None:
     """
     if not raw_input.strip():
         return None
-    if re.search(r"\bgit\s+commit\b", raw_input):
+    if RAW_GIT_COMMIT_RE.search(raw_input):
         log("[Hook] ERROR: malformed JSON input, but raw command text matches `git commit`.")
         return _MALFORMED_COMMIT_MESSAGE
     log("[Hook] WARNING: could not parse hook input as JSON; not a git commit, passing through.")
