@@ -1,8 +1,8 @@
 """mem サブシステムの SQLite スキーマ定義。
 
 ``repos`` / ``sessions`` / ``knowledge`` の 3 テーブルのみで構成する。
-``knowledge.session_id`` が ``sessions`` を参照するため、DDL は
-``repos`` → ``sessions`` → ``knowledge`` の順に並べる。
+``sessions`` と ``knowledge`` が ``repos`` を参照するため、DDL は ``repos`` を
+先頭に置く。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS repos (
   last_seen_at  TEXT NOT NULL
 );
 
--- セッション履歴。knowledge の出所であり、次セッションへの引き継ぎを持つ。
+-- セッション履歴。次セッションへの引き継ぎを持つ。
 CREATE TABLE IF NOT EXISTS sessions (
   id          INTEGER PRIMARY KEY,
   session_uid TEXT NOT NULL UNIQUE,        -- ハーネスが渡す session_id
@@ -54,7 +54,6 @@ CREATE TABLE IF NOT EXISTS knowledge (
                   CHECK (status IN ('active','pending','archived')),
   source        TEXT NOT NULL CHECK (source IN ('agent','observer','human')),
   source_ref    TEXT,                      -- 出所の自由記述（ファイルパス等）
-  session_id    INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
   superseded_by INTEGER REFERENCES knowledge(id) ON DELETE SET NULL,
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL,

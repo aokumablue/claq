@@ -62,7 +62,7 @@ class Repo(_RowModel):
 
 @dataclass
 class Session(_RowModel):
-    """セッション履歴 1 行。knowledge の出所であり引き継ぎを持つ。
+    """セッション履歴 1 行。次セッションへの引き継ぎを持つ。
 
     Attributes:
         session_uid: ハーネスが渡す session_id。
@@ -103,7 +103,6 @@ class Knowledge(_RowModel):
             生まれる。呼び出し側に毎回明示させることでその経路を作らせない。
             generic learn 経路の値は ``knowledge_input`` が ``pending`` に固定する。
         source_ref: 出所の自由記述（ファイルパス等）。
-        session_id: 出所セッションの ``sessions.id``。
         superseded_by: この行を置き換えた ``knowledge.id``。
         created_at: 作成時刻（ISO8601）。
         updated_at: 更新時刻（ISO8601）。
@@ -121,7 +120,6 @@ class Knowledge(_RowModel):
     domain: str | None = None
     confidence: float = 0.5
     source_ref: str | None = None
-    session_id: int | None = None
     superseded_by: int | None = None
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)

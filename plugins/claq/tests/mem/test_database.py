@@ -112,15 +112,6 @@ class TestSchema:
         assert db.list_knowledge() == []
         assert db.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
-    def test_session_delete_nulls_knowledge_link(self, db: Database) -> None:
-        """sessions の削除で knowledge.session_id は NULL になる（SET NULL）。"""
-        db.upsert_repo(_repo())
-        session = db.start_session(Session(session_uid="uid-1", repo_id="claq-dev"))
-        db.upsert_knowledge(_knowledge(session_id=session.id))
-        db.conn.execute("DELETE FROM sessions WHERE id = ?", (session.id,))
-        db.conn.commit()
-        assert db.get_knowledge_by_key("use-python3").session_id is None
-
 
 class TestConnection:
     """接続・初期化・後始末・パス検証の挙動。"""
@@ -270,7 +261,6 @@ class TestKnowledge:
     def test_upsert_persists_all_optional_columns(self, db: Database) -> None:
         """任意カラムがすべて往復する。"""
         db.upsert_repo(_repo())
-        session = db.start_session(Session(session_uid="uid-1", repo_id="claq-dev"))
         base = db.upsert_knowledge(_knowledge("old-way"))
         stored = db.upsert_knowledge(
             _knowledge(
@@ -282,7 +272,6 @@ class TestKnowledge:
                 status="pending",
                 source="observer",
                 source_ref="plugins/claq/src/claq/mem/database.py",
-                session_id=session.id,
                 superseded_by=base.id,
             )
         )
@@ -293,7 +282,6 @@ class TestKnowledge:
         assert stored.status == "pending"
         assert stored.source == "observer"
         assert stored.source_ref.endswith("database.py")
-        assert stored.session_id == session.id
         assert stored.superseded_by == base.id
 
     def test_list_without_filters_returns_all_newest_first(self, db: Database) -> None:

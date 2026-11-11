@@ -238,9 +238,8 @@ class Database:
         row = self._returning(
             """INSERT INTO knowledge
                  (key, scope, repo_id, kind, title, body, domain, confidence,
-                  status, source, source_ref, session_id, superseded_by,
-                  created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  status, source, source_ref, superseded_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(COALESCE(repo_id, ''), key) DO UPDATE SET
                  scope = excluded.scope,
                  kind = excluded.kind,
@@ -251,7 +250,6 @@ class Database:
                  status = excluded.status,
                  source = excluded.source,
                  source_ref = excluded.source_ref,
-                 session_id = excluded.session_id,
                  superseded_by = excluded.superseded_by,
                  updated_at = excluded.updated_at
                RETURNING *""",
@@ -267,7 +265,6 @@ class Database:
                 knowledge.status,
                 knowledge.source,
                 knowledge.source_ref,
-                knowledge.session_id,
                 knowledge.superseded_by,
                 knowledge.created_at,
                 knowledge.updated_at,
