@@ -1,4 +1,4 @@
-"""mem サブシステムの SQLite スキーマ定義（database.py から分離）。
+"""mem サブシステムの SQLite スキーマ定義。
 
 ``repos`` / ``sessions`` / ``knowledge`` の 3 テーブルのみで構成する。
 ``knowledge.session_id`` が ``sessions`` を参照するため、DDL は

@@ -147,7 +147,7 @@ mkdir -p "$CLAQ_DATA_PATH"
 
 ### scan_scaffold_drift（足場タグ denylist の陳腐化検知）
 
-`ci/scan_scaffold_drift.py` は、`lib/harness.py` の `_SCAFFOLD_TAGS` から漏れた新しい足場タグを実 transcript から検知する。コンポーネントのインベントリとは別の単位で、コンポーネント数には加えない。
+`ci/scan_scaffold_drift.py` は、`lib/harness.py` の `SCAFFOLD_TAGS` から漏れた新しい足場タグを実 transcript から検知する。コンポーネントのインベントリとは別の単位で、コンポーネント数には加えない。
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127

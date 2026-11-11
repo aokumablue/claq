@@ -1,4 +1,4 @@
-"""mem サブシステムのデータクラス定義群（database.py から分離）。
+"""mem サブシステムのデータクラス定義群。
 
 ``repos`` / ``sessions`` / ``knowledge`` の 3 テーブルに 1 対 1 対応する
 dataclass を定義し、``sqlite3.Row`` からの復元を ``from_row`` で提供する。
