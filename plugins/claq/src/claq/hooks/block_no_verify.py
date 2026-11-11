@@ -100,8 +100,7 @@ from claq.hooks.hook_common import (
 from claq.hooks.shell_tokens import (
     command_dialect_variants,
     command_exceeds_scan_budget,
-    extract_shell_wrapper_command,
-    is_shell_wrapper_token,
+    extract_shell_wrapper_call,
     scan_budget_message,
     split_segments,
     tokenize_with_status,
@@ -560,27 +559,6 @@ def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix:
 _UNPARSED_RAW_BYPASS_RE = re.compile(r"--no-verify|hookspath", re.IGNORECASE)
 
 
-def _wrapper_prefix_tokens(segment: list[str]) -> tuple[str, ...]:
-    """セグメント内で最初の既知シェル起動より前にあるトークン列を返す。
-
-    ``HOME=/tmp/h sh -c '...'`` や ``env HOME=/tmp/h sh -c '...'`` の ``HOME=/tmp/h`` は、
-    シェルの子プロセスとして動く内側の git にも環境として渡る。``-c`` の文字列より後ろの
-    位置引数（``sh -c '...' HOME=/tmp/h``）は環境ではないため含めない。
-
-    Args:
-        segment: `extract_shell_wrapper_command` が文字列コマンドを返したセグメント。
-            シェル起動トークンを必ず含む。
-
-    Returns:
-        最初のシェル起動トークンより前のトークン列。
-
-    Raises:
-        StopIteration: セグメントにシェル起動トークンが無い場合（呼び出し側の契約違反）。
-    """
-    index = next(i for i, token in enumerate(segment) if is_shell_wrapper_token(token))
-    return tuple(segment[:index])
-
-
 def _segment_has_bypass(segment: list[str], inherited_prefix: tuple[str, ...]) -> bool:
     """1 セグメント内のいずれかの git 起動がフックを迂回するかを判定する。
 
@@ -631,10 +609,8 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
             return True
         if _recursed:
             continue
-        wrapper_command = extract_shell_wrapper_command(segment)
-        if wrapper_command is not None and has_bypass_flag(
-            wrapper_command, _recursed=True, _inherited_prefix=_wrapper_prefix_tokens(segment)
-        ):
+        wrapper = extract_shell_wrapper_call(segment)
+        if wrapper is not None and has_bypass_flag(wrapper.command, _recursed=True, _inherited_prefix=wrapper.prefix):
             return True
     return False
 
