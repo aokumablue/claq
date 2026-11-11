@@ -340,8 +340,9 @@ class Database:
     def start_session(self, session: Session) -> Session:
         """セッションを開始登録する。
 
-        同一 ``session_uid`` の再入は ``harness`` の更新のみ行い、
-        ``started_at`` は初回の値を保持する。
+        同一 ``session_uid`` の再入は既存行を書き換えずに返す（``started_at`` は
+        初回の値のまま）。衝突時の ``DO UPDATE`` は、``RETURNING`` に既存行を
+        返させるための無変更の代入。
 
         Args:
             session: 開始するセッション。
@@ -351,15 +352,14 @@ class Database:
         """
         row = self._returning(
             """INSERT INTO sessions
-                 (session_uid, repo_id, harness, handoff, started_at, ended_at)
-               VALUES (?, ?, ?, ?, ?, ?)
+                 (session_uid, repo_id, handoff, started_at, ended_at)
+               VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(session_uid) DO UPDATE SET
-                 harness = excluded.harness
+                 session_uid = excluded.session_uid
                RETURNING *""",
             (
                 session.session_uid,
                 session.repo_id,
-                session.harness,
                 session.handoff,
                 session.started_at,
                 session.ended_at,

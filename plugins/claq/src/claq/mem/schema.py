@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS sessions (
   id          INTEGER PRIMARY KEY,
   session_uid TEXT NOT NULL UNIQUE,        -- ハーネスが渡す session_id
   repo_id     TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-  harness     TEXT NOT NULL DEFAULT 'unknown',
   handoff     TEXT NOT NULL DEFAULT '',    -- 次セッションへの引き継ぎ（人間可読の散文）
   started_at  TEXT NOT NULL,
   ended_at    TEXT

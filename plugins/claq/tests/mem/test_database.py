@@ -332,19 +332,17 @@ class TestSessions:
     """sessions の CRUD。"""
 
     def test_start_session_inserts_then_is_idempotent(self, db: Database) -> None:
-        """開始登録で id を採番し、同一 session_uid の再入は started_at を保持し harness だけ更新する。"""
+        """開始登録で id を採番し、同一 session_uid の再入は既存行をそのまま返す。"""
         db.upsert_repo(_repo())
-        first = db.start_session(Session(session_uid="uid-1", repo_id="claq-dev", harness="claude", started_at=_TS))
+        first = db.start_session(Session(session_uid="uid-1", repo_id="claq-dev", started_at=_TS))
         assert first.id is not None
-        assert first.harness == "claude"
         assert first.handoff == ""
         assert first.ended_at is None
         second = db.start_session(
-            Session(session_uid="uid-1", repo_id="claq-dev", harness="codex", started_at="2026-09-09T00:00:00+00:00")
+            Session(session_uid="uid-1", repo_id="claq-dev", started_at="2026-09-09T00:00:00+00:00")
         )
         assert second.id == first.id
         assert second.started_at == _TS
-        assert second.harness == "codex"
 
     def test_start_session_requires_existing_repo(self, db: Database) -> None:
         """未登録 repo_id は外部キー制約で弾かれる。"""
