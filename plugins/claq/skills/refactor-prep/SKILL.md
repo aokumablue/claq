@@ -1,6 +1,6 @@
 ---
 name: refactor-prep
-description: リファクタ着手前に対象分割・依存可視化・実行前テストセットを最小コストで確定する事前準備スキル。
+description: `/refactor` のステップ1 からの委譲専用。リファクタ着手前に対象分割・依存可視化・実行前テストセットを最小コストで確定する。
 context: fork
 background: false
 user-invocable: false
