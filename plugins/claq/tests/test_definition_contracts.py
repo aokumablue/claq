@@ -23,6 +23,8 @@ _RELATIVE_MD_HINT = '`. "$HOME/.claq/env.sh" && claq_plugin_root`'
 _DELEGATORS_LINE_RE = re.compile(r"^- `loop-dev` ← (.+)$", re.M)
 _DESCRIPTION_DELEGATORS_RE = re.compile(r"^description: .*?。([a-z/-]+) からの委譲専用。$", re.M)
 _SKILL_INVOCATION_RE = re.compile(r"`([a-z-]+)` skill")
+# command が名指しせず、モデルが作る前に自分で起動する fork の skill（判定が次の手順を決める）。
+_MODEL_INVOKED_FORKS = frozenset({"search"})
 
 
 def _corpus() -> list[tuple[Path, str]]:
@@ -116,8 +118,8 @@ def test_commands_with_relative_md_reference_state_base() -> None:
 
 
 def test_forked_skills_invoked_by_commands_run_in_foreground() -> None:
-    """command が名指しして起動する fork の skill は `background: false` を持つ（既定は後のターンに結果が届く）。"""
-    invoked = {
+    """結果が次の手順を決める fork の skill は `background: false` を持つ（既定は後のターンに結果が届く）。"""
+    invoked = _MODEL_INVOKED_FORKS | {
         name
         for path, text in _corpus()
         if path.parts[0] == "commands"

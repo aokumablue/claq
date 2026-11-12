@@ -88,12 +88,13 @@ skills の文書の frontmatter 表は `background` を「Default: `true`」と�
 
 | skill | 判定 | 根拠 |
 |---|---|---|
-| `loop-dev` | 実施（`background: false`） | 7 本の command が起動し、報告を受けて Loop-Dev Result を転記する。結果が起動したターンに届かないと次の手順が成り立たない |
-| `refactor-prep` | 実施（`background: false`） | `/refactor` は出力を直後の `refactor-rollback` の入力に使う |
-| `skill-make` | 実施（`background: false`） | `/skill-gen` が起動し、結果を受けて報告する |
-| `learn` / `search` / `loop-audit` / `maintain` / `skill-tune` | クローズ | 結果を次の手順の入力に使う呼び出し元が無い。利用者・モデルが直接起動し、結果が後のターンに届いても成り立つ |
+| `loop-dev` | 実施（`background: false`） | 7 本の command が起動し、報告を受けて Loop-Dev Result を転記する。fork の前景・背景は frontmatter でしか選べず、背景の fork は使えるツールが絞られ、編集は checkpoint の外に出る（書き込みとコミットを行う skill に直接効く） |
+| `refactor-prep` | 実施（`background: false`） | `/refactor` は出力を直後の `refactor-rollback` の入力に使い、結果が次の手順を決める |
+| `skill-make` | 実施（`background: false`） | `/skill-gen` が起動し、結果を受けて報告する。生成物の書き込みを行う |
+| `search` | 実施（`background: false`） | モデルが作る前に起動し、判定（採用／拡張／自作）と導入が次の手順を決める。背景だと判定が出る前に作り始めうる |
+| `learn` / `loop-audit` / `maintain` / `skill-tune` | クローズ | `learn` は記録だけで結果が次の手順を決めず、他の 3 本は利用者が直接起動して結果を読む（後のターンに届いても成り立つ） |
 
-あわせて、`validate_skills` で `background` を真偽値として検査し（`"false"` は効かず既定へ戻る）、command が名指しする fork の skill に `background: false` があることを構造テストで検査する。判断基準は ADR `definition-and-subagent-design.md` の決定 7 に追記した。
+あわせて、`validate_skills` で `background` を真偽値として検査し（`"false"` は効かず既定へ戻る）、command が名指しする fork の skill と `search` に `background: false` があることを構造テストで検査する。判断基準は ADR `definition-and-subagent-design.md` の決定 7 に追記した。
 
 ### 出典
 
@@ -202,7 +203,7 @@ ADR は避ける止まり方 4 種を「全定義で同じ文言に」として�
 | skills（quick-* 5 本 / grillme / adr） | 対象外 | 利用者との往復・承認待ちが意図した停止点 |
 | skills（checkpoint / refactor-rollback / secure） | 対象外 | 単発の出力で終わる |
 
-修正は C2・C3 に記載。fork で子を起動する skill（loop-dev / search / skill-make / maintain / skill-tune）は文言と `run_in_background: false` を持っており、変更不要。
+修正は C2・C3 に記載。fork で子を起動する skill（loop-dev / search / skill-make / maintain / skill-tune）は文言と子の `run_in_background: false` を持っており、変更不要（fork 自身の `background` は「新たに見つけた点」で扱う）。
 
 ---
 
