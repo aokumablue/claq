@@ -83,7 +83,7 @@ Test Generation
 ──────────────────────────────
 Scope:      {n} files  ({language})
 Tables:     {table_count} (functions)
-Tests added:{tests_added}
+Tests added: {tests_added}
 Coverage:   {cov_before}% → {cov_after}%
 Iterations: {n}/2
 Commits:    {hashes or "none (理由)"}
