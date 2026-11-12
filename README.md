@@ -99,7 +99,7 @@ claude plugin install claq@claq
 
 ## 🧩 Skills (21)
 
-すべて `plugins/claq/skills/<name>/SKILL.md` に定義。**起動方法**は `user-invocable` / `disable-model-invocation` の組み合わせで決まる（詳細は [用語](#用語) と [Architecture](#-architecture) を参照）。**実行形態**は `context: fork`（バックグラウンド実行・対話不可）か inline（親セッションで実行・対話可）か。
+すべて `plugins/claq/skills/<name>/SKILL.md` に定義。**起動方法**は `user-invocable` / `disable-model-invocation` の組み合わせで決まる（詳細は [用語](#用語) と [Architecture](#-architecture) を参照）。**実行形態**は `context: fork`（既定はバックグラウンド実行。結果を次の手順に使う skill は `background: false` で前景に固定する。どちらも対話不可）か inline（親セッションで実行・対話可）か。
 
 | Skill | 起動方法 | 実行形態 | 用途 | 一言説明 |
 |---|---|---|---|---|
@@ -819,7 +819,7 @@ flowchart TB
 **設計方針**:
 
 - ユーザーは **Commands のみ選択** すれば内部で Agents / Skills が自動連鎖
-- スキルの `context: fork` は「ツール消費が報告より重く、ユーザーの応答も本文自体も親に不要」なものだけに付ける（fork は既定でバックグラウンド実行され対話・承認ゲートを持てないため）。対話/承認を伴う skill・本文や出力そのものが親の判断材料になる skill は inline。ユーザー直接起動の可否は `user-invocable` で独立に決める
+- スキルの `context: fork` は「ツール消費が報告より重く、ユーザーの応答も本文自体も親に不要」なものだけに付ける（fork は対話・承認ゲートを持てず、既定ではバックグラウンド実行されるため。結果が呼び出し側の次の手順を決める skill は `background: false` を書く）。対話/承認を伴う skill・本文や出力そのものが親の判断材料になる skill は inline。ユーザー直接起動の可否は `user-invocable` で独立に決める
 - 永続化は **SQLite（個人）** の単層。テーブルは `repos` / `knowledge` / `sessions` の 3 つだけ
 - 検索は埋め込みも FTS5 も使わず Python 側でスコアリング（ランタイム依存はゼロ、標準ライブラリのみ）
 - 知識カードを書くのは Commands / Skills の「学びの記録」ステップのみ。Agents は書かず、候補を呼び出し元へ報告する
