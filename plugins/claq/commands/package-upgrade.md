@@ -1,6 +1,7 @@
 ---
 name: package-upgrade
 description: 依存パッケージ（ランタイムを含む）の版を上げ、破壊的変更に追従してテストを通す。新しい依存の導入は search、自分のコードの整理は /refactor。
+argument-hint: "[パッケージ名[@版] ...]"
 command: /package-upgrade
 ---
 

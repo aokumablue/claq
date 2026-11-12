@@ -1,6 +1,7 @@
 ---
 name: feat-dev
 description: 新機能・機能拡張を、探索から loop-dev による反復実装・サマリーまで一気通貫で進める。
+argument-hint: "[機能説明]"
 command: /feat-dev
 ---
 

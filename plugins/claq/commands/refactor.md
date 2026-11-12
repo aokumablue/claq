@@ -1,6 +1,7 @@
 ---
 name: refactor
 description: 機能を変えずにコードをリファクタリングする（デッドコード削除・可読性・性能。差分または指定パス）。新機能は /feat-dev。
+argument-hint: "[ファイルパス] [--mode=clean|simplify]"
 command: /refactor
 ---
 

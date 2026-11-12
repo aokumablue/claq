@@ -1,6 +1,7 @@
 ---
 name: test-gen
 description: 既存コードにテストを足してブランチカバレッジを上げる（差分または指定パス）。
+argument-hint: "[ファイルパス]"
 command: /test-gen
 ---
 

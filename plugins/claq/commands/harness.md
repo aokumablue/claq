@@ -1,6 +1,7 @@
 ---
 name: harness
 description: ハーネスを監査して改善案を示す。適用は `--apply` 指定時のみ。
+argument-hint: "[scope] [--format=text|json] [--root=<path>] [--target-kind=repo|consumer] [--audit-only] [--apply]"
 command: /harness
 ---
 
