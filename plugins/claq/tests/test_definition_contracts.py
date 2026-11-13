@@ -55,14 +55,14 @@ def test_stop_phrase_is_identical_everywhere() -> None:
     assert not partial, "停止文言が正本と一致しない:\n" + "\n".join(partial)
 
 
-def test_commands_with_stop_section_use_stop_phrase() -> None:
-    """「## 停止点」節を持つ command は停止 4 種文言を含む。"""
+def test_stop_section_and_fork_definitions_use_stop_phrase() -> None:
+    """「## 停止点」節を持つ定義と、`context: fork` の skill は停止 4 種文言を含む。"""
     missing = [
         str(path)
         for path, text in _corpus()
-        if path.parts[0] == "commands" and "## 停止点" in text and _STOP_PHRASE not in text
+        if ("## 停止点" in text or "\ncontext: fork\n" in text) and _STOP_PHRASE not in text
     ]
-    assert not missing, "停止点節に停止文言が無い:\n" + "\n".join(missing)
+    assert not missing, "停止点節・fork の定義に停止文言が無い:\n" + "\n".join(missing)
 
 
 def test_loop_dev_delegators_match_commands() -> None:
@@ -92,7 +92,9 @@ def test_agents_have_no_parent_relative_md_reference() -> None:
 def test_defense_pointer_has_matching_report_field() -> None:
     """報告の「追加した防御」へ残すよう求める定義は、返却形式にその欄を持つ。"""
     missing = [
-        str(path) for path, text in _corpus() if _DEFENSE_POINTER in text and not _DEFENSE_FIELD_RE.search(text)
+        str(path)
+        for path, text in _corpus()
+        if ("## 実装の手順" in text or _DEFENSE_POINTER in text) and not _DEFENSE_FIELD_RE.search(text)
     ]
     assert not missing, "「追加した防御」欄が返却形式に無い:\n" + "\n".join(missing)
 
