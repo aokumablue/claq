@@ -73,7 +73,7 @@
 | C7 | クローズ | 散文のレポートで壊れる振る舞いを示せない（好みの問題） | — |
 | S2 | クローズ | `user-invocable: false` は "Only Claude can invoke"、"hides it from the `/` menu"（skills）。adr・checkpoint は自動起動で成立する。secure は description がモデルに見えないだけで実害なし | — |
 | S3 | 実施 | 出力は `n.n / 10` を求めるが式が無く、同じ履歴から値が揺れる | 満たした基準の数から決まる式を追加。blocker 0 件の履歴は満点、実行 0 件は `N/A` |
-| V1 | 実施（V1-e を除く） | 下の「CI に足す検査」 | `tests/test_definition_contracts.py` |
+| V1 | 実施（V1-a〜f すべて） | 下の「CI に足す検査」 | `tests/test_definition_contracts.py`、`src/claq/ci/validate_commands.py` |
 
 ### P3 の判定結果
 
@@ -95,8 +95,8 @@
 
 定義 md は互いを import しないため、片方だけ書き換えた食い違いが実行時まで残る。これを pytest の構造テストで検出する。
 
-- 実施: V1-a（停止文言の一部を書く定義は 4 種を同じ文言で書く）、V1-b（loop-dev の description・release-verify の委譲元一覧・loop-dev を起動する command の 3 者一致）、V1-c（agents に `../` の md 参照が無い）、V1-d（報告の「追加した防御」を求める定義はその欄を持つ）、V1-f（planner を起動する定義は `mode:` を書く）、X3 の検査（`../` の md 参照を持つ command は基準の求め方を書く）
-- V1-e も実施（上の P3 の判定結果）。commands の frontmatter の綴り違いは `validate_commands` が拒否する
+- 実施: V1-a（停止文言の一部を書く定義・「## 停止点」節を持つ定義・fork の skill は 4 種を同じ文言で書く）、V1-b（loop-dev の description・release-verify の委譲元一覧・loop-dev を起動する command の 3 者一致）、V1-c（agents に `../` の md 参照が無い）、V1-d（「実装の手順」を持つ定義・報告の「追加した防御」を求める定義はその欄を持つ）、V1-f（planner を起動する定義は `mode:` を書く）、X3 の検査（`../` の md 参照を持つ command は基準の求め方を書く）
+- V1-e（実施）: commands の frontmatter は、綴り違いを拒否し、`---` で始まるのに解析できないファイルも拒否する。許可キーの一覧ではなく綴り違いの検出で足りると判断した（未知キーの許可一覧は、今後 Claude Code が新しいキーを足すたびに直す必要が出るため）
 
 ### 新たに見つけた点: fork skill の `background`
 
@@ -544,7 +544,7 @@ ADR は「定義に書いた検証規則は CI で実測する」としている
 | V1-b | `release-verify` の委譲元一覧と、`loop-dev` description の委譲元が一致する | `tests/test_md_references.py` | X2 |
 | V1-c | agents の本文に `../` で始まる `.md` 参照が無い | `tests/test_md_references.py` | A5 |
 | V1-d | 「実装の手順」を持つ定義の返却形式に「追加した防御」がある | `tests/test_simplicity_criteria.py` | X4 |
-| V1-e | commands の frontmatter キーが許可一覧（`name` / `description` / `argument-hint`）に収まる | `src/claq/ci/validate_commands.py` | C1 |
+| V1-e | commands の frontmatter の綴り違い（`argument_hint` 等）と、解析できない frontmatter を拒否する | `src/claq/ci/validate_commands.py` | C1 |
 | V1-f | `planner` を起動する定義の本文に `mode: evaluate` か `mode: decide` がある | `tests/test_agent_regex_contracts.py` | X1 |
 
 各検査は対応する定義修正と同じコミットで足す（先に足すと落ちる）。
