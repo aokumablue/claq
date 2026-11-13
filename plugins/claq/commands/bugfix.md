@@ -1,6 +1,7 @@
 ---
 name: bugfix
 description: バグを再現テストから回帰防止まで一気通貫で直す。設計変更は /plan、品質改善は /refactor。
+argument-hint: "[バグ説明] [ファイルパス]"
 command: /bugfix
 ---
 

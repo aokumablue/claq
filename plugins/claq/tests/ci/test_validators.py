@@ -298,6 +298,28 @@ def test_validate_commands_reports_errors_and_io_failures(
     assert '存在しないエージェント "missing"' in stderr
 
 
+def test_validate_commands_rejects_misspelled_frontmatter_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`argument_hint` のような綴り違いは黙って無視されるので拒否し、正しい綴りと frontmatter の無いファイルは通すこと。"""
+    (tmp_path / "agents").mkdir()
+    (tmp_path / "skills").mkdir()
+    _write_files(
+        tmp_path,
+        {
+            "commands/bad.md": "---\nname: bad\nargument_hint: x\n---\nBody.\n",
+            "commands/good.md": "---\nname: good\nargument-hint: x\n---\nBody.\n",
+            "commands/plain.md": "Body.\n",
+        },
+    )
+
+    assert _run_commands(tmp_path) == 1
+    stderr = capsys.readouterr().err
+    assert "argument_hint は argument-hint の綴り違い" in stderr
+    assert "good.md" not in stderr
+    assert "plain.md" not in stderr
+
+
 def test_validate_commands_resolves_relative_dirs_via_root_dir(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

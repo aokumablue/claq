@@ -1,6 +1,7 @@
 ---
 name: instinct
 description: 蓄積された知識（knowledge）の一覧・閲覧・検索・昇格・アーカイブ・追加を行う統合コマンド。
+argument-hint: "<list|show|search|promote|forget|learn> [引数...]"
 command: /instinct
 ---
 

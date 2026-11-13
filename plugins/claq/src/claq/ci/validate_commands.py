@@ -9,6 +9,7 @@ from pathlib import Path
 from claq.ci.ci_common import (
     PLUGIN_ROOT,
     emit_error,
+    extract_frontmatter,
     list_markdown_files,
     parse_validator_args,
     read_or_report,
@@ -22,6 +23,10 @@ DEFAULT_AGENTS_DIR = PLUGIN_ROOT / "agents"
 DEFAULT_SKILLS_DIR = PLUGIN_ROOT / "skills"
 
 _RESERVED_SKILL_ROOTS = {"learned", "imported"}
+
+# commands の frontmatter で意味を持つキー。Claude Code は未知のキーを黙って無視するので、
+# `argument_hint` のようなアンダースコア綴りは宣言したつもりで効かない（補完時のヒントが出ない）。
+_KNOWN_FRONTMATTER_FIELDS = frozenset({"name", "description", "command", "argument-hint"})
 
 
 _KEBAB_NAME = r"[a-z0-9]+(?:-[a-z0-9]+)*"
@@ -82,6 +87,14 @@ def _workflow_reference_errors(file_name: str, content: str, valid_agents: set[s
                 yield f'{file_name} - ワークフローが存在しないエージェント "{agent}" を参照しています'
 
 
+def _frontmatter_field_errors(file_name: str, content: str) -> Iterator[str]:
+    """frontmatter のハイフン／アンダースコアの綴り違いを返す（frontmatter が無いファイルは対象外）。"""
+    for key in extract_frontmatter(content) or {}:
+        swapped = key.replace("_", "-")
+        if swapped != key and swapped in _KNOWN_FRONTMATTER_FIELDS:
+            yield f"{file_name} - frontmatter の {key} は {swapped} の綴り違い（黙って無視される）"
+
+
 def _validate_command_file(
     file_path: Path, valid_commands: set[str], valid_agents: set[str], valid_skills: set[str]
 ) -> tuple[bool, int]:
@@ -95,7 +108,8 @@ def _validate_command_file(
         return True, 0
 
     body = _CODE_FENCE_PATTERN.sub("", content)
-    has_errors = report_errors(_command_reference_errors(name, body, valid_commands))
+    has_errors = report_errors(_frontmatter_field_errors(name, content))
+    has_errors |= report_errors(_command_reference_errors(name, body, valid_commands))
     has_errors |= report_errors(_agent_reference_errors(name, body, valid_agents))
     warn_count = _warn_skill_references(name, body, valid_skills)
     has_errors |= report_errors(_workflow_reference_errors(name, body, valid_agents))

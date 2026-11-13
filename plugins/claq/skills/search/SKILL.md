@@ -2,6 +2,7 @@
 name: search
 description: 新機能・新しい依存・新しいユーティリティや抽象化を作る前に、既存実装・ライブラリ・MCP・スキルを調べて採用／拡張／自作を決め、採用なら導入まで行う。既存コードの修正や小さな変更では使わない。
 context: fork
+background: false
 user-invocable: false
 ---
 

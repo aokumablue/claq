@@ -69,18 +69,34 @@
 | A8 | 実施 | description は「When Claude should delegate」（sub-agents）。計画フォーマットに、設計原則と loop-dev が前提にする「変更ファイル一覧」が無い | 呼ばない条件の形に直し、「変更ファイル一覧」「テストコマンド」欄を追加 |
 | A10 | クローズ | カバレッジ 100% は利用者の規約で、変えるのは仕様変更。「統合（常に）」は API・DB 操作を対象にした文として読める | — |
 | C5 | クローズ | `refactor-fix` は loop-dev の列挙内で、review も同じ値を使う。誤選択の再現が無い | — |
-| C6 | 実施（一部） | rollback は prep の出力を入力に取る。reviewer / security-auditor は INFO を返すのに要約で落ちていた | 起動順を明記、`Issues` に INFO を追加。節の並べ替えは P3 として見送り |
+| C6 | 実施 | rollback は prep の出力を入力に取る。reviewer / security-auditor は INFO を返すのに要約で落ちていた | 起動順を明記、`Issues` に INFO を追加、部分モード節を後ろへ移動（P3 の判定結果） |
 | C7 | クローズ | 散文のレポートで壊れる振る舞いを示せない（好みの問題） | — |
 | S2 | クローズ | `user-invocable: false` は "Only Claude can invoke"、"hides it from the `/` menu"（skills）。adr・checkpoint は自動起動で成立する。secure は description がモデルに見えないだけで実害なし | — |
 | S3 | 実施 | 出力は `n.n / 10` を求めるが式が無く、同じ履歴から値が揺れる | 満たした基準の数から決まる式を追加。blocker 0 件の履歴は満点、実行 0 件は `N/A` |
 | V1 | 実施（V1-e を除く） | 下の「CI に足す検査」 | `tests/test_definition_contracts.py` |
+
+### P3 の判定結果
+
+利用者が範囲を広げたので、P3 も根拠を取って項目ごとに決めた。
+
+| ID | 判定 | 根拠 | 内容 |
+|---|---|---|---|
+| A1 | 実施 | 同じ形式を読む security-auditor・loop-dev は「得るもの」 | reviewer の「起きること」を「得るもの」に統一 |
+| A6 | 実施 | description は "When Claude should delegate"（sub-agents）。ADR も「いつ呼ぶか」を求める | code-refiner / reviewer / security-auditor / tdd-writer の先頭を「専門」から使う条件へ |
+| C1 | 実施（一部） | commands は `argument-hint` を補完のヒントとして読む（skills の frontmatter 表）。`command:` と `name:` は Claude Code が無視するが、他ハーネスの読み手を排除できず、削って直る失敗も再現できない | 10 本に `argument-hint` を追加。`command:` は残す |
+| V1-e | 実施 | 未知のキーは黙って無視される（skills）ので、`argument_hint` の綴り違いは宣言が丸ごと効かない | `validate_commands` に綴り違いの拒否を追加（skills と同じ形） |
+| C6（並べ替え） | 実施 | 部分モードはステップ1〜9 を引く節で、7〜9 が未定義の位置にあった | ステップ9 の後ろへ移動 |
+| C9 | 実施 | 他の行は「:」の後に空白がある | `Tests added: {tests_added}` |
+| C10 | クローズ | feat-dev と bugfix は形が違うが、どちらも loop-dev の結果を転記する。読み手が形に依存する箇所が無く、壊れる振る舞いを示せない（好みの問題） | — |
+| S4 | 実施（一部） | `user-invocable: false` の skill は description が常にコンテキストにあり、Claude が起動できる（skills）。委譲専用の明示が要る | refactor-prep・skill-make を委譲専用の形に。release-verify・mcp-gen の `/maintain` 等の表記はリポジトリ全体の慣例（`/bugfix` と同じ）で、食い違いの再現が無いためクローズ |
+| S5 | 実施（一部） | 停止点が末尾にあると、冒頭を読んだ時点で止まってよい条件が分からない。他の fork skill は冒頭 | skill-tune の停止点を冒頭へ、`Step N` を「ステップN」へ、secure の永続メモリを箇条書きへ。永続メモリ節のラベル（参照:/search:）・mcp-gen の見出し・maintain の句点は、読み手が依存せず壊れる振る舞いを示せないためクローズ |
 
 ### CI に足す検査の実施結果
 
 定義 md は互いを import しないため、片方だけ書き換えた食い違いが実行時まで残る。これを pytest の構造テストで検出する。
 
 - 実施: V1-a（停止文言の一部を書く定義は 4 種を同じ文言で書く）、V1-b（loop-dev の description・release-verify の委譲元一覧・loop-dev を起動する command の 3 者一致）、V1-c（agents に `../` の md 参照が無い）、V1-d（報告の「追加した防御」を求める定義はその欄を持つ）、V1-f（planner を起動する定義は `mode:` を書く）、X3 の検査（`../` の md 参照を持つ command は基準の求め方を書く）
-- 見送り: V1-e。commands の `command:` は Claude Code が黙って無視するフィールドで（skills の「ignores a field it doesn't recognize」）、許可一覧を決めるのは P3 の C1 を直すときになる
+- V1-e も実施（上の P3 の判定結果）。commands の frontmatter の綴り違いは `validate_commands` が拒否する
 
 ### 新たに見つけた点: fork skill の `background`
 
@@ -88,12 +104,13 @@ skills の文書の frontmatter 表は `background` を「Default: `true`」と�
 
 | skill | 判定 | 根拠 |
 |---|---|---|
-| `loop-dev` | 実施（`background: false`） | 7 本の command が起動し、報告を受けて Loop-Dev Result を転記する。結果が起動したターンに届かないと次の手順が成り立たない |
-| `refactor-prep` | 実施（`background: false`） | `/refactor` は出力を直後の `refactor-rollback` の入力に使う |
-| `skill-make` | 実施（`background: false`） | `/skill-gen` が起動し、結果を受けて報告する |
-| `learn` / `search` / `loop-audit` / `maintain` / `skill-tune` | クローズ | 結果を次の手順の入力に使う呼び出し元が無い。利用者・モデルが直接起動し、結果が後のターンに届いても成り立つ |
+| `loop-dev` | 実施（`background: false`） | 7 本の command が起動し、報告を受けて Loop-Dev Result を転記する。fork の前景・背景は frontmatter でしか選べず、背景の fork は使えるツールが絞られ、編集は checkpoint の外に出る（書き込みとコミットを行う skill に直接効く） |
+| `refactor-prep` | 実施（`background: false`） | `/refactor` は出力を直後の `refactor-rollback` の入力に使い、結果が次の手順を決める |
+| `skill-make` | 実施（`background: false`） | `/skill-gen` が起動し、結果を受けて報告する。生成物の書き込みを行う |
+| `search` | 実施（`background: false`） | モデルが作る前に起動し、判定（採用／拡張／自作）と導入が次の手順を決める。背景だと判定が出る前に作り始めうる |
+| `learn` / `loop-audit` / `maintain` / `skill-tune` | クローズ | `learn` は記録だけで結果が次の手順を決めず、他の 3 本は利用者が直接起動して結果を読む（後のターンに届いても成り立つ） |
 
-あわせて、`validate_skills` で `background` を真偽値として検査し（`"false"` は効かず既定へ戻る）、command が名指しする fork の skill に `background: false` があることを構造テストで検査する。判断基準は ADR `definition-and-subagent-design.md` の決定 7 に追記した。
+あわせて、`validate_skills` で `background` を真偽値として検査し（`"false"` は効かず既定へ戻る）、command が名指しする fork の skill と `search` に `background: false` があることを構造テストで検査する。判断基準は ADR `definition-and-subagent-design.md` の決定 7 に追記した。
 
 ### 出典
 
@@ -202,7 +219,7 @@ ADR は避ける止まり方 4 種を「全定義で同じ文言に」として�
 | skills（quick-* 5 本 / grillme / adr） | 対象外 | 利用者との往復・承認待ちが意図した停止点 |
 | skills（checkpoint / refactor-rollback / secure） | 対象外 | 単発の出力で終わる |
 
-修正は C2・C3 に記載。fork で子を起動する skill（loop-dev / search / skill-make / maintain / skill-tune）は文言と `run_in_background: false` を持っており、変更不要。
+修正は C2・C3 に記載。fork で子を起動する skill（loop-dev / search / skill-make / maintain / skill-tune）は文言と子の `run_in_background: false` を持っており、変更不要（fork 自身の `background` は「新たに見つけた点」で扱う）。
 
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: review
 description: 変更差分（またはパス指定）のセキュリティ/品質レビューを行い、BLOCKER の修正まで自律実行する。
+argument-hint: "[ファイルパス]"
 command: /review
 ---
 

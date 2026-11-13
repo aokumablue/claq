@@ -1,6 +1,7 @@
 ---
 name: skill-gen
 description: このリポジトリの繰り返し作業から SKILL.md を生成し、eval で評価・改善する。
+argument-hint: "[--commits=<n>] [--knowledge]"
 command: /skill-gen
 ---
 

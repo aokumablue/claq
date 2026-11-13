@@ -45,8 +45,8 @@ CSP ヘッダ、CSRF トークンと `SameSite=Strict`、レート制限、RLS /
 
 ## 永続メモリ
 
-search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `security vulnerability {category}` / `{vulnerability_type} fix`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
-record: 特定の入口に結び付く学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
+- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `security vulnerability {category}` / `{vulnerability_type} fix`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
+- record: 特定の入口に結び付く学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
 
 ## 入力安全
 

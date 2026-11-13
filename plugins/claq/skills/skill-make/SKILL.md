@@ -1,6 +1,6 @@
 ---
 name: skill-make
-description: 新スキル生成/eval実行/ベンチマーク分析/説明文最適化。/skill-genからの委譲先。
+description: `/skill-gen` からの委譲専用。スキルの生成・eval 実行・ベンチマーク分析・説明文の最適化を行う。
 context: fork
 background: false
 user-invocable: false

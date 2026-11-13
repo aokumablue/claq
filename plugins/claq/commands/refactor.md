@@ -1,6 +1,7 @@
 ---
 name: refactor
 description: 機能を変えずにコードをリファクタリングする（デッドコード削除・可読性・性能。差分または指定パス）。新機能は /feat-dev。
+argument-hint: "[ファイルパス] [--mode=clean|simplify]"
 command: /refactor
 ---
 
@@ -53,10 +54,6 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 ## ステップ6: review + secure（並列）
 
 `claq:reviewer`（品質・設計・保守性）と `claq:security-auditor`（セキュリティ・脆弱性）を同時に起動し、結果を統合する。両方の依頼文に `effective_scope` を書き、reviewer の依頼文には security-auditor と並列であることも書く。
-
-## 部分モード
-
-`--mode=clean` はステップ1 → 2 → 3 → 6 → 7 → 8 → 9、`--mode=simplify` はステップ1 → 2 → 4 → 6 → 7 → 8 → 9 を実行する。
 
 ## ステップ7: final gate
 
@@ -117,6 +114,10 @@ Issues:     CRITICAL {c} / HIGH {h} / MEDIUM {m} / LOW {l} / INFO {i}
 Final Gate: PASS / BLOCKED
 Learned:    {ステップ8 で記録した key / なし}
 ```
+
+## 部分モード
+
+`--mode=clean` はステップ1 → 2 → 3 → 6 → 7 → 8 → 9、`--mode=simplify` はステップ1 → 2 → 4 → 6 → 7 → 8 → 9 を実行する。
 
 ## ルール
 

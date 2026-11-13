@@ -1,6 +1,7 @@
 ---
 name: plan
 description: コードを書く前に実装計画を立て、承認を得てから実装する。
+argument-hint: "[要件説明]"
 command: /plan
 ---
 

@@ -137,11 +137,13 @@ agents / skills / commands の本文は、起動のたびにモデルが指示�
    塞がらない。子の完了を待たずに返さざるを得ない場合の結果は、未判定を数値の 0 にしない形（判定行は
    「未判定」、収束は NO、コミットなし）で定義側に決めておく。commands は主会話で動き、後から届く
    hand-back で再開できるため対象外とする。
-   呼び出し元が結果を次の手順の入力に使う fork の skill（commands が Skill ツールで起動する skill）は、
-   frontmatter に `background: false` を書く。fork の既定はバックグラウンド実行で、結果は起動した
-   ターンには届かず後のターンの完了通知で届くため、起動の直後に結果を使う手順（`refactor-prep` の出力を
-   `refactor-rollback` へ渡す等）が成り立たない。呼び出し元を持たず利用者やモデルが直接起動する fork の
-   skill は既定のままにする
+   結果が呼び出し側の次の手順を決める fork の skill（commands が起動する `loop-dev`・`refactor-prep`・
+   `skill-make`、モデルが作る前に起動する `search`）は、frontmatter に `background: false` を書く。
+   Agent で起動する子は呼び出しごとに前景・背景を選べるが、fork の skill は frontmatter でしか選べず
+   既定は背景なので、依頼文で待つよう頼んでも塞がらない（上の `run_in_background` と同じ理屈）。
+   背景の fork は使えるツールが絞られ、編集は利用者側の checkpoint の外に出るため、書き込みと
+   コミットを行う skill には特に効く。結果を使う呼び出し元が無い skill（利用者が直接起動する
+   `maintain` 等、記録だけを行う `learn`）は既定のままにする
 
 判定行の欠落は「指摘ゼロ」ではない。収束条件や final gate が `Blockers: {n}` 行の実在を前提と
 する場合、行が無い（途中終了・出力破損・起動失敗）ときは未収束 / `BLOCKED` として扱う。
