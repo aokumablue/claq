@@ -540,12 +540,12 @@ ADR は「定義に書いた検証規則は CI で実測する」としている
 
 | ID | 検査 | 置き場 | 防ぐもの |
 |---|---|---|---|
-| V1-a | 停止 4 種文言が、対象ファイル一覧（commands 9 本 + fork skill + release-verify）に同じ行として存在する | `tests/test_md_references.py` か新規テスト。`test_simplicity_criteria.py` と同じ形（正本 1 つ + 写しの一覧） | X5・C2・C3 |
-| V1-b | `release-verify` の委譲元一覧と、`loop-dev` description の委譲元が一致する | `tests/test_md_references.py` | X2 |
-| V1-c | agents の本文に `../` で始まる `.md` 参照が無い | `tests/test_md_references.py` | A5 |
-| V1-d | 「実装の手順」を持つ定義の返却形式に「追加した防御」がある | `tests/test_simplicity_criteria.py` | X4 |
-| V1-e | commands の frontmatter の綴り違い（`argument_hint` 等）と、解析できない frontmatter を拒否する | `src/claq/ci/validate_commands.py` | C1 |
-| V1-f | `planner` を起動する定義の本文に `mode: evaluate` か `mode: decide` がある | `tests/test_agent_regex_contracts.py` | X1 |
+| V1-a | 停止 4 種文言が、対象ファイル一覧（commands 9 本 + fork skill + release-verify）に同じ行として存在する | `tests/test_definition_contracts.py` | X5・C2・C3 |
+| V1-b | `release-verify` の委譲元一覧と、`loop-dev` description の委譲元が一致する | `tests/test_definition_contracts.py` | X2 |
+| V1-c | agents の本文に `../` で始まる `.md` 参照が無い | `tests/test_definition_contracts.py` | A5 |
+| V1-d | 「実装の手順」を持つ定義の返却形式に「追加した防御」がある | `tests/test_definition_contracts.py` | X4 |
+| V1-e | commands の frontmatter の綴り違い（`argument_hint` 等）と、解析できない frontmatter を拒否する | `src/claq/ci/validate_commands.py`、`tests/ci/test_validators.py` | C1 |
+| V1-f | `planner` を起動する定義の本文に `mode: evaluate` か `mode: decide` がある | `tests/test_definition_contracts.py` | X1 |
 
 各検査は対応する定義修正と同じコミットで足す（先に足すと落ちる）。
 
@@ -573,8 +573,8 @@ ADR は「定義に書いた検証規則は CI で実測する」としている
 1. command 展開時に `../skills/learn/SKILL.md` を主会話が Read できるか → 本文にベースディレクトリは付かない（X3 を実施）
 2. `disable-model-invocation: true` の skill を Skill ツールで呼んだときの挙動 → 拒否される（S1 を実施）
 3. grader の既定文言 `No suggestions, evals look solid` を文字列一致で読む箇所が `skill-make/references/` にあるか → 無い（A4 をクローズ）
-4. `command:` frontmatter を読む外部ツールの有無（C1）
-5. `maintain`・`loop-audit` が `/claq:<name>` で起動できるか（S4）
+4. `command:` frontmatter を読む外部ツールの有無（C1）→ リポジトリ内に読み手は無いが、他ハーネスの読み手を排除できないので `command:` は残した
+5. `maintain`・`loop-audit` が `/claq:<name>` で起動できるか（S4）→ 表記はリポジトリ全体の慣例で、食い違いの再現が無いためクローズ
 
 ## 推奨する実施順
 
