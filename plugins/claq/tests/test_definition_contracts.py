@@ -90,7 +90,7 @@ def test_agents_have_no_parent_relative_md_reference() -> None:
 
 
 def test_defense_pointer_has_matching_report_field() -> None:
-    """報告の「追加した防御」へ残すよう求める定義は、返却形式にその欄を持つ。"""
+    """「## 実装の手順」を持つ定義と、報告の「追加した防御」へ残すよう求める定義は、返却形式にその欄を持つ。"""
     missing = [
         str(path)
         for path, text in _corpus()
