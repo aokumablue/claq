@@ -28,7 +28,7 @@
 
 ## 説明文の最適化
 
-SKILL.md の前置きの `description` は、Claude がスキルを呼ぶかどうかを左右する主要因である。作成・改善の後、次の手順で description のトリガー精度を上げる。train/holdout で過適合を避ける収束判断の考え方は `skill-tune`（Step 7 の hold-out 過適合チェック）に従う。
+SKILL.md の前置きの `description` は、Claude がスキルを呼ぶかどうかを左右する主要因である。作成・改善の後、次の手順で description のトリガー精度を上げる。train/holdout で過適合を避ける収束判断の考え方は `skill-tune`（ステップ7 の hold-out 過適合チェック）に従う。
 
 ### 1. トリガー用 eval クエリを作る
 
