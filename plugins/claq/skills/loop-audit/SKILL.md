@@ -77,7 +77,7 @@ Circuit-Break率: {%}
 Blocker再発率:   {%}
 エスカレ率:      {%}
 Process Readiness:   {n.n} / {実測できた領域数}
-Outcome Health:      {n.n} / 10（下回った基準: {収束率|CB率|再発率 の一覧、無ければ「なし」}）
+Outcome Health:      {n.n または N/A} / 10（下回った基準: {収束率|CB率|再発率 の一覧、無ければ「なし」}）
 Observation Coverage:{n} / 9（N/A: {領域名, ...}）
 ──────────────────────────────
 改善提案:
