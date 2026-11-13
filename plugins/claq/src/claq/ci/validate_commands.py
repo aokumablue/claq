@@ -88,8 +88,18 @@ def _workflow_reference_errors(file_name: str, content: str, valid_agents: set[s
 
 
 def _frontmatter_field_errors(file_name: str, content: str) -> Iterator[str]:
-    """frontmatter のハイフン／アンダースコアの綴り違いを返す（frontmatter が無いファイルは対象外）。"""
-    for key in extract_frontmatter(content) or {}:
+    """frontmatter の解析失敗と、ハイフン／アンダースコアの綴り違いを返す。
+
+    `---` で始まるのに解析できないファイルは、Claude Code が name / description を
+    読めないため不合格にする（綴り違いと同じく、黙って効かない宣言になる）。
+    frontmatter を持たないファイルは対象外。
+    """
+    frontmatter = extract_frontmatter(content)
+    if frontmatter is None:
+        if content.startswith("---"):
+            yield f"{file_name} - frontmatter を解析できません（name / description が読まれない）"
+        return
+    for key in frontmatter:
         swapped = key.replace("_", "-")
         if swapped != key and swapped in _KNOWN_FRONTMATTER_FIELDS:
             yield f"{file_name} - frontmatter の {key} は {swapped} の綴り違い（黙って無視される）"

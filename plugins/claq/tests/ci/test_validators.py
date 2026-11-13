@@ -320,6 +320,18 @@ def test_validate_commands_rejects_misspelled_frontmatter_key(
     assert "plain.md" not in stderr
 
 
+def test_validate_commands_rejects_unparseable_frontmatter(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`---` で始まるのに解析できない frontmatter は、読まれない宣言として不合格にすること。"""
+    (tmp_path / "agents").mkdir()
+    (tmp_path / "skills").mkdir()
+    _write_files(tmp_path, {"commands/broken.md": "---\nname: broken\n  bad: [indent\n---\nBody.\n"})
+
+    assert _run_commands(tmp_path) == 1
+    assert "frontmatter を解析できません" in capsys.readouterr().err
+
+
 def test_validate_commands_resolves_relative_dirs_via_root_dir(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
