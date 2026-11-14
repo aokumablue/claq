@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from claq.ci.ci_common import extract_frontmatter
+
 _ROOT = Path(__file__).resolve().parents[1]
 _TARGET_DIRS = ("agents", "skills", "commands")
 
@@ -18,6 +20,8 @@ _STOP_PHRASE = (
 _STOP_FRAGMENTS = tuple(_STOP_PHRASE.split("・"))
 _DEFENSE_POINTER = "報告の「追加した防御」"
 _DEFENSE_FIELD_RE = re.compile(r"^(?:## )?追加した防御|`追加した防御`", re.M)
+_STOP_HEADING_RE = re.compile(r"^## 停止点$", re.M)
+_IMPLEMENTATION_HEADING_RE = re.compile(r"^#{2,3} 実装の手順$", re.M)
 _PLANNER_MODE_RE = re.compile(r"mode: (?:evaluate|decide)")
 _RELATIVE_MD_HINT = '`. "$HOME/.claq/env.sh" && claq_plugin_root`'
 _DELEGATORS_LINE_RE = re.compile(r"^- `loop-dev` ← (.+)$", re.M)
@@ -34,6 +38,14 @@ def _corpus() -> list[tuple[Path, str]]:
         for dirname in _TARGET_DIRS
         for path in sorted((_ROOT / dirname).rglob("*.md"))
     ]
+
+
+def _is_fork_skill(path: Path, text: str) -> bool:
+    """skill の SKILL.md で、frontmatter の `context` が `fork` かを返す。"""
+    if path.parts[0] != "skills" or path.name != "SKILL.md":
+        return False
+    frontmatter = extract_frontmatter(text) or {}
+    return frontmatter.get("context") == "fork"
 
 
 def _loop_dev_callers() -> set[str]:
@@ -55,14 +67,14 @@ def test_stop_phrase_is_identical_everywhere() -> None:
     assert not partial, "停止文言が正本と一致しない:\n" + "\n".join(partial)
 
 
-def test_commands_with_stop_section_use_stop_phrase() -> None:
-    """「## 停止点」節を持つ command は停止 4 種文言を含む。"""
+def test_stop_section_and_fork_definitions_use_stop_phrase() -> None:
+    """「## 停止点」見出しを持つ定義と、frontmatter が `context: fork` の skill は停止 4 種文言を含む。"""
     missing = [
         str(path)
         for path, text in _corpus()
-        if path.parts[0] == "commands" and "## 停止点" in text and _STOP_PHRASE not in text
+        if (_STOP_HEADING_RE.search(text) or _is_fork_skill(path, text)) and _STOP_PHRASE not in text
     ]
-    assert not missing, "停止点節に停止文言が無い:\n" + "\n".join(missing)
+    assert not missing, "停止点節・fork の定義に停止文言が無い:\n" + "\n".join(missing)
 
 
 def test_loop_dev_delegators_match_commands() -> None:
@@ -90,9 +102,11 @@ def test_agents_have_no_parent_relative_md_reference() -> None:
 
 
 def test_defense_pointer_has_matching_report_field() -> None:
-    """報告の「追加した防御」へ残すよう求める定義は、返却形式にその欄を持つ。"""
+    """「実装の手順」見出し（## / ###）を持つ定義と、報告の「追加した防御」へ残すよう求める定義は、その欄を持つ。"""
     missing = [
-        str(path) for path, text in _corpus() if _DEFENSE_POINTER in text and not _DEFENSE_FIELD_RE.search(text)
+        str(path)
+        for path, text in _corpus()
+        if (_IMPLEMENTATION_HEADING_RE.search(text) or _DEFENSE_POINTER in text) and not _DEFENSE_FIELD_RE.search(text)
     ]
     assert not missing, "「追加した防御」欄が返却形式に無い:\n" + "\n".join(missing)
 
@@ -126,10 +140,13 @@ def test_forked_skills_invoked_by_commands_run_in_foreground() -> None:
         for name in _SKILL_INVOCATION_RE.findall(text)
     }
     assert invoked, "Skill ツールで skill を起動する command が見つからない"
+    frontmatters = {
+        name: extract_frontmatter((_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")) or {}
+        for name in sorted(invoked)
+    }
     missing = [
         name
-        for name in sorted(invoked)
-        if "\ncontext: fork\n" in (text := (_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8"))
-        and "\nbackground: false\n" not in text
+        for name, frontmatter in frontmatters.items()
+        if frontmatter.get("context") == "fork" and frontmatter.get("background") is not False
     ]
     assert not missing, "fork の skill に background: false が無い:\n" + "\n".join(missing)

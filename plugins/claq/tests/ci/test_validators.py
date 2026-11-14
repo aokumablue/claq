@@ -320,6 +320,49 @@ def test_validate_commands_rejects_misspelled_frontmatter_key(
     assert "plain.md" not in stderr
 
 
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        pytest.param("---\nname: broken\n  bad: [indent\n---\nBody.\n", "フロントマターを解析できません", id="unparseable"),
+        # パーサーは BOM を外して解析するので、BOM 付きでも壊れた frontmatter は拒否する。
+        pytest.param("\ufeff---\nname: x\n  bad: [\n---\nBody.\n", "フロントマターを解析できません", id="bom-unparseable"),
+        pytest.param("---\nname: x\nBody.\n", "フロントマターを解析できません", id="unterminated"),
+        pytest.param("---\n- a\n---\nBody.\n", "マッピングではありません", id="non-mapping"),
+    ],
+)
+def test_validate_commands_rejects_broken_frontmatter(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], content: str, message: str
+) -> None:
+    """frontmatter を持つのに解析できない・mapping でないファイルは、綴り違いの検査が効かないので不合格にすること。"""
+    (tmp_path / "agents").mkdir()
+    (tmp_path / "skills").mkdir()
+    _write_files(tmp_path, {"commands/broken.md": content})
+
+    assert _run_commands(tmp_path) == 1
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        # 先頭行が --- ちょうどでなければ、パーサーは frontmatter なしと判定する。
+        pytest.param("----\nBody.\n", id="four-dashes"),
+        pytest.param("---x\nBody.\n", id="dashes-with-suffix"),
+        pytest.param("---\n---\nBody.\n", id="empty"),
+    ],
+)
+def test_validate_commands_accepts_files_the_parser_treats_as_without_frontmatter(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], content: str
+) -> None:
+    """パーサーが frontmatter なし・空と判定するファイルは不合格にしないこと。"""
+    (tmp_path / "agents").mkdir()
+    (tmp_path / "skills").mkdir()
+    _write_files(tmp_path, {"commands/plain.md": content})
+
+    assert _run_commands(tmp_path) == 0
+    assert "plain.md" not in capsys.readouterr().err
+
+
 def test_validate_commands_resolves_relative_dirs_via_root_dir(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
