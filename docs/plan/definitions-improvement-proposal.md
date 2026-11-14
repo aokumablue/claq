@@ -73,7 +73,7 @@
 | C7 | クローズ | 散文のレポートで壊れる振る舞いを示せない（好みの問題） | — |
 | S2 | クローズ | `user-invocable: false` は "Only Claude can invoke"、"hides it from the `/` menu"（skills）。adr・checkpoint は自動起動で成立する。secure は description がモデルに見えないだけで実害なし | — |
 | S3 | 実施 | 出力は `n.n / 10` を求めるが式が無く、同じ履歴から値が揺れる | 満たした基準の数から決まる式を追加。blocker 0 件の履歴は満点、実行 0 件は `N/A` |
-| V1 | 実施（V1-a〜f すべて） | 下の「CI に足す検査」 | `tests/test_definition_contracts.py`、`src/claq/ci/validate_commands.py` |
+| V1 | 実施（V1-a〜f すべて） | 下の「CI に足す検査」 | `tests/test_definition_contracts.py`、`src/claq/ci/validate_commands.py`、`tests/ci/test_validators.py` |
 
 ### P3 の判定結果
 
@@ -84,7 +84,7 @@
 | A1 | 実施 | 同じ形式を読む security-auditor・loop-dev は「得るもの」 | reviewer の「起きること」を「得るもの」に統一 |
 | A6 | 実施 | description は "When Claude should delegate"（sub-agents）。ADR も「いつ呼ぶか」を求める | code-refiner / reviewer / security-auditor / tdd-writer の先頭を「専門」から使う条件へ |
 | C1 | 実施（一部） | commands は `argument-hint` を補完のヒントとして読む（skills の frontmatter 表）。`command:` と `name:` は Claude Code が無視するが、他ハーネスの読み手を排除できず、削って直る失敗も再現できない | 10 本に `argument-hint` を追加。`command:` は残す |
-| V1-e | 実施 | 未知のキーは黙って無視される（skills）ので、`argument_hint` の綴り違いは宣言が丸ごと効かない | `validate_commands` に綴り違いの拒否を追加（skills と同じ形） |
+| V1-e | 実施 | 未知のキーは黙って無視される（skills）ので、`argument_hint` の綴り違いは宣言が丸ごと効かない | `validate_commands` に綴り違いの拒否と、frontmatter を持つのに解析できない・mapping でないファイルの拒否を追加（有無はパーサーの判定に従う） |
 | C6（並べ替え） | 実施 | 部分モードはステップ1〜9 を引く節で、7〜9 が未定義の位置にあった | ステップ9 の後ろへ移動 |
 | C9 | 実施 | 他の行は「:」の後に空白がある | `Tests added: {tests_added}` |
 | C10 | クローズ | feat-dev と bugfix は形が違うが、どちらも loop-dev の結果を転記する。読み手が形に依存する箇所が無く、壊れる振る舞いを示せない（好みの問題） | — |
@@ -96,7 +96,7 @@
 定義 md は互いを import しないため、片方だけ書き換えた食い違いが実行時まで残る。これを pytest の構造テストで検出する。
 
 - 実施: V1-a（停止文言の一部を書く定義・「## 停止点」節を持つ定義・fork の skill は 4 種を同じ文言で書く）、V1-b（loop-dev の description・release-verify の委譲元一覧・loop-dev を起動する command の 3 者一致）、V1-c（agents に `../` の md 参照が無い）、V1-d（「実装の手順」を持つ定義・報告の「追加した防御」を求める定義はその欄を持つ）、V1-f（planner を起動する定義は `mode:` を書く）、X3 の検査（`../` の md 参照を持つ command は基準の求め方を書く）
-- V1-e（実施）: commands の frontmatter は、綴り違いを拒否し、`---` で始まるのに解析できないファイルも拒否する。許可キーの一覧ではなく綴り違いの検出で足りると判断した（未知キーの許可一覧は、今後 Claude Code が新しいキーを足すたびに直す必要が出るため）
+- V1-e（実施）: commands の frontmatter は、綴り違いを拒否し、frontmatter を持つ（パーサーの判定で、BOM を外して先頭行が `---` ちょうど）のに解析できない・mapping でないファイルも拒否する。許可キーの一覧ではなく綴り違いの検出で足りると判断した（未知キーの許可一覧は、今後 Claude Code が新しいキーを足すたびに直す必要が出るため）
 
 ### 新たに見つけた点: fork skill の `background`
 
@@ -540,11 +540,11 @@ ADR は「定義に書いた検証規則は CI で実測する」としている
 
 | ID | 検査 | 置き場 | 防ぐもの |
 |---|---|---|---|
-| V1-a | 停止 4 種文言が、対象ファイル一覧（commands 9 本 + fork skill + release-verify）に同じ行として存在する | `tests/test_definition_contracts.py` | X5・C2・C3 |
+| V1-a | 停止文言の一部を書く定義・「## 停止点」見出しを持つ定義・frontmatter が `context: fork` の skill は、停止 4 種文言を正本と同じ文言で含む | `tests/test_definition_contracts.py` | X5・C2・C3 |
 | V1-b | `release-verify` の委譲元一覧と、`loop-dev` description の委譲元が一致する | `tests/test_definition_contracts.py` | X2 |
 | V1-c | agents の本文に `../` で始まる `.md` 参照が無い | `tests/test_definition_contracts.py` | A5 |
-| V1-d | 「実装の手順」を持つ定義の返却形式に「追加した防御」がある | `tests/test_definition_contracts.py` | X4 |
-| V1-e | commands の frontmatter の綴り違い（`argument_hint` 等）と、解析できない frontmatter を拒否する | `src/claq/ci/validate_commands.py`、`tests/ci/test_validators.py` | C1 |
+| V1-d | 「実装の手順」見出しを持つ定義と、報告の「追加した防御」を求める定義は、その欄を持つ | `tests/test_definition_contracts.py` | X4 |
+| V1-e | commands の frontmatter の綴り違い（`argument_hint` 等）と、frontmatter を持つのに解析できない・mapping でないファイルを拒否する | `src/claq/ci/validate_commands.py`、`tests/ci/test_validators.py` | C1 |
 | V1-f | `planner` を起動する定義の本文に `mode: evaluate` か `mode: decide` がある | `tests/test_definition_contracts.py` | X1 |
 
 各検査は対応する定義修正と同じコミットで足す（先に足すと落ちる）。
