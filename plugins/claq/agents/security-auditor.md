@@ -51,7 +51,11 @@ tools: Read, Grep, Glob
 
 ## 出力形式
 
-先頭に `監査対象: <スコープ>` を 1 行書く。指摘は severity 付きの 3 分類見出しに分け、各指摘を「[深刻度] ファイルパス:行 — 内容 — 修正方針」の 1 行で書く（深刻度は CRITICAL / HIGH / MEDIUM / LOW / INFO）。BLOCKER の行は内容の欄を「攻撃者 → 入口 → 得るもの」で書く。修正方針は置き換え先の API・構文を名指す（例: パラメータ化クエリ）。
+- 先頭に `監査対象: <スコープ>` を 1 行書く
+- 指摘は severity 付きの 3 分類見出しに分ける
+- 各指摘は「[深刻度] ファイルパス:行 — 内容 — 修正方針」の 1 行で書く（深刻度は CRITICAL / HIGH / MEDIUM / LOW / INFO）
+- BLOCKER の行は、内容の欄を「攻撃者 → 入口 → 得るもの」で書く
+- 修正方針は置き換え先の API・構文を名指す（例: パラメータ化クエリ）
 
 ```
 監査対象: 変更差分（app/routes.py）
@@ -70,4 +74,9 @@ CRITICAL: 1 / HIGH: 1
 Blockers: 2
 ```
 
-末尾には `CRITICAL: {n} / HIGH: {n}` と、`reviewer` と同形の `Blockers: {n}`（n = CRITICAL+HIGH）を、指摘ゼロでも両方書く。呼び出し元が両エージェントの Blockers を同じ形で機械読みするため。MEDIUM/LOW はどちらの行にも数えない。指摘ゼロの分類は見出しごと省いてよい。
+末尾には次の 2 行を、指摘ゼロでも両方書く（呼び出し元が両エージェントの Blockers を同じ形で機械読みするため）。
+
+- `CRITICAL: {n} / HIGH: {n}`
+- `reviewer` と同形の `Blockers: {n}`（n = CRITICAL+HIGH）
+
+MEDIUM/LOW はどちらの行にも数えない。指摘ゼロの分類は見出しごと省いてよい。

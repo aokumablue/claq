@@ -9,17 +9,24 @@ command: /bugfix
 
 ## 停止点
 
-ユーザーの応答を待つのは、grillme の質問と、ステップ2 で再現できずに不足情報を求めるときだけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えず、次のステップへ進む。報告や未決事項への推奨は次のツール呼び出しと同じ応答に書く。
+ユーザーの応答を待つのは、grillme の質問と、ステップ2 で再現できずに不足情報を求めるときだけ。
+それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えず、次のステップへ進む。
+報告や未決事項への推奨は、次のツール呼び出しと同じ応答に書く。
 
 ## grillme（条件付き）
 
-要件が曖昧で、読み方によって作業が大きく変わるときだけ、開始直後に grillme スキルで共通理解を固める。それ以外の判断は自分で決めて着手する。起動したら完了まで他の処理に進まず、合意した方針を 1 行で書き留めてから次へ進む（ここで再確認は求めない）。
+- 起動するのは、要件が曖昧で、読み方によって作業が大きく変わるときだけ。開始直後に grillme スキルで共通理解を固める
+- それ以外の判断は自分で決めて着手する
+- 起動したら完了まで他の処理に進まない。合意した方針を 1 行で書き留めてから次へ進む（ここで再確認は求めない）
 
 ## 永続メモリ
 
-- 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `bug fix regression repro root cause verify` / `{対象ファイルパス}` / `{症状キーワード}`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`
+- 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `bug fix regression repro root cause verify` / `{対象ファイルパス}` / `{症状キーワード}`）
+  - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: ステップ4 の基準で `claq_mem_learn` を使う
-- 相対パスの md: このファイルは `commands/` にある。プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
+- 相対パスの md: このファイルは `commands/` にある
+  - プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 
 ## ステップ1: 要件整理
 

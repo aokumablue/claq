@@ -9,17 +9,23 @@ command: /harness
 
 ## 停止点
 
-止まるのは、`--audit-only` のステップ1 終了、`--apply` 無しのステップ2 終了、ステップ3 の `BLOCKED` だけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えず、ステップ5 まで進む。報告や未決事項への推奨は次のツール呼び出しと同じ応答に書く。
+止まるのは、`--audit-only` のステップ1 終了、`--apply` 無しのステップ2 終了、ステップ3 の `BLOCKED` だけ。
+それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えず、ステップ5 まで進む。
+報告や未決事項への推奨は、次のツール呼び出しと同じ応答に書く。
 
 ## 永続メモリ
 
-- 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `harness audit score` / `harness config optimization audit`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`
+- 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `harness audit score` / `harness config optimization audit`）
+  - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
-- 相対パスの md: このファイルは `commands/` にある。プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
+- 相対パスの md: このファイルは `commands/` にある
+  - プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 
 ## 使い方
 
-`claq_run` には `--root` と `--target-kind repo|consumer` を常に渡す（ユーザーが省いたら監査対象のルートと種別を決めて渡す。省くと cwd から自動判定され、provider リポジトリ直下を consumer と誤判定しうる）。
+`claq_run` には `--root` と `--target-kind repo|consumer` を常に渡す。ユーザーが省いたら、監査対象のルートと種別を決めて渡す。
+省くと cwd から自動判定され、provider リポジトリ直下を consumer と誤判定しうる。
 
 ## ステップ1: ベースライン取得
 
@@ -28,7 +34,11 @@ command: /harness
 claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
 ```
 
-スコアカードを出力する。`--apply` 指定時は harness-tuner へ生の JSON を渡すため `--format json` で実行し、表示はその JSON から整形する（text 出力に JSON は含まれない）。`--audit-only` は /harness の制御フラグで `claq_run` へは渡さず、指定時はここで終える。`--root` / `--target-kind` はステップ4 の比較まで同じ値を保つ。
+スコアカードを出力する。
+
+- `--apply` 指定時は harness-tuner へ生の JSON を渡すため `--format json` で実行し、表示はその JSON から整形する（text 出力に JSON は含まれない）
+- `--audit-only` は /harness の制御フラグで `claq_run` へは渡さない。指定時はここで終える
+- `--root` / `--target-kind` はステップ4 の比較まで同じ値を保つ
 
 採点はこのスクリプトの出力だけを根拠にし、手で採点しない。
 
@@ -42,7 +52,8 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 
 `claq:harness-tuner` を起動し、ステップ1 の JSON 出力をそのまま渡す（トップ3はその `top_actions`）。
 
-harness-tuner の出力が届かない、または先頭行が `FAIL:` なら、ステップ4・5 へ進まず `BLOCKED: {理由}` として終える（適用されていない状態の再監査は baseline と同じ値になり、「適用して効果なし」と区別できない）。
+harness-tuner の出力が届かない、または先頭行が `FAIL:` なら、ステップ4・5 へ進まず `BLOCKED: {理由}` として終える。
+適用されていない状態の再監査は baseline と同じ値になり、「適用して効果なし」と区別できないため。
 
 ## ステップ4: 改善後スコア（`--apply` 指定時のみ）
 

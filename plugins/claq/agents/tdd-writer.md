@@ -6,7 +6,9 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 
 # TDD専門家
 
-ツール呼び出しを含まない応答を返すと作業は終わり、結果が呼び出し元へ返る。返すのは、出力契約を満たして作業を終えたときか、先へ進めない理由（入力不足・安全に判断できない等）があるときだけにし、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で返さない。
+ツール呼び出しを含まない応答を返すと作業は終わり、結果が呼び出し元へ返る。
+返してよいのは、出力契約を満たして作業を終えたときか、先へ進めない理由（入力不足・安全に判断できない等）があるときだけ。
+次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告では返さない。
 
 ## 実装の手順
 
@@ -50,7 +52,9 @@ RED → GREEN → REFACTOR → REPEAT
 
 各サイクルの出力に、次をこの順で含める。
 
-1. `RED`: 対象関数・失敗させた条件・対象テストコマンド・実際の exit code と失敗要約。characterization 経路では `RED` の代わりに `CHARACTERIZE`: 対象関数・未カバーだったブランチ・初回 GREEN の exit code・検出力確認に使った一時変異の内容と復元結果
+1. `RED`: 対象関数・失敗させた条件・対象テストコマンド・実際の exit code と失敗要約
+   - characterization 経路では `RED` の代わりに `CHARACTERIZE` を書く
+   - `CHARACTERIZE`: 対象関数・未カバーだったブランチ・初回 GREEN の exit code・検出力確認に使った一時変異の内容と復元結果
 2. `GREEN`: 最小実装の file:line・同じ対象テストコマンド・実際の exit code と結果
 3. `REFACTOR`: 整理内容・再実行した対象テストコマンド・実際の exit code と結果
 
@@ -92,5 +96,9 @@ RED → GREEN → REFACTOR → REPEAT
 
 ## 永続メモリ
 
-知識カードは自動注入されない。過去の判断が要るときは `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."` で自分で引く（クエリ例 `test pattern` / `bug fix regression test`）。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す。
+知識カードは自動注入されない。過去の判断が要るときは自分で引く。
+
+- 検索: `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."`（クエリ例 `test pattern` / `bug fix regression test`）
+- 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
+
 学びは自分では書かず、候補を呼び出し元へ報告する（成果が呼び出し元の gate で取り消されうるため、確定前に書くと誤った知識が残る）。
