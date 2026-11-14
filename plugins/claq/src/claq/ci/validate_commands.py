@@ -9,13 +9,13 @@ from pathlib import Path
 from claq.ci.ci_common import (
     PLUGIN_ROOT,
     emit_error,
-    extract_frontmatter,
     list_markdown_files,
     parse_validator_args,
     read_or_report,
     report_errors,
     report_missing,
 )
+from claq.lib.frontmatter import FrontmatterError, MissingFrontmatterError, parse_yaml, split_frontmatter
 
 DEFAULT_ROOT_DIR = PLUGIN_ROOT
 DEFAULT_COMMANDS_DIR = PLUGIN_ROOT / "commands"
@@ -88,16 +88,23 @@ def _workflow_reference_errors(file_name: str, content: str, valid_agents: set[s
 
 
 def _frontmatter_field_errors(file_name: str, content: str) -> Iterator[str]:
-    """frontmatter の解析失敗と、ハイフン／アンダースコアの綴り違いを返す。
+    """frontmatter の解析失敗・mapping でない値と、ハイフン／アンダースコアの綴り違いを返す。
 
-    `---` で始まるのに解析できないファイルは、Claude Code が name / description を
-    読めないため不合格にする（綴り違いと同じく、黙って効かない宣言になる）。
-    frontmatter を持たないファイルは対象外。
+    frontmatter の有無はパーサーの判定に従う（BOM を外し、先頭行が ``---`` ちょうどのときだけ
+    frontmatter とみなす）。frontmatter を持たないファイルは対象外にし、持つのに解析できない
+    ファイルは綴り違いの検査が効かなくなるため不合格にする。空の frontmatter はキーが無いものとして扱う。
     """
-    frontmatter = extract_frontmatter(content)
+    try:
+        frontmatter = parse_yaml(split_frontmatter(content))
+    except MissingFrontmatterError:
+        return
+    except FrontmatterError as exc:
+        yield f"{file_name} - フロントマターを解析できません（{exc}）"
+        return
     if frontmatter is None:
-        if content.startswith("---"):
-            yield f"{file_name} - frontmatter を解析できません（name / description が読まれない）"
+        return
+    if not isinstance(frontmatter, dict):
+        yield f"{file_name} - フロントマターがマッピングではありません"
         return
     for key in frontmatter:
         swapped = key.replace("_", "-")
