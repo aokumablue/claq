@@ -10,7 +10,8 @@ user-invocable: false
 
 `refactor` の実行前に、対象の分割・依存関係・検証テストを固定して手戻りを減らす。
 
-止まるのは、テキストのサマリーと JSON 契約を返すときだけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。
+止まるのは、テキストのサマリーと JSON 契約を返すときだけ。
+それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。
 
 ## 手順
 
@@ -53,8 +54,13 @@ JSON 契約（`deps.from` / `deps.to` は `groups` 配列のインデックス�
 ```
 
 - `scope_files` / `groups` / `deps` / `tests.baseline` / `tests.group` / `tests.final` のキーは必ず出す（値は空でもよい）
-- baseline / group / final のカテゴリ全体で実在するコマンドを確認できなければ、その配列を空にする。空配列が JSON 契約上の「検証手段なし」で、JSON だけを読む `refactor-rollback` はそれで判定する（テキスト側の「検証手段なし」は人間向けの表記）
-- `tests.group[i]` は `groups[i]` を検証するコマンドで、`len(tests.group) == len(groups)`（または全体が空配列）にする。`groups[i]` にだけ検証手段が無ければ、配列ごと空にせず `tests.group[i]` を空文字列 `""` にする。`refactor-rollback` は添字で引いて各ファイルの `verify` を決めるため、長さがずれると、リバートした対象を検証しないコマンドを検証として提示することになる
+- baseline / group / final のカテゴリ全体で実在するコマンドを確認できなければ、その配列を空にする
+  - 空配列が JSON 契約上の「検証手段なし」で、JSON だけを読む `refactor-rollback` はそれで判定する
+  - テキスト側の「検証手段なし」は人間向けの表記
+- `tests.group[i]` は `groups[i]` を検証するコマンドで、`len(tests.group) == len(groups)`（または全体が空配列）にする
+  - `groups[i]` にだけ検証手段が無ければ、配列ごと空にせず `tests.group[i]` を空文字列 `""` にする
+  - `refactor-rollback` は添字で引いて各ファイルの `verify` を決める
+  - 長さがずれると、リバートした対象を検証しないコマンドを検証として提示することになる
 
 ## ルール
 
@@ -65,5 +71,6 @@ JSON 契約（`deps.from` / `deps.to` は `groups` 配列のインデックス�
 
 ## 永続メモリ
 
-- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `refactor preflight scope split dependency testset`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
+- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `refactor preflight scope split dependency testset`
+  - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

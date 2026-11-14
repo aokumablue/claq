@@ -8,7 +8,8 @@ user-invocable: false
 
 # コードを書く前に調べる
 
-止まるのは、判定を返すとき（採用なら導入を終えた後）と、採用の前提を満たせず導入を見送るときだけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。
+止まるのは、判定を返すとき（採用なら導入を終えた後）と、採用の前提を満たせず導入を見送るときだけ。
+それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。
 
 本 skill が起動する子はすべて `run_in_background: false` で起動し、hand-back が揃うまで次の工程へ進まない。background だと結果待ちの応答で fork が終わるため。
 
@@ -52,7 +53,10 @@ user-invocable: false
 
 ## 完全モード（エージェント並列）
 
-B（ローカル資産）は数回の確認で終わるので自分で調べる。A（レジストリ）と C（GitHub・Web）は候補の比較が要るときに 2 エージェントを同時に起動して委ね、全結果をまとめてから判定マトリクスを当てる（数手で終わる調べ物まで委譲すると、コストと時間だけが増える）。
+- B（ローカル資産）は数回の確認で終わるので自分で調べる
+- A（レジストリ）と C（GitHub・Web）は、候補の比較が要るときに 2 エージェントを同時に起動して委ねる
+  - 数手で終わる調べ物まで委譲すると、コストと時間だけが増える
+- 全結果をまとめてから判定マトリクスを当てる
 
 ```text
 # A: パッケージレジストリ
@@ -72,5 +76,6 @@ Check: stars, last commit, open issues, license. Return every fitting candidate
 
 ## 永続メモリ
 
-- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `adopt reject tool library {category}` / `{tool_name} success fail issue`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
+- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `adopt reject tool library {category}` / `{tool_name} success fail issue`
+  - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

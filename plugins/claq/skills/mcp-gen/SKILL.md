@@ -59,7 +59,8 @@ user-invocable: true
 
 ### 2. スケルトンを複製する
 
-スケルトンはスキル起動時に提示されるベースディレクトリの `assets/` にある。提示が無いときは、次が返す plugin root の `skills/mcp-gen/assets/` を使う（失敗したら止めて報告する）。
+スケルトンはスキル起動時に提示されるベースディレクトリの `assets/` にある。
+提示が無いときは、次が返す plugin root の `skills/mcp-gen/assets/` を使う（失敗したら止めて報告する）。
 
 ```bash
 . "$HOME/.claq/env.sh" && claq_plugin_root
@@ -90,7 +91,8 @@ cp -R /abs/skill/mcp-gen/assets/facade-overlay/facade /abs/path/to/dest/facade
 
 `pyproject.toml` は `pyproject.toml.template` の中身を読んで Write ツールで作る。重ね合わせたなら
 `only-include` に `"adapters.py"` と `"facade"` を足す。
-（Bash で書くと、生成先が作業中の git リポジトリ内なら内容によらず保護フックに止められる。Write でも lint・テスト・カバレッジの節やキー（`ignore` / `select` / `exclude` / `addopts` / `fail_under` 等）を含むと止められる）
+（Bash で書くと、生成先が作業中の git リポジトリ内なら内容によらず保護フックに止められる。
+Write でも、lint・テスト・カバレッジの節やキー（`ignore` / `select` / `exclude` / `addopts` / `fail_under` 等）を含むと止められる）
 
 ### 3. ツールを設計する
 
@@ -150,7 +152,8 @@ cp -R /abs/skill/mcp-gen/assets/facade-overlay/facade /abs/path/to/dest/facade
 "$PY" /abs/path/to/dest/smoke_check.py
 ```
 
-exit code 0 を確認するまで完了報告しない。完了報告には `追加した防御`（file:line と引用した根拠）と `提案`（理由と出典）を書く。無ければ「なし」と書く。`FAIL` の文面には直し方が書いてある。
+exit code 0 を確認するまで完了報告しない。`FAIL` の文面には直し方が書いてある。
+`追加した防御`（file:line と引用した根拠）と `提案`（理由と出典）は、該当があるときだけ完了報告に書く。
 旧仕様の名前が当たったときは、その意味を `references/spec-2026-07-28.md` の表で確かめる。
 `WARN` は文面に従う（走査できなかったファイルは、そのファイルに旧仕様の名前が無いかを確かめる。版の不一致なら、
 スケルトンを信じず先に SDK の changelog を読み直す）。
