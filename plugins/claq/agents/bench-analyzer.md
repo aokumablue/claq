@@ -37,10 +37,8 @@ tools: Read, Grep, Glob
 ### 入力
 
 - winner: `"A"` または `"B"`（ブラインド比較の結果。`"TIE"` の比較は勝因が無いので分析せず **FAIL** を返す）
-- winner_skill_path: 勝者の出力を生んだ skill へのパス
-- winner_transcript_path: 勝者の実行トランスクリプトへのパス
-- loser_skill_path: 敗者の出力を生んだ skill へのパス
-- loser_transcript_path: 敗者の実行トランスクリプトへのパス
+- winner_skill_path / loser_skill_path: 勝者・敗者の出力を生んだ skill へのパス
+- winner_transcript_path / loser_transcript_path: 勝者・敗者の実行トランスクリプトへのパス
 - comparison_result_path: ブラインド比較エージェントの JSON 出力へのパス
 
 ### 手順
@@ -71,30 +69,17 @@ tools: Read, Grep, Glob
     "loser_skill": "path/to/loser/skill",
     "comparator_reasoning": "比較エージェントが勝者を選んだ理由の要約"
   },
-  "winner_strengths": [
-    "複数ページ文書を扱うための段階的な指示が明確だった",
-    "整形エラーを検出できる検証スクリプトが含まれていた",
-    "OCR が失敗したときの扱い（原因を報告して止まる）が明示されていた"
-  ],
+  "winner_strengths": ["複数ページ文書を扱うための段階的な指示が明確だった", "整形エラーを検出できる検証スクリプトが含まれていた", "OCR が失敗したときの扱い（原因を報告して止まる）が明示されていた"],
   "loser_weaknesses": [
     "『文書を適切に処理する』という曖昧な指示があり、挙動がぶれた",
     "検証用スクリプトがなく、agent が場当たり的になった",
     "OCR 失敗時の指示がなく、場当たりの代替策を重ねて誤った出力を返した"
   ],
   "instruction_following": {
-    "winner": {
-      "score": 9,
-      "issues": [
-        "任意のログ出力ステップを省略した"
-      ]
-    },
+    "winner": {"score": 9, "issues": ["任意のログ出力ステップを省略した"]},
     "loser": {
       "score": 6,
-      "issues": [
-        "skill の整形テンプレートを使わなかった",
-        "手順 3 ではなく独自の方法を取った",
-        "『常に出力を検証する』という指示を見落とした"
-      ]
+      "issues": ["skill の整形テンプレートを使わなかった", "手順 3 ではなく独自の方法を取った", "『常に出力を検証する』という指示を見落とした"]
     }
   },
   "improvement_suggestions": [

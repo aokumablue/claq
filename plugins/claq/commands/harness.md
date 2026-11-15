@@ -37,7 +37,7 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 スコアカードを出力する。
 
 - `--apply` 指定時は harness-tuner へ生の JSON を渡すため `--format json` で実行し、表示はその JSON から整形する（text 出力に JSON は含まれない）
-- `--audit-only` は /harness の制御フラグで `claq_run` へは渡さない。指定時はここで終える
+- `--audit-only` は /harness の制御フラグで `claq_run` へは渡さない
 - `--root` / `--target-kind` はステップ4 の比較まで同じ値を保つ
 
 採点はこのスクリプトの出力だけを根拠にし、手で採点しない。

@@ -55,7 +55,6 @@ completed: false
   - `[]` は「evaluate が走って指摘 0 件」を意味する
   - evaluate を起動していない・判定行が返らなかった場合は `-` を書く（`[]` に潰すと「指摘が無い」と「判定が返っていない」を区別できない）
   - `blockers=-` の反復は `result=converged` にできない
-- `result` は `converged` / `not-converged` / `circuit-break` / `stopped` の 4 値だけ
 - `scope` はスコープガードを照合したときだけ `OK` / `VIOLATION` を書く
   - 照合しなかった反復は `-` を書く（`OK` に潰すと「照合して逸脱なし」と「照合していない」を区別できない）
   - `scope=-` の反復はスコープ遵守の証跡にならない

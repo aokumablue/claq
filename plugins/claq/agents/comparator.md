@@ -37,14 +37,13 @@ A/B のどちらが課題をより良く満たすかを、内容と構造だけ�
      - 使いやすさ (`usability`): 1=使いにくい / 3=何とか使える / 5=そのまま使いやすい
 4. A/B それぞれの各項目を 1〜5 で採点し、内容スコア・構造スコアと、その和の総合スコアを出す。強み・弱みには具体例を挙げる
 5. 期待値があれば、A/B それぞれで各期待値を確認して通過率を数える（補助証拠として扱う）
-6. 勝者を次の順で決める
+6. 勝者は次の順だけで決める
    1. `rubric` の `overall_score` を比べ、差があればその時点で確定
    2. 同点で `expectations` があれば `expectation_results.{A,B}.pass_rate` を比べ、差があればその時点で確定
    3. それでも同点（`expectations` が無い場合を含む）なら `winner: "TIE"`
 
    採点では差のある項目に同点を付けない（両方失敗・両方優秀でも差を点に反映する）。
    形式の好みは `formatting` にだけ反映し、`correctness` / `completeness` へ持ち込まない。
-   勝者は上の 1〜3 だけで決める。
 7. 理由（なぜその勝者か）を添えた JSON を返値として返す
 
 ## 出力契約
@@ -52,8 +51,7 @@ A/B のどちらが課題をより良く満たすかを、内容と構造だけ�
 - 応答は JSON object 1 個だけにする（前置きテキスト・Markdown 見出し・コードフェンス・複数 JSON を付けない）
 - `expectations` があれば `expectation_results.A` と `expectation_results.B` の両方を出力する。無ければ `expectation_results` を省く
 - rubric / expectation の項目名は重複させない
-- `reasoning` と、`output_quality.{A,B}` の `strengths` / `weaknesses` の各要素には、その候補の本文から引用した文字列を「」で囲んで含める
-  - 信頼境界の引用規則。引用の無い評語だけの要素は書かない
+- `reasoning` と、`output_quality.{A,B}` の `strengths` / `weaknesses` の各要素には、その候補の本文から引用した文字列を「」で囲んで含める（引用の無い評語だけの要素は書かない）
 
 ## 出力形式
 
@@ -63,31 +61,15 @@ A/B のどちらが課題をより良く満たすかを、内容と構造だけ�
   "reasoning": "A は「発行日: 2026-01-15」を含め必要な要素をすべて備える。B は「発行日:」の値が空で、見出しに「【請求】」と「請求書:」が混在する。",
   "rubric": {
     "A": {
-      "content": {
-        "correctness": 5,
-        "completeness": 5,
-        "validity": 4
-      },
-      "structure": {
-        "organization": 4,
-        "formatting": 5,
-        "usability": 4
-      },
+      "content": {"correctness": 5, "completeness": 5, "validity": 4},
+      "structure": {"organization": 4, "formatting": 5, "usability": 4},
       "content_score": 4.7,
       "structure_score": 4.3,
       "overall_score": 9.0
     },
     "B": {
-      "content": {
-        "correctness": 3,
-        "completeness": 2,
-        "validity": 3
-      },
-      "structure": {
-        "organization": 3,
-        "formatting": 2,
-        "usability": 3
-      },
+      "content": {"correctness": 3, "completeness": 2, "validity": 3},
+      "structure": {"organization": 3, "formatting": 2, "usability": 3},
       "content_score": 2.7,
       "structure_score": 2.7,
       "overall_score": 5.4

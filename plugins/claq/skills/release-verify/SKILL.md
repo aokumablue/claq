@@ -294,8 +294,7 @@ cd plugins/claq && python3 -m pytest -q --cov  # fail_under=100 はこのディ�
 2. 全指摘が `修正済み` または `根拠付き NO-FIX` に分類済み（`Unadjudicated` と `Pending` がともに 0）
 3. ステップ5 のゲートがすべて緑
    - 回帰ゲート 3 つと、修正 1 件ごとの再実測ゲートの両方（修正が 0 件なら回帰ゲート 3 つのみ）
-   - 再実測ゲート: (a) 元 payload の陽性・陰性の反転 (b) 隣接軸 1 本
-   - (b) が記録されていない修正が 1 件でもあれば未達
+   - 再実測ゲートの隣接軸が記録されていない修正が 1 件でもあれば未達
 4. 測定 root と修理 root が `Build:` 行に記録されている
 
 `Scaffold-Drift` の `NOT-RUN` は 1〜4 のどれにも数えない。
@@ -343,7 +342,6 @@ Learned:    {知識カードの key} / なし
 - `Scaffold-Drift` の `DRIFT` / `NOT-RUN` は BLOCKED の条件に加えない
   - `DRIFT` は通常の指摘として恒等式に入るので、`Pending` / `Unadjudicated` 経由で判定に効く
   - `NOT-RUN` は単独では BLOCKED にしない（コーパスが無いホストや root ポインタが未記録のホストで常に BLOCKED になるのを避けるため）
-- 末尾に記録した知識カードの key を 1 行書く（無ければ `Learned: なし`）
 - ステップ5 で修正したときは、`Learned` の前に `追加した防御`（file:line と引用した根拠）を書く。無ければ「なし」と書く
   - `提案`（理由と出典）は、該当があるときだけ書く
 

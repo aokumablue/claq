@@ -28,14 +28,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
   "max_score": 58,
   "categories": {},
   "checks": [],
-  "top_actions": [
-    {
-      "action": "Fix ...",
-      "path": "path/to/file",
-      "category": "Quality Gates",
-      "points": 3
-    }
-  ]
+  "top_actions": [{"action": "Fix ...", "path": "path/to/file", "category": "Quality Gates", "points": 3}]
 }
 ```
 

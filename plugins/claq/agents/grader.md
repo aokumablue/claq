@@ -76,12 +76,7 @@ FAIL:
       "evidence": "No spreadsheet was created. The output was a text file."
     }
   ],
-  "summary": {
-    "passed": 1,
-    "failed": 1,
-    "total": 2,
-    "pass_rate": 0.5
-  },
+  "summary": {"passed": 1, "failed": 1, "total": 2, "pass_rate": 0.5},
   "claims": [
     {
       "claim": "The form has 12 fillable fields",

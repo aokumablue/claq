@@ -71,7 +71,7 @@ claq_run claq.mem.cli list --global --kind pitfall  # global の罠だけ
 ### search `<query>`
 
 title / key / domain / body へのヒットを重み付けし、confidence と新しさで補正して上位から出す（既定 5 件）。
-出力は `list` と同じ 1 行形式で `body` を含まない。本文が要るカードだけ key を `show` に渡す。
+出力は `list` と同じ 1 行形式で、`body` を含まない。
 
 既定の絞り込みは `status='active'` で、`pending` は出てこない。
 

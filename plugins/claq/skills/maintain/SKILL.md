@@ -142,9 +142,7 @@ hooks / `src/claq/hooks/` を含む回は、両ハーネス互換（原則4）�
 claq_run claq.ci.scan_scaffold_drift
 ```
 
-`0` = ドリフトなし / `1` = 未知の足場タグを検出 / `2` = 走査対象ゼロ。
-
-`1` は次の 3 択から判断して振り分ける。緑にするためだけに `BENIGN_TAGS` へ語を足さない（`document` のようにホストの足場にもなりうる語を入れると、将来の本物の漏れを黙って握り潰す）。
+exit 1（未知の足場タグを検出）は、次の 3 択から判断して振り分ける。緑にするためだけに `BENIGN_TAGS` へ語を足さない（`document` のようにホストの足場にもなりうる語を入れると、将来の本物の漏れを黙って握り潰す）。
 
 1. ホストが生成した足場 → `lib/harness.py` の `SCAFFOLD_TAGS` へ追加
 2. 依頼本文に現れる良性の HTML タグ → `ci/scan_scaffold_drift.py` の `BENIGN_TAGS` へ追加

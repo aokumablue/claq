@@ -172,7 +172,6 @@ checkpoint skill は呼ばず、そのフォーマット（`../checkpoint/SKILL.
 
 - 反復1 が未収束で反復2 へ進むときは、Loop-Dev Result を出力せず次のツール呼び出しへ進む
 - 子と evaluate の報告にある「提案」（BLOCKER 未満の指摘を含む）は `Proposals` に転記する
-- Proposals は採否を利用者が決める項目で、呼び出し元は既定では実施しない
 
 ```
 Loop-Dev Result
