@@ -24,8 +24,7 @@ drift の判定は `../maintain/SKILL.md`、脆弱性の観点は `../secure/SKI
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
   - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `release verify smoke {コンポーネント名}` / `bypass 実測 exit code`）
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
-  - root ポインタが未記録の文脈では、`claq_run` が exit 127 で解決できない
-  - そのときは開発リポジトリの `.venv`（claq が入っている）で `python3 -m claq.mem.cli search "..."` を直接叩く
+  - root ポインタが未記録の文脈では `claq_run` が exit 127 で解決できないので、開発リポジトリの `.venv`（claq が入っている）で `python3 -m claq.mem.cli search "..."` を直接叩く
 - 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
 
 ## ステップ1: インベントリ
@@ -64,7 +63,7 @@ echo "measured=$MEASURED_ROOT via=$VIA gate=$GATE_ROOT"
   - `python3 -m claq.モジュール名`: PLUGIN_ROOT を見ない
     - 開発 venv では、editable install 経由でリポジトリ作業ツリーを実行する
     - venv 外の素の `python3` では import に失敗する
-    - どちらも配布ビルドは実行しない
+    - 開発 venv でも venv 外でも、配布ビルドは実行しない
 - Bash の呼び出しごとに cwd と環境変数はリセットされ、`MEASURED_ROOT` も次の呼び出しには残らない
   - 解決した絶対パスをレポートの `Build:` 行に書き取り、以後は各呼び出しの先頭でその絶対パスをリテラルで代入する
   - env ポインタの再解決は PPID に依存し、呼び出しごとに同じ答えを返す保証が無い
@@ -138,7 +137,7 @@ stdin へ実 payload を流し、exit code を実測する。payload の形状�
 - 等号が及ばないのは次の 2 つ
   - 認識形を残したまま加算的に読み足す形（`("command", "cmd", *_EXTRA)` の星付き展開、`if "commandLine" in tool_input:` と添字）
   - `_TOOL_NAME_MAP` の値の側（`test_declared_tool_name_aliases_normalize_into_hook_gate` は「宣言 ⊆ 実装」しか見ない）
-- この 2 つは、各フックにつき代表 1 値ずつ（`cmd` / 生パッチ / `toolName` / lowercase のツール名）を追加で流し、「代表値のみ検査」と明記して報告する
+- 等号が及ばない 2 つは、各フックにつき代表 1 値ずつ（`cmd` / 生パッチ / `toolName` / lowercase のツール名）を追加で流し、「代表値のみ検査」と明記して報告する
   - 全件を閉じるまで `Findings` を「全軸で 0」と読ませない
 
 ```bash
@@ -336,8 +335,7 @@ Learned:    {知識カードの key} / なし
 ```
 
 - `Gate: BLOCKED` になるのは、次のいずれか: `Not run` が 1 以上 / `Unadjudicated` が 1 以上 / `Build:` が `same=no`
-  - `same=no` のとき、`Fixed` は修理 root で閉じた件数で、測定 root には未反映
-  - このとき `Gate: PASS` を出さない（配布ビルドを測りながらリポジトリの修正結果で合格にしない）
+  - `same=no` のときは `Gate: PASS` を出さない（`Fixed` は修理 root で閉じた件数で、測定 root には未反映。配布ビルドを測りながらリポジトリの修正結果で合格にしない）
 - 行の恒等式は `Findings 合計 = Fixed + NO-FIX + Pending + Unadjudicated`
   - どの指摘（エージェントの主張を含む）も 4 行のどれかに入る
   - 恒等式の母集合は `Findings` 行で、単位は指摘。`= {合計}` には 4 スロットすべての和を書く

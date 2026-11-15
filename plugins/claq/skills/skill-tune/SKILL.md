@@ -36,8 +36,7 @@ user-invocable: true
 
 - Agent ツールで新しいサブエージェントを起動する。自分で読み直して代わりにしない
 - 複数のシナリオは並列に実行する
-- 本 skill が起動する子（シナリオ・バリアント）はすべて `run_in_background: false` で起動し、hand-back が揃うまで次の工程へ進まない
-  - background だと結果待ちの応答で fork が終わるため
+- 本 skill が起動する子（シナリオ・バリアント）はすべて `run_in_background: false` で起動し、hand-back が揃うまで次の工程へ進まない（background だと結果待ちの応答で fork が終わるため）
 - 起動できない環境なら「環境制約」を参照
 
 ### ステップ3: サブエージェントの実行

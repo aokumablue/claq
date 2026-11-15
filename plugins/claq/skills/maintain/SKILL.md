@@ -42,7 +42,7 @@ commands/skills/agents/hooks をレビューし、実害を直し、効いてい
 - 対象外: スケジューラの内蔵 / auto-push / RLS 級の新機能の実装（見つけたら `/plan` の提示に留める）
 - `--scope` を省いたときは、cwd がリポジトリルート（`plugins/claq/` を辿れる）である前提で進める
   - 対象パスが存在しなければ `BLOCKED: 対象 surfaces が見つかりません（cwd={現在の cwd}、想定パス={解決したパス}）。--scope で対象ディレクトリを明示してください` として止まる
-  - 別の cwd から起動すると、installed plugin のメンテを「対象なし」と誤認しうるため
+  - 止まる理由: 別の cwd から起動すると、installed plugin のメンテを「対象なし」と誤認しうる
 
 ## ステップ1: 準備・入力収集（READ-ONLY）
 

@@ -25,7 +25,7 @@ command: /harness
 ## 使い方
 
 `claq_run` には `--root` と `--target-kind repo|consumer` を常に渡す。ユーザーが省いたら、監査対象のルートと種別を決めて渡す。
-省くと cwd から自動判定され、provider リポジトリ直下を consumer と誤判定しうる。
+`claq_run` へ渡さないと cwd から自動判定され、provider リポジトリ直下を consumer と誤判定しうる。
 
 ## ステップ1: ベースライン取得
 
@@ -52,8 +52,7 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --targ
 
 `claq:harness-tuner` を起動し、ステップ1 の JSON 出力をそのまま渡す（トップ3はその `top_actions`）。
 
-harness-tuner の出力が届かない、または先頭行が `FAIL:` なら、ステップ4・5 へ進まず `BLOCKED: {理由}` として終える。
-適用されていない状態の再監査は baseline と同じ値になり、「適用して効果なし」と区別できないため。
+harness-tuner の出力が届かない、または先頭行が `FAIL:` なら、ステップ4・5 へ進まず `BLOCKED: {理由}` として終える（適用されていない状態の再監査は baseline と同じ値になり、「適用して効果なし」と区別できないため）。
 
 ## ステップ4: 改善後スコア（`--apply` 指定時のみ）
 

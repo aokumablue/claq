@@ -74,8 +74,7 @@ claq_run claq.mem.cli search "..."                    # 既定 = active（昇格
 2 回引くのは重複の確認のときだけにする。
 
 - 判断材料として知識を読む「参照」は、既定の `active` だけで引く（このファイルの「参照する」節、各 skill の「永続メモリ」節）
-- `pending` は人間が `/instinct promote` を通していないカードである
-- `pending` を判断材料に混ぜると、承認ゲートを迂回して agent 自身の書込みが agent 自身の判断を動かす
+- `pending` は判断材料に混ぜない（人間が `/instinct promote` を通していないカードで、混ぜると承認ゲートを迂回して agent 自身の書込みが agent 自身の判断を動かす）
 
 scope に迷ったら `repo` にする（`global` はどのリポジトリの注入枠も使い、scope を後から変える CLI は無い）。
 

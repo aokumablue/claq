@@ -91,7 +91,7 @@ user-invocable: false
        - JS: `jest.config.*`/`vitest.config.*`・`package.json` の `scripts`
        - 共通: `Makefile` の test ターゲット・CI 設定等
 5. 収束判定: 次の 4 条件をすべて満たせば収束
-   - 条件
+   - 4 条件:
      - change 由来の red がゼロ（`red_baseline` のシグネチャを除く）
      - lint green
      - evaluate の blocker（CRITICAL/HIGH）ゼロ
@@ -135,14 +135,12 @@ user-invocable: false
 ## circuit breaker
 
 - 照合: 反復1 の checkpoint の反復履歴に記録したシグネチャ（定義は `../checkpoint/SKILL.md`）と、反復2 の generate の自己検証結果を文字列の完全一致で比べる
-- hard trigger: 同じテスト失敗シグネチャ（`red_baseline` を除く）が反復2 の自己検証でも red
-  - evaluate を飛ばしてすぐエスカレーションし、止まる
-  - 反復履歴に `result=circuit-break` を記録し、green コミットしない
-- early trigger（反復1 の収束判定が不成立のとき）: 次の 2 つがどちらも成り立つ
-  - 収束判定時点の red シグネチャ集合が、ベースライン記録時と完全に一致する（どちらも `red_baseline` を除く。新しい red も green 化も無く、改善がほぼゼロ）
-  - 残った blocker/red の根本原因を 1 行で特定できない
-  - このときは反復2 を省いてすぐエスカレーションし、止まる
-  - 反復履歴に `result=circuit-break`、rootcause 欄に `early-escalation: {理由}` を記録し、green コミットしない
+- hard trigger: 同じテスト失敗シグネチャ（`red_baseline` を除く）が反復2 の自己検証でも red なら、evaluate を飛ばしてすぐエスカレーションし、止まる
+  - 発火したら、反復履歴に `result=circuit-break` を記録し、green コミットしない
+- early trigger（反復1 の収束判定が不成立のとき）: 次の 2 条件がどちらも成り立てば、反復2 を省いてすぐエスカレーションし、止まる
+  - 条件 1: 収束判定時点の red シグネチャ集合が、ベースライン記録時と完全に一致する（どちらも `red_baseline` を除く。新しい red も green 化も無く、改善がほぼゼロ）
+  - 条件 2: 残った blocker/red の根本原因を 1 行で特定できない
+  - 発火したら、反復履歴に `result=circuit-break`、rootcause 欄に `early-escalation: {理由}` を記録し、green コミットしない
 - 根本原因を 1 行で特定できていれば、early trigger は発火させず反復2 を実行する（rootcause 欄に記録）
   - rootcause には、解消対象の blocker/失敗テストとの対応を書く
   - 対応を示せない rootcause は、特定できていないものとして扱う

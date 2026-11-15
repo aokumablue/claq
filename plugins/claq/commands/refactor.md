@@ -36,8 +36,7 @@ command: /refactor
 `refactor-rollback` の出力を受け取った直後に、実効スコープを確定する（precondition gate）。
 
 1. `effective_scope = scope_files − Skip Rules の file 集合 − CAUTION の file 集合`
-2. `effective_scope` が空なら、1 件も編集せずに `BLOCKED: effective scope が空です（Skip Rules: {file 一覧}）` として終える
-   - リバートできない問題を final gate まで持ち越すと、変更が残ったまま止まるため
+2. `effective_scope` が空なら、1 件も編集せずに `BLOCKED: effective scope が空です（Skip Rules: {file 一覧}）` として終える（リバートできない問題を final gate まで持ち越すと、変更が残ったまま止まるため）
 
 ## ステップ2: baseline
 
