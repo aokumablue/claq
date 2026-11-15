@@ -32,7 +32,7 @@
 | S1 | P1 | release-verify | モデルから起動できない skill が常に `Not run` になる |
 | C2 | P1 | package-upgrade | 永続メモリ・停止文言・Assumptions が他の command と揃っていない |
 | X3 | P2 | commands 全 10 本 | learn の基準を相対パスで参照（主会話が読める保証が無い） |
-| X4 | P2 | quick-debug / quick-refactor / quick-review | 手順 6 が指す「追加した防御」欄が返却形式に無い |
+| X4 | P2 | quick-debug / quick-refactor / quick-review | 手順 7 が指す「追加した防御」欄が返却形式に無い |
 | A3 | P2 | comparator | 出力例が「本文からの引用」規則に合っていない |
 | A4 | P2 | grader | 入力欠落時の扱いが無い。既定文言が英語 |
 | A7 | P2 | harness-tuner / harness | FAIL 時の出力形と、呼び出し側の扱いが無い |
@@ -62,7 +62,7 @@
 | S1 | 実施 | `disable-model-invocation: true` は「Claude can't invoke the skill on its own」（skills）。Skill ツールで `claq:quick-review` を呼ぶと拒否されることを実測 | 利用者へ `/<name>` を依頼し、結果が貼られるまで `Not run`。Gate の意味を変える `Manual` 区分は採らない |
 | C2 | 実施 | 停止文言・永続メモリ・Assumptions が他の command と不揃い | 学びの記録は既存のため追加なし |
 | X3 | 実施 | command の本文にベースディレクトリは付かない（`claq:instinct` を Skill で起動して実測）。`${CLAUDE_PLUGIN_ROOT}` は本文で置換されるが（plugins-reference）、ベンダ固有パスは ADR とテストで禁止 | 各 command の永続メモリ節に、`claq_plugin_root` の `commands/` を基準に読む旨を追加 |
-| X4 | 実施 | 手順 6 が指す欄が返却形式に無い（定義内の矛盾） | quick-debug / quick-refactor / quick-review に加え、同じ欠落のあった html-gen / mcp-gen / release-verify にも追加 |
+| X4 | 実施 | 手順 7 が指す欄が返却形式に無い（定義内の矛盾） | quick-debug / quick-refactor / quick-review に加え、同じ欠落のあった html-gen / mcp-gen / release-verify にも追加 |
 | A3 | 実施 | 信頼境界は本文引用を求め、引用の無い判定は破棄される。出力例が引用なし | 出力例を引用つきの評語にし、引用を入れるフィールドを出力契約に明記 |
 | A4 | クローズ | 入力欠落・判断不能は既存の「FAIL」規則（`:47`・`:56`）で扱える。`No suggestions, evals look solid` を読む箇所は grader.md 以外に無く、英語であることによる不具合は再現できない | — |
 | A7・C3 | 実施 | harness-tuner が FAIL でも再監査へ進む手順で、「適用して効果なし」と区別できない | FAIL の先頭行を決め、/harness は `BLOCKED` で終える。停止点節を追加、再監査は `--format json` 固定 |
@@ -191,10 +191,10 @@ commands 全 10 本が `../skills/learn/SKILL.md` を「基準はここ」と参
 **要確認**
 インストール済みビルドで `/claq:bugfix` などを起動し、相対パスの Read が実際に通るかを 1 回確かめる。通るなら P3 に下げてよい。
 
-### X4. 「実装の手順」6 が指す欄が返却形式に無い（P2）
+### X4. 「実装の手順」7 が指す欄が返却形式に無い（P2）
 
 **現状**
-「実装の手順」1〜7 は `tests/test_simplicity_criteria.py` が一字一句の一致を固定している（正本は `agents/tdd-writer.md`）。6 番は「報告の『追加した防御』に残す」。この欄を返却形式に持つのは `quick-code`（`SKILL.md:69`）・`code-refiner`（`:74`）・`tdd-writer`（`:53`）だけで、`quick-debug`・`quick-refactor`・`quick-review` には無い。
+「実装の手順」1〜10 は `tests/test_simplicity_criteria.py` が一字一句の一致を固定している（正本は `agents/tdd-writer.md`）。7 番は「報告の『追加した防御』に残す」。この欄を返却形式に持つのは `quick-code`（`SKILL.md:69`）・`code-refiner`（`:74`）・`tdd-writer`（`:53`）だけで、`quick-debug`・`quick-refactor`・`quick-review` には無い。
 
 **問題**
 手順が書けと言う欄の置き場が無く、書かれるかどうかが実行ごとに変わる。
@@ -529,7 +529,7 @@ Outcome Health: {満たした基準数} / {実測できた基準数}
 - `skill-tune`: 「停止点」が末尾の「打ち切り基準」内にある。他の fork skill は冒頭。冒頭へ移す。`Step N` 表記を他と同じ「ステップN」にする
 - `secure`: 「永続メモリ」節だけ箇条書き記号が無い
 - `html-gen` / `mcp-gen` / `release-verify`: 永続メモリ節のラベルが「参照: / 記録:」。他は「search: / record:」。どちらかに揃える
-- `mcp-gen`: 「実装の手順」1〜7 の直後に箇条書き（`- cache_hints…`）が続く。間に見出しを 1 つ入れる
+- `mcp-gen`: 「実装の手順」1〜10 の直後に箇条書き（`- cache_hints…`）が続く。間に見出しを 1 つ入れる
 - `maintain`: 「フック修正: 原則4 に従う。」など、箇条書き末尾の句点が混在
 
 ---
