@@ -107,7 +107,7 @@ Write でも、lint・テスト・カバレッジの節やキー（`ignore` / `s
 見本のツール・リソース・プロンプト（不要なら削除）、受信側のレート制限の定数（`TOOL_CALLS_PER_WINDOW` /
 `TOOL_CALL_WINDOW_SECONDS`）と主体を返す `_principal`。重ね合わせたなら `CATALOG`・
 出力モデル・`adapters.py` の偽物（実際の上流の呼び出しに置き換える）も。upstream-protection-overlay を重ねたら、
-上限の定数を上流の契約に合わせる（`references/upstream-protection.md`）。
+条件に当たる部品だけを渡し、上限の定数を上流の契約に合わせる（`references/upstream-protection.md`）。
 
 触らない: `install_guard(mcp, ...)` と `run(mcp)` の呼び出し（上限は定数で差し替える）、`guard.py`、`smoke_check.py`、
 `smoke_static.py`、`facade/` の部品。`transport.py` は公開するホスト名を足すとき以外は触らない。

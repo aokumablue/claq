@@ -2,7 +2,8 @@
 
 上流から 429 を受ける前に、サーバの側で呼び出しの量を絞る。絞るときは待たずにすぐ失敗を返す
 （待てば締切を越え、締切超えが遮断器の失敗として数えられる）。server.py は上流ごとに
-`UpstreamPolicy` を 1 つ置き、上流の呼び出しを全てその `call` に通す。
+`UpstreamPolicy` を 1 つ置き、上流の呼び出しを全てその `call` に通す。クォータ・同時実行の上限・
+同じ要求の合流は、条件に当たるものだけを `UpstreamPolicy` に渡す（遮断器は常に入る）。
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable, Hashable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any
 
 from .breaker import CircuitBreaker, call_upstream
@@ -202,34 +203,34 @@ class SingleFlight:
 class UpstreamPolicy:
     """上流ごとの呼び出しの方針。上流 1 つにつき 1 つ作り、全主体で共有する。
 
-    同じ要求の合流（`SingleFlight`）→ 同時実行の上限（`ConcurrencyLimit`）→ 遮断器・再試行・締切
-    （`call_upstream`）→ 試行ごとのクォータ（`UpstreamQuota`）の順に通す。クォータは試行ごとに数える
-    （再試行も上流を呼ぶ）。遮断中は上流を呼ばないので、クォータを使わない。
+    遮断器・再試行・締切（`call_upstream`）は常に通す。クォータ・同時実行の上限・同じ要求の合流は、
+    渡されたものだけを重ねる（条件に当たらない仕組みを、契約に無い値で入れないため）。
+    重ねる順は、同じ要求の合流（`SingleFlight`）→ 同時実行の上限（`ConcurrencyLimit`）→ 遮断器・再試行・締切
+    → 試行ごとのクォータ（`UpstreamQuota`）。クォータは試行ごとに数える（再試行も上流を呼ぶ）。
+    遮断中は上流を呼ばないので、クォータを使わない。
     """
 
     def __init__(
         self,
         *,
-        rate_per_second: float,
-        burst: int,
-        max_concurrent: int,
-        max_concurrent_per_principal: int,
+        quota: UpstreamQuota | None = None,
+        concurrency: ConcurrencyLimit | None = None,
+        merge_same_requests: bool = False,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        """上限を設定する。
+        """重ねる仕組みを設定する。
 
         Args:
-            rate_per_second: 上流のクォータが 1 秒あたりに回復する回数。
-            burst: 上流のクォータを貯められる回数の上限。
-            max_concurrent: この上流への全主体を合わせた同時実行の上限。
-            max_concurrent_per_principal: この上流への 1 つの主体の同時実行の上限。
+            quota: 上流のクォータ。上流の契約にレート制限があるときに渡す。
+            concurrency: 同時実行の上限。上流の契約に同時実行の上限があるときに渡す。
+            merge_same_requests: 同じ主体の同じ要求の同時の呼び出しを 1 本にまとめるか。共有のリモートで True にする。
             clock: 単調増加する現在時刻を返す関数（締切と同じ基準）。
         """
         self._clock = clock
         self._breaker = CircuitBreaker(clock=clock)
-        self._quota = UpstreamQuota(rate_per_second, burst, clock=clock)
-        self._concurrency = ConcurrencyLimit(max_concurrent, max_concurrent_per_principal)
-        self._flights = SingleFlight()
+        self._quota = quota
+        self._concurrency = concurrency
+        self._flights = SingleFlight() if merge_same_requests else None
 
     async def call[T](
         self,
@@ -241,13 +242,14 @@ class UpstreamPolicy:
     ) -> T:
         """方針を通して、上流のメソッドを引数 arguments で呼ぶ。
 
-        同じ主体・同じメソッド・同じ引数の同時の呼び出しは 1 本にまとめる（締切は先に来た呼び出しの
-        もの）。主体をキーに含めるので、他の主体の結果は返さない。メソッドが引数の外の状態を読む
-        なら、それを引数か主体に含める。
+        合流を有効にしたときは、同じ主体・同じメソッド・同じ引数の同時の呼び出しを 1 本にまとめる
+        （締切は先に来た呼び出しのもの）。主体をキーに含めるので、他の主体の結果は返さない。
+        メソッドが引数の外の状態を読むなら、それを引数か主体に含める。
 
         Args:
             method: 上流を呼ぶメソッド（引数は名前で渡す）。
-            arguments: メソッドに渡す引数。値は hashable か list（list は tuple にしてキーにする）。
+            arguments: メソッドに渡す引数。合流を有効にしたときは、値を hashable か list にする
+                （list は tuple にしてキーにする）。
             principal: 呼び出しの主体。
             deadline: 締切（`clock` と同じ基準の時刻）。
 
@@ -260,23 +262,26 @@ class UpstreamPolicy:
         """
 
         async def attempt() -> T:
-            """クォータを 1 回ぶん使ってから上流を呼ぶ（再試行のたびに呼ばれる）。
+            """クォータがあれば 1 回ぶん使ってから上流を呼ぶ（再試行のたびに呼ばれる）。
 
             Returns:
                 上流の結果。
             """
-            self._quota.take()
+            if self._quota is not None:
+                self._quota.take()
             return await method(**arguments)
 
         async def bounded() -> T:
-            """同時実行の枠の中で、遮断器・再試行・締切を通して上流を呼ぶ。
+            """同時実行の上限があればその枠の中で、遮断器・再試行・締切を通して上流を呼ぶ。
 
             Returns:
                 上流の結果。
             """
-            with self._concurrency.slot(principal):
+            with self._concurrency.slot(principal) if self._concurrency is not None else nullcontext():
                 return await call_upstream(self._breaker, attempt, deadline=deadline, clock=self._clock)
 
+        if self._flights is None:
+            return await bounded()
         key = (
             principal,
             method,

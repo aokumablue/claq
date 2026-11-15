@@ -313,10 +313,21 @@ class TestSingleFlight:
         assert asyncio.run(scenario()) == (True, 1, ["ok", "ok"])
 
 
-def _policy(facade: types.SimpleNamespace, clock: _Clock, **limits: Any) -> Any:
-    """時計 clock の上で、上限を limits で上書きした UpstreamPolicy を作る（既定はどの上限にも当たらない値）。"""
-    settings = {"rate_per_second": 1.0, "burst": 100, "max_concurrent": 100, "max_concurrent_per_principal": 100}
-    return facade.limits.UpstreamPolicy(**{**settings, **limits}, clock=clock)
+def _policy(
+    facade: types.SimpleNamespace,
+    clock: _Clock,
+    *,
+    burst: int = 100,
+    max_concurrent: int = 100,
+    max_concurrent_per_principal: int = 100,
+) -> Any:
+    """時計 clock の上で、全ての仕組みを重ねた UpstreamPolicy を作る（既定はどの上限にも当たらない値）。"""
+    return facade.limits.UpstreamPolicy(
+        quota=facade.limits.UpstreamQuota(1.0, burst, clock=clock),
+        concurrency=facade.limits.ConcurrencyLimit(max_concurrent, max_concurrent_per_principal),
+        merge_same_requests=True,
+        clock=clock,
+    )
 
 
 def _call(policy: Any, clock: _Clock, method: Any, arguments: dict[str, Any], principal: str = "alice") -> Any:
@@ -412,6 +423,14 @@ class TestUpstreamPolicy:
             return [error.detail for error in throttled], await _call(policy, clock, gate, {}, "bob")
 
         assert asyncio.run(scenario()) == (["concurrency limit"] * 5 + ["upstream quota"] * 5, "ok")
+
+    def test_policy_without_parts_neither_merges_nor_throttles(self, facade: types.SimpleNamespace) -> None:
+        """クォータ・同時実行の上限・合流を渡さなければ、同じ要求の同時の呼び出しもそれぞれ上流を呼び、絞らない。"""
+        clock = _Clock()
+        policy = facade.limits.UpstreamPolicy(clock=clock)
+        gate = _Gate()
+        calls = [_call(policy, clock, gate, {"order_id": "a"}) for _ in range(3)]
+        assert (asyncio.run(_released(gate, calls)), gate.calls) == (["ok", "ok", "ok"], 3)
 
     def test_policy_cancellation_reaches_upstream(self, facade: types.SimpleNamespace) -> None:
         """呼び出し元が取り消されたら、上流の呼び出しも取り消し、その後始末が走る。"""
