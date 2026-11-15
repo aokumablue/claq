@@ -30,7 +30,8 @@
 
 ## データ
 
-- 永続化は `~/.claq/mem.db` のみ。テーブルは `repos` / `knowledge` / `sessions`。`~/.claq` は 0700、`mem.db` は 0600。Windows では DACL を変えない
+- 知識とセッションの永続化は `~/.claq/mem.db` のみ。テーブルは `repos` / `knowledge` / `sessions`。`~/.claq` は 0700、`mem.db` は 0600。Windows では DACL を変えない
+- `~/.claq/session-data/` には checkpoint（`checkpoint-*.md`）と圧縮の記録（`compaction-log.txt`）をファイルで置く
 - agent 由来カードは常に `source=agent` / `status=pending`。注入されるのは `active` のみ（人間が `promote`）
 - `list` / `search` は 1 行。`body` は `show` のみ。0 件は無出力
 
