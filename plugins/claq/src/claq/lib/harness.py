@@ -367,6 +367,9 @@ SCAFFOLD_TAGS = (
 # スラッシュコマンド起動の足場タグ。中身は依頼そのものなので捨てずに畳む。
 COMMAND_TAGS = ("command-name", "command-message", "command-args")
 
+# 貼り付けを包む足場タグ。中身は依頼そのものなので、タグだけを落として中身を残す。
+PASTE_TAGS = ("pasted_content",)
+
 # タグ名の直後に「名前の終わり」を要求する先読み。これが無いと、タグ**名**が
 # 足場名で始まるだけの別タグ（`<system-reminders>` や `<local-command-stdout-parser>`）
 # まで一致し、無関係な依頼をメッセージごと破棄してしまう。属性付きは通す。
@@ -432,6 +435,8 @@ _COMMAND_ARGS_PATTERN = tag_block_pattern("command-args", capture=True)
 _COMMAND_SCAFFOLD_PATTERN = re.compile(
     r"</?(?:" + "|".join(COMMAND_TAGS) + r")" + TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE
 )
+# 貼り付けを包むタグ（開始・終了）。中身には触れない。
+_PASTE_TAG_PATTERN = re.compile(r"</?(?:" + "|".join(PASTE_TAGS) + r")" + TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE)
 # 畳み込みで中身ごと落とすブロック。`command-message` はコマンド名の再掲、
 # `command-args` は畳んだ文字列側へ取り込み済みのため元の位置には残さない。
 _COMMAND_MESSAGE_BLOCK_PATTERN = tag_block_pattern("command-message")
@@ -502,7 +507,7 @@ def normalize_user_message(text: str) -> str:
     押し出されるうえ、注意書きの指示文が次セッションへ疑似ユーザー指示として再注入される。
 
     中身が無価値な足場は丸ごと捨て、スラッシュコマンド起動だけは ``/name args`` へ
-    畳む。足場の中身に閉じタグを混ぜて除去を回避しようとした入力はメッセージごと破棄する。
+    畳む。貼り付けを包むタグは、タグだけを落として中身（依頼そのもの）を残す。足場の中身に閉じタグを混ぜて除去を回避しようとした入力はメッセージごと破棄する。
 
     Returns:
         依頼本文。足場しか含まれていない、または細工が検出された場合は空文字列。
@@ -512,4 +517,4 @@ def normalize_user_message(text: str) -> str:
     stripped = _drop_scaffold_blocks(text)
     if stripped is None:
         return ""
-    return _fold_command_invocation(stripped).strip()
+    return _PASTE_TAG_PATTERN.sub("", _fold_command_invocation(stripped)).strip()
