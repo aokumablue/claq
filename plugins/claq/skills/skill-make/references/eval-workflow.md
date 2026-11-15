@@ -43,9 +43,9 @@ Execute this task:
 
 ## 4. grading して集計し、分析する
 
-すべての run が終わったら:
-
 grader / comparator / bench-analyzer の返値が検証を通らなければ保存せず、推測で補った JSON も書かない。その run（比較）は判定欠落として skill-make の呼び出し元へ伝える。
+
+すべての run が終わったら:
 
 1. 各 run を grading する
    - grader サブエージェント（`../../../agents/grader.md`）を起動するか、その本文に従って inline で評価する
