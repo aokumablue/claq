@@ -144,8 +144,8 @@ def runtime_config() -> str:
 def item_detail(item_id: str) -> str:
     """テンプレートリソース。URI 中の `{item_id}` が引数へ束縛される。
 
-    `item_id` は外部入力である。既定の `resource_security` がパストラバーサル・
-    絶対パス・NUL を弾くが、ファイルや DB を引くなら自前の検証も併せて行う。
+    `item_id` は外部入力である。パストラバーサル・絶対パス・NUL は既定の `resource_security` が
+    弾くので、同じ検査を重ねて書かない。ID の形などの制約が要件にあれば、ここで確かめる。
 
     Args:
         item_id: URI から抽出された項目 ID。

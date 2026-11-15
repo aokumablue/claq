@@ -16,7 +16,6 @@
 - タイムアウトは呼び出しごとに設定する（全体の締切は server.py が持つ）
 - 上流が返す次ページの URL（nextLink・Link ヘッダ）やカーソルから戻した値を上流へ渡すときは、
   scheme・host・path の接頭辞を許可リストで照合する（資格情報付きで任意のホストへ取りに行かせない）
-- 上流の応答の大きさに上限を置き、超えたら `UpstreamError(502, ...)` にする
 """
 
 from __future__ import annotations
