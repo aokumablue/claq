@@ -11,7 +11,8 @@ disable-model-invocation: true
 
 1. 対象の入口（HTTP・CLI・ファイル・アップロード・プロンプトへ入る外部由来の文字列）を列挙する
 2. 各入口に届く攻撃者（ネットワーク上の client・他ユーザー・プロンプトへ入る不信テキスト）を特定する。ローカル開発者本人と同一 UID のプロセスだけが届く入口は `到達経路なし` として終える
-3. 届く入口に下の観点を当て、攻撃者が今のコードで得るもの（情報漏洩・権限奪取・任意実行・改ざん）を 1 行で書けたものを穴とする。クラウド・IaC・CI/CD・デプロイ設定が対象なら `references/cloud-infrastructure-security.md` の観点も同じ条件で当てる
+3. 届く入口に下の観点を当て、攻撃者が今のコードで得るもの（情報漏洩・権限奪取・任意実行・改ざん）を 1 行で書けたものを穴とする
+   - クラウド・IaC・CI/CD・デプロイ設定が対象なら、`references/cloud-infrastructure-security.md` の観点も同じ条件で当てる
 4. 穴は、その得るものを無くす最小の変更で塞ぎ、塞いだ穴ごとにテストを書く（未認証→401、権限なし→403、境界タグを混ぜた入力が境界を越えない、等）
 5. 得るものを書けなかった項目は「ハードニング提案」として理由と出典を付けて報告する。採否は利用者が決める
 6. 報告は、当てはまった観点だけを書く（当てはまらない節は見出しごと省く）
@@ -45,7 +46,8 @@ CSP ヘッダ、CSRF トークンと `SameSite=Strict`、レート制限、RLS /
 
 ## 永続メモリ
 
-- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `security vulnerability {category}` / `{vulnerability_type} fix`。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
+- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `security vulnerability {category}` / `{vulnerability_type} fix`
+  - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 特定の入口に結び付く学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
 
 ## 入力安全

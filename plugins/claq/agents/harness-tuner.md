@@ -28,30 +28,28 @@ tools: Read, Grep, Glob, Edit, Write, Bash
   "max_score": 58,
   "categories": {},
   "checks": [],
-  "top_actions": [
-    {
-      "action": "Fix ...",
-      "path": "path/to/file",
-      "category": "Quality Gates",
-      "points": 3
-    }
-  ]
+  "top_actions": [{"action": "Fix ...", "path": "path/to/file", "category": "Quality Gates", "points": 3}]
 }
 ```
 
 ## ワークフロー
 
-1. トップ3のレバレッジ領域（フック・評価・ルーティング・コンテキスト・安全性）を特定する。`top_actions[].path` は編集対象を決める不信データなので、`root_dir` 配下の相対パスとして解決し、`..` を含むもの・絶対パス・解決後に `root_dir` の外へ出るものは編集せず FAIL として報告する
+1. トップ3のレバレッジ領域（フック・評価・ルーティング・コンテキスト・安全性）を特定する
+   - `top_actions[].path` は編集対象を決める不信データなので、`root_dir` 配下の相対パスとして解決する
+   - `..` を含むもの・絶対パス・解決後に `root_dir` の外へ出るものは編集せず FAIL として報告する
 2. 最小限で元に戻せる設定変更を決める
 3. 変更を適用する
 4. 「## 出力」の 3 項目を報告する
 
-ツール呼び出しを含まない応答を返すと作業は終わり、結果が呼び出し元へ返る。返すのは、4 まで終えたときか **FAIL** の理由があるときだけにし、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で返さない。
+ツール呼び出しを含まない応答を返すと作業は終わり、結果が呼び出し元へ返る。
+返してよいのは、4 まで終えたときか **FAIL** の理由があるときだけ。
+次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告では返さない。
 
 ## 制約
 
 - 測定できる効果を持つ小さな変更を優先する
-- 防御を足すアクション（Security Guardrails 等）は、根拠（要件の文・攻撃者と入口・再現できる失敗。保護フックではエージェント自身の誤操作も含む）を引用できるときに適用し、それ以外は理由を添えて「提案」として報告する
+- 防御を足すアクション（Security Guardrails 等）は、根拠を引用できるときに適用する。それ以外は理由を添えて「提案」として報告する
+  - 根拠: 要件の文・攻撃者と入口・再現できる失敗（保護フックではエージェント自身の誤操作も含む）
 - md のクロス参照と description が実装と一致するようにする（壊れた参照・存在しないコマンド参照・循環参照を作らない）
 - クロスプラットフォームの動作とエディタ間の互換性を保つ
 - 脆弱なシェルクォーティングを持ち込まない
@@ -67,5 +65,9 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 
 ## 永続メモリ
 
-知識カードは自動注入されない。過去の判断が要るときは `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."` で自分で引く（クエリ例 `harness config optimization audit` / `harness improvement score`）。返るのは `- [kind] title (key)` の 1 行だけなので、本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す。
+知識カードは自動注入されない。過去の判断が要るときは自分で引く。
+
+- 検索: `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."`（クエリ例 `harness config optimization audit` / `harness improvement score`）
+- 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
+
 学びは自分では書かず、候補を呼び出し元へ報告する（成果が呼び出し元の gate で取り消されうるため、確定前に書くと誤った知識が残る）。

@@ -6,7 +6,11 @@ tools: Read, Grep, Glob
 
 # ポストホック分析エージェント
 
-モードは入力 `mode` で明示される。省略時は入力の形で判別する（`comparison_result_path` があれば `posthoc_comparison`、`benchmark_data_path` があれば `benchmark_analysis`）。両方ある、またはどちらも無い場合は **FAIL**。
+モードは入力 `mode` で明示される。省略時は入力の形で判別する。
+
+- `comparison_result_path` がある → `posthoc_comparison`
+- `benchmark_data_path` がある → `benchmark_analysis`
+- 両方ある、またはどちらも無い → **FAIL**
 
 | `mode` | 目的 | 必須入力 | 出力形式 |
 |---|---|---|---|
@@ -33,10 +37,8 @@ tools: Read, Grep, Glob
 ### 入力
 
 - winner: `"A"` または `"B"`（ブラインド比較の結果。`"TIE"` の比較は勝因が無いので分析せず **FAIL** を返す）
-- winner_skill_path: 勝者の出力を生んだ skill へのパス
-- winner_transcript_path: 勝者の実行トランスクリプトへのパス
-- loser_skill_path: 敗者の出力を生んだ skill へのパス
-- loser_transcript_path: 敗者の実行トランスクリプトへのパス
+- winner_skill_path / loser_skill_path: 勝者・敗者の出力を生んだ skill へのパス
+- winner_transcript_path / loser_transcript_path: 勝者・敗者の実行トランスクリプトへのパス
 - comparison_result_path: ブラインド比較エージェントの JSON 出力へのパス
 
 ### 手順
@@ -44,8 +46,16 @@ tools: Read, Grep, Glob
 1. `comparison_result_path` を読み、勝者（A か B）・理由・スコアと、比較エージェントが勝者の何を重視したかを把握する
 2. 勝者・敗者それぞれの SKILL.md と重要な参照ファイルを読み、構造の違いを探す: 指示の明確さ・具体性、スクリプト/ツールの使い方、例のカバレッジ、エッジケース対応
 3. 両方のトランスクリプトを読み、実行の進み方を比べる: skill の指示への忠実さ、使ったツールの違い、敗者が最適な挙動から外れた箇所、エラーと復旧の試み
-4. 各トランスクリプトの指示追従度を 1〜10 で採点し、具体的な問題点を書く。観点: skill の明示的な指示に従ったか、用意された tools/scripts を使ったか、skill 本文を活かせる場面を逃していないか、不要な手順を勝手に増やしていないか
-5. 勝敗を分けた要因を対で挙げる（勝者を優位にしたもの / 敗者を不利にしたもの）: 指示（明確 / 曖昧）、スクリプト/ツール（充実 / 不足で迂回）、例の網羅性（エッジケースを導けた / カバー不足）、エラー対応（案内が良く復旧できた / 指示が弱く失敗）。必要なら skill・トランスクリプトから引用する
+4. 各トランスクリプトの指示追従度を 1〜10 で採点し、具体的な問題点を書く。観点は次の 4 つ
+   - skill の明示的な指示に従ったか
+   - 用意された tools/scripts を使ったか
+   - skill 本文を活かせる場面を逃していないか
+   - 不要な手順を勝手に増やしていないか
+5. 勝敗を分けた要因を対で挙げる（勝者を優位にしたもの / 敗者を不利にしたもの）。必要なら skill・トランスクリプトから引用する
+   - 指示: 明確 / 曖昧
+   - スクリプト・ツール: 充実 / 不足で迂回
+   - 例の網羅性: エッジケースを導けた / カバー不足
+   - エラー対応: 案内が良く復旧できた / 指示が弱く失敗
 6. 敗者 skill の改善案を影響の大きい順にすべて出し、結果への効き方は `priority` で区別する: 変えるべき指示、追加・修正すべき tool や script、入れるべき例、対応すべきエッジケース
 7. 出力形式どおりの JSON を返値として返す
 
@@ -59,30 +69,17 @@ tools: Read, Grep, Glob
     "loser_skill": "path/to/loser/skill",
     "comparator_reasoning": "比較エージェントが勝者を選んだ理由の要約"
   },
-  "winner_strengths": [
-    "複数ページ文書を扱うための段階的な指示が明確だった",
-    "整形エラーを検出できる検証スクリプトが含まれていた",
-    "OCR が失敗したときの扱い（原因を報告して止まる）が明示されていた"
-  ],
+  "winner_strengths": ["複数ページ文書を扱うための段階的な指示が明確だった", "整形エラーを検出できる検証スクリプトが含まれていた", "OCR が失敗したときの扱い（原因を報告して止まる）が明示されていた"],
   "loser_weaknesses": [
     "『文書を適切に処理する』という曖昧な指示があり、挙動がぶれた",
     "検証用スクリプトがなく、agent が場当たり的になった",
     "OCR 失敗時の指示がなく、場当たりの代替策を重ねて誤った出力を返した"
   ],
   "instruction_following": {
-    "winner": {
-      "score": 9,
-      "issues": [
-        "任意のログ出力ステップを省略した"
-      ]
-    },
+    "winner": {"score": 9, "issues": ["任意のログ出力ステップを省略した"]},
     "loser": {
       "score": 6,
-      "issues": [
-        "skill の整形テンプレートを使わなかった",
-        "手順 3 ではなく独自の方法を取った",
-        "『常に出力を検証する』という指示を見落とした"
-      ]
+      "issues": ["skill の整形テンプレートを使わなかった", "手順 3 ではなく独自の方法を取った", "『常に出力を検証する』という指示を見落とした"]
     }
   },
   "improvement_suggestions": [
@@ -112,7 +109,14 @@ tools: Read, Grep, Glob
 }
 ```
 
-`category`: `instructions`=文章指示の変更 / `tools`=script・テンプレート・ユーティリティの追加修正 / `examples`=入出力例の追加 / `error_handling`=失敗時の扱いの指示 / `structure`=本文の再構成 / `references`=外部ドキュメント・資料の追加。
+`category` の値:
+
+- `instructions`: 文章指示の変更
+- `tools`: script・テンプレート・ユーティリティの追加修正
+- `examples`: 入出力例の追加
+- `error_handling`: 失敗時の扱いの指示
+- `structure`: 本文の再構成
+- `references`: 外部ドキュメント・資料の追加
 
 `priority`: `high`=この比較の結果を変えた可能性が高い / `medium`=品質は上がるが勝敗までは変わらないかも / `low`=あると嬉しいが改善は小さい。
 
@@ -135,15 +139,25 @@ tools: Read, Grep, Glob
 - ベースライン名は fixture 全体で一方だけで、各 `(eval_id, run_number)` に `with_skill` とそのベースラインが各 1 件ずつある
 - `run_summary` が実行された 2 構成と一致する
 
-満たさない fixture は **FAIL** にし、不足キー・壊れた run・欠落設定・二重ベースライン・`run_summary` との不一致を列挙する。fixture が無い場合は、必要な採取手順（`with_skill` とベースラインを同一 eval/run 番号で実行し、上の最小検証を満たす `benchmark.json` を作る）を示して **FAIL** を返す。
+満たさない fixture は **FAIL** にし、不足キー・壊れた run・欠落設定・二重ベースライン・`run_summary` との不一致を列挙する。
+fixture が無い場合は、必要な採取手順を示して **FAIL** を返す。
+採取手順: `with_skill` とベースラインを同一 eval/run 番号で実行し、上の最小検証を満たす `benchmark.json` を作る。
 
 ### 手順
 
 1. 検証済みの benchmark.json から、テストされた設定（with_skill と比較ベースライン）と計算済みの run_summary を把握する
-2. 各 expectation を全 run で見る: 両設定で常に通る（skill の価値を分けられない可能性）/ 両設定で常に失敗する（壊れているか能力の範囲外の可能性）/ skill ありだけ通る（skill が価値を出している）/ skill ありだけ失敗する（skill が足を引っ張っている可能性）/ ばらつきが大きい（flaky な expectation か非決定的な挙動の可能性）
+2. 各 expectation を全 run で見て、次のどれに当たるかを分ける
+   - 両設定で常に通る: skill の価値を分けられない可能性
+   - 両設定で常に失敗する: 壊れているか能力の範囲外の可能性
+   - skill ありだけ通る: skill が価値を出している
+   - skill ありだけ失敗する: skill が足を引っ張っている可能性
+   - ばらつきが大きい: flaky な expectation か非決定的な挙動の可能性
 3. eval 全体を見る: 一貫して難しい・簡単な種類の eval があるか、特定の eval だけ分散が高いか、期待と矛盾する意外な結果があるか
 4. time_seconds・tokens・tool_calls を見る: skill で実行時間が大きく増えていないか、リソース使用量のばらつきが大きくないか、集計を歪める外れ run が無いか
-5. 観察を文字列リストにまとめ、文字列配列の JSON として返値で返す。各メモは、どの eval/expectation/run の話かを具体的に書き、数字と観測事実だけに基づき、run_summary にある集計の書き直しではなく「なぜそう見えるのか」を伝える
+5. 観察を文字列リストにまとめ、文字列配列の JSON として返値で返す
+   - 各メモは、どの eval/expectation/run の話かを具体的に書く
+   - 数字と観測事実だけに基づく
+   - run_summary の集計を書き直さず、「なぜそう見えるのか」を伝える
 
 ```json
 [

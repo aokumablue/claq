@@ -62,12 +62,12 @@ OPTIONAL_SETTINGS: dict[str, Any] = {
     "PAGED_TOOL": "",
     "PAGED_ARGS": {},
     "PAGED_CHANGED_ARGS": {},
-    "PAGED_ENV": {},
     "CURSOR_ERROR_SUBSTRING": "cursor",
     "FIELDS_TOOL": "",
     "FIELDS_BAD_ARGS": {},
     "FIELDS_EXPECTED_SUGGESTION": "",
     "CLIENT_CAPABILITIES": {},
+    "SERVER_ENV": {},
     "MRTR_CASES": [],
 }
 # 有効にした検査（キー）に要る期待値（値）。空のままだと `"" in text` のように検査が必ず通る。
@@ -108,11 +108,8 @@ class SmokeWarning(UserWarning):
     """検査は落とさないが、確かめられなかったことがあるという知らせ（main は WARN と表示する）。"""
 
 
-def _spawn(env: dict[str, str] | None = None) -> subprocess.Popen:
-    """サーバを stdio の子プロセスとして起動する。
-
-    Args:
-        env: 既存の環境変数に上書きで足す値。
+def _spawn() -> subprocess.Popen:
+    """サーバを stdio の子プロセスとして起動する（環境変数に `SERVER_ENV` を上書きで足す）。
 
     Returns:
         起動したプロセス。
@@ -124,7 +121,7 @@ def _spawn(env: dict[str, str] | None = None) -> subprocess.Popen:
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
-        env={**os.environ, **(env or {})},
+        env={**os.environ, **cfg.SERVER_ENV},
     )
 
 
@@ -185,7 +182,7 @@ def _assert_server_has_mcp(stderr_tail: str) -> None:
         )
 
 
-def _exchange(requests: list[dict], env: dict[str, str] | None = None) -> dict[int, dict]:
+def _exchange(requests: list[dict]) -> dict[int, dict]:
     """サーバを起動してリクエスト列を送り、id をキーにした応答を返す。
 
     stdin は全応答が揃うまで開いたままにする。先に閉じるとサーバが処理中の
@@ -193,7 +190,6 @@ def _exchange(requests: list[dict], env: dict[str, str] | None = None) -> dict[i
 
     Args:
         requests: 送信する JSON-RPC リクエストの一覧。各要素は `id` を持つこと。
-        env: サーバへ足す環境変数。
 
     Returns:
         リクエスト id をキー、応答オブジェクトを値とする辞書。
@@ -201,7 +197,7 @@ def _exchange(requests: list[dict], env: dict[str, str] | None = None) -> dict[i
     Raises:
         AssertionError: 制限時間内に全応答が揃わなかったとき。
     """
-    process = _spawn(env)
+    process = _spawn()
     responses: dict[int, dict] = {}
     complete = threading.Event()
 
@@ -579,10 +575,10 @@ def test_paging_round_trip() -> None:
     """カーソルが別のプロセスでも続きを返し、改ざんと条件の変更を拒むこと。
 
     1 ページ目と 2 ページ目を**別々のプロセス**で取る。カーソルが自己完結していれば
-    どのインスタンスでも続きを返せる（署名付きカーソルなら PAGED_ENV で同じ鍵を渡す）。
+    どのインスタンスでも続きを返せる（署名付きカーソルなら SERVER_ENV で同じ鍵を渡す）。
     """
     _require("PAGED_TOOL")
-    first = _exchange([_call(1, cfg.PAGED_TOOL, cfg.PAGED_ARGS)], cfg.PAGED_ENV)[1]["result"]
+    first = _exchange([_call(1, cfg.PAGED_TOOL, cfg.PAGED_ARGS)])[1]["result"]
     assert first.get("isError") is not True, first
     page1 = first["structuredContent"]
     cursor = page1.get("next_cursor")
@@ -595,8 +591,7 @@ def test_paging_round_trip() -> None:
             _call(1, cfg.PAGED_TOOL, {**cfg.PAGED_ARGS, "cursor": cursor}),
             _call(2, cfg.PAGED_TOOL, {**cfg.PAGED_ARGS, "cursor": tampered}),
             _call(3, cfg.PAGED_TOOL, {**cfg.PAGED_CHANGED_ARGS, "cursor": cursor}),
-        ],
-        cfg.PAGED_ENV,
+        ]
     )
     second = responses[1]["result"]
     assert second.get("isError") is not True, f"別のプロセスで続きを取れません: {second}"

@@ -9,7 +9,8 @@ user-invocable: false
 
 セッションでの発見を知識カード（`knowledge` テーブルの 1 行）へ変換して蓄積する。知識の正はこのテーブル 1 つだけで、YAML ファイルや JSONL には書かない。
 
-止まるのは、候補の登録を終えたとき（該当 0 件を含む）だけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。
+止まるのは、候補の登録を終えたとき（該当 0 件を含む）だけ。
+それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。
 
 ## 知識カードのモデル
 
@@ -54,9 +55,15 @@ user-invocable: false
 - 一般的なプログラミング知識 — モデルが既に知っていること
 - 特定の入口に結び付かない防御・フォールバックの一般則 — 「未知の型は失敗にする」「禁止リストより許可リスト」のように、どの入力に効くかを書けないもの。以後の実装すべてに防御を足させる
 - 未検証の推測 — 確かめてから記録する
-- 既存カードと同じ内容 — 先に `search` で確かめる。見つかったカードが `pending` なら同じ `key` で更新し、`active`（人間が昇格済み）なら何もしない（既に注入されていて記録としては完了している。下記「active カードは更新できない」）
+- 既存カードと同じ内容 — 先に `search` で確かめる
+  - 見つかったカードが `pending` なら、同じ `key` で更新する
+  - `active`（人間が昇格済み）なら何もしない（下記「active カードは更新できない」）
 
-重複の確認では `pending` と `active` の 2 回引く。`--status` は単値しか取れず、agent が入れたカードは常に `pending` なので、既定の `active` だけでは自分の過去のカードが出てこない。逆に `pending` だけでは昇格済みの同内容カードを見落とす。
+重複の確認では `pending` と `active` の 2 回引く。
+
+- `--status` は単値しか取れない
+- agent が入れたカードは常に `pending` なので、既定の `active` だけでは自分の過去のカードが出てこない
+- 逆に `pending` だけでは、昇格済みの同内容カードを見落とす
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127
@@ -64,7 +71,10 @@ claq_run claq.mem.cli search "..." --status pending   # 未昇格の自分のカ
 claq_run claq.mem.cli search "..."                    # 既定 = active（昇格済み）
 ```
 
-2 回引くのは重複の確認のときだけにする。判断材料として知識を読む「参照」は、既定の `active` だけで引く（このファイルの「参照する」節、各 skill の「永続メモリ」節）。`pending` は人間が `/instinct promote` を通していないカードなので、判断材料に混ぜると承認ゲートを迂回して agent 自身の書込みが agent 自身の判断を動かす。
+2 回引くのは重複の確認のときだけにする。
+
+- 判断材料として知識を読む「参照」は、既定の `active` だけで引く（このファイルの「参照する」節、各 skill の「永続メモリ」節）
+- `pending` は判断材料に混ぜない（人間が `/instinct promote` を通していないカードで、混ぜると承認ゲートを迂回して agent 自身の書込みが agent 自身の判断を動かす）
 
 scope に迷ったら `repo` にする（`global` はどのリポジトリの注入枠も使い、scope を後から変える CLI は無い）。
 
@@ -75,7 +85,12 @@ scope に迷ったら `repo` にする（`global` はどのリポジトリの注
 
 ## 登録の手順
 
-`claq_mem_learn` は書込み時に、既知の接頭辞・キーワード形式のシークレット（JWT・`sk-`・`ghp_`・`AKIA`・bearer・password 代入・email 等）を `key` / `title` / `body` / `domain` から `[REDACTED]` へ置換する。接頭辞もキーワードも伴わない長い hex・Base64 は置換されないので、それだけは登録前に自分で伏せる。昇格したカードは SessionStart で毎回注入されるため、混入するとコードを直した後も残り続ける。危険パターンを `pitfall` に残すときは、実際の値ではなく形と回避条件を書く。
+`claq_mem_learn` は書込み時に、既知の接頭辞・キーワード形式のシークレットを `key` / `title` / `body` / `domain` から `[REDACTED]` へ置換する。
+
+- 置換されるもの: JWT・`sk-`・`ghp_`・`AKIA`・bearer・password 代入・email 等
+- 置換されないもの: 接頭辞もキーワードも伴わない長い hex・Base64。それだけは登録前に自分で伏せる
+- 昇格したカードは SessionStart で毎回注入されるため、混入するとコードを直した後も残り続ける
+- 危険パターンを `pitfall` に残すときは、実際の値ではなく形と回避条件を書く
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127
@@ -85,17 +100,20 @@ claq_mem_learn --key prod-build-env-not-injected --kind pitfall --scope repo \
   --body "開発サーバは .env を読むが本番ビルドは読まない。必要な値はビルド設定の環境変数で渡す。"
 ```
 
-`claq_mem_learn`（および `mem.cli learn`）は `--source` / `--status` を持たず、常に `source=agent` / `status=pending` で登録する（JSON に `source: "human"` や `status: "active"` を書いても採用されず usage error になる）。注入対象への昇格は `/instinct promote <key>` を通す。昇格は監査ログへ記録される。
+`claq_mem_learn`（および `mem.cli learn`）は `--source` / `--status` を持たず、常に `source=agent` / `status=pending` で登録する。
+
+- JSON に `source: "human"` や `status: "active"` を書いても採用されず、usage error になる
+- 注入対象への昇格は `/instinct promote <key>` を通す。昇格は監査ログへ記録される
 
 ## active カードは更新できない
 
-同じ `key` の既存カードが `active`（人間が `promote` 済み）なら、`learn` は更新せず usage error で拒否する。これは失敗ではなく、その知識が既に有効で記録としてやることが無いという意味である。
+同じ `key` の既存カードが `active`（人間が `promote` 済み）なら、`learn` は更新せず usage error で拒否する。
+これは失敗ではなく、その知識が既に有効で、記録としてやることが無いという意味である。
 
 このときの正しい振る舞い:
 
 - 別の key で作り直さない（重複カードになり、注入枠を二重に使う）
 - 本文を変えたい・確信度を上げたいときは人間に頼む（注入対象を決めるのは `status` で、`active` のカードの `confidence` を上げる実益は無い）
-
 
 ## 参照する
 
@@ -109,7 +127,10 @@ claq_run claq.mem.cli show prod-build-env-not-injected   # body を読む唯一�
 
 ## 陳腐化した知識の扱い
 
-削除せず `archived` にする。agent は候補として key と理由を示し、実行は `/instinct` の承認を経る（`forget` は注入済みの知識も落とすため）。置き換えた場合は `forget <old-key> --superseded-by <new-key>` で置換関係を残す。
+削除せず `archived` にする。
+
+- agent は候補として key と理由を示し、実行は `/instinct` の承認を経る（`forget` は注入済みの知識も落とすため）
+- 置き換えた場合は `forget <old-key> --superseded-by <new-key>` で置換関係を残す
 
 ## 入力安全
 

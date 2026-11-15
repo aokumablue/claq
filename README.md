@@ -121,7 +121,7 @@ claude plugin install claq@claq
 | [`refactor-rollback`](plugins/claq/skills/refactor-rollback/SKILL.md) | 自動発火 / 内部委譲のみ | inline | ロールバック計画 | refactor-prep の出力を受けてファイル単位ロールバック計画を確定し失敗時の復旧を高速化 |
 | [`release-verify`](plugins/claq/skills/release-verify/SKILL.md) | 自動発火 + `/release-verify` | inline | リリース前実起動検証 | 配布ビルドへ実 payload を流し exit code と出力を実測して裁定する |
 | [`search`](plugins/claq/skills/search/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 既存解決策探索 | 新機能・新しい依存・新しい抽象化の前に、既存実装・ライブラリ・MCP・スキルを調べて採用／拡張／自作を決め、採用なら導入まで行う |
-| [`secure`](plugins/claq/skills/secure/SKILL.md) | 自動発火 + `/secure` | inline | セキュリティチェックリスト | 認証・決済・秘匿情報・LLM/エージェント連携実装時の包括的セキュリティチェックリストとパターン提供 |
+| [`secure`](plugins/claq/skills/secure/SKILL.md) | `/secure`（自動発火なし） | inline | セキュリティ点検 | 入口と攻撃者を特定し、攻撃者が得るものを書けた穴だけを最小の変更で塞ぐ。書けない改善はハードニング提案として報告する |
 | [`skill-make`](plugins/claq/skills/skill-make/SKILL.md) | 自動発火 / 内部委譲のみ | fork | スキル生成本体 | 新スキル生成/eval実行/ベンチマーク分析/説明文最適化（`skill-gen` 専用委譲先） |
 | [`skill-tune`](plugins/claq/skills/skill-tune/SKILL.md) | 自動発火 + `/skill-tune` | fork | スキル改善反復 | 自己申告と指示側メトリクスの両面評価→最小修正→再評価を収束まで繰り返す |
 
@@ -449,7 +449,6 @@ flowchart LR
     direction LR
     AR["✅ reviewer<br/>品質・設計"]:::agent
     AS["🛡️ security-auditor<br/>脆弱性・プロンプト境界"]:::agent
-    SS["secure"]:::skill -.-> AS
   end
 
   CR --> review
@@ -458,7 +457,7 @@ flowchart LR
 ```
 
 **トリガー**: 認証・決済・シークレット・API エンドポイント実装
-**期待効果**: 脆弱性検出 (security-auditor) + 設計チェックリスト (secure) の二段構え。CRITICAL/HIGH があればレポートの判定は `Block`（コミット不可）。後処理で、実挙動から裏取りできた指摘だけを修正する
+**期待効果**: reviewer（品質・設計）と security-auditor（脆弱性・プロンプト境界）を並列に当てる。利用者が点検だけを頼むときは `/secure`。CRITICAL/HIGH があればレポートの判定は `Block`（コミット不可）。後処理で、実挙動から裏取りできた指摘だけを修正する
 
 **実行例**:
 

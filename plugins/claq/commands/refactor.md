@@ -9,13 +9,18 @@ command: /refactor
 
 ## 停止点
 
-止まるのは、ステップ1 の `BLOCKED`（effective scope が空）と、ステップ2 で基準を取れないときだけ。それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えず、ステップ9 の要約まで進む。報告や未決事項への推奨は次のツール呼び出しと同じ応答に書く。
+止まるのは、ステップ1 の `BLOCKED`（effective scope が空）と、ステップ2 で基準を取れないときだけ。
+それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えず、ステップ9 の要約まで進む。
+報告や未決事項への推奨は、次のツール呼び出しと同じ応答に書く。
 
 ## 永続メモリ
 
-- 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み。追加で要るときは `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`）→ 本文が要る key だけ `claq_run claq.mem.cli show <key>`
+- 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`）
+  - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: ステップ8 の基準で `claq_mem_learn` を使う
-- 相対パスの md: このファイルは `commands/` にある。プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
+- 相対パスの md: このファイルは `commands/` にある
+  - プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 
 ## ステップ1: preflight（スコープ確定 + 実行準備）
 
@@ -41,11 +46,19 @@ command: /refactor
 
 ## ステップ3: clean（`claq:code-refiner`）
 
-デッドコードを削除する。依頼文に `mode: clean` と `effective_scope` を明示する（モードも依頼文で渡さないと子へ届かない）。ファイルを 1 つ適用するごとにテストし、失敗したら `git checkout -- <file>` でそのファイルだけ戻して続ける。
+デッドコードを削除する。
+
+- 依頼文に `mode: clean` と `effective_scope` を明示する（モードも依頼文で渡さないと子へ届かない）
+- ファイルを 1 つ適用するごとにテストする。失敗したら `git checkout -- <file>` でそのファイルだけ戻して続ける
 
 ## ステップ4: simplify（並列, `claq:code-refiner`）
 
-グループ単位で同時に起動する（上限 4）。依頼文に `mode: simplify` と `effective_scope` を明示する。起動の直前に各グループの対象ファイル集合を突き合わせ、重複があるグループは同時に起動せず直列にする（同じファイルを並列に編集すると片方の変更が失われるため）。グループが終わるごとにテストし、失敗したらファイル単位で戻す。
+グループ単位で同時に起動する（上限 4）。
+
+- 依頼文に `mode: simplify` と `effective_scope` を明示する
+- 起動の直前に、各グループの対象ファイル集合を突き合わせる
+- 重複があるグループは同時に起動せず直列にする（同じファイルを並列に編集すると片方の変更が失われるため）
+- グループが終わるごとにテストし、失敗したらファイル単位で戻す
 
 ## ステップ5: perf（`claq:code-refiner`）
 
@@ -53,7 +66,12 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 
 ## ステップ6: review + secure（並列）
 
-`claq:reviewer`（品質・設計・保守性）と `claq:security-auditor`（セキュリティ・脆弱性）を同時に起動し、結果を統合する。両方の依頼文に `effective_scope` を書き、reviewer の依頼文には security-auditor と並列であることも書く。
+次の 2 エージェントを同時に起動し、結果を統合する。
+
+- `claq:reviewer`（品質・設計・保守性）
+- `claq:security-auditor`（セキュリティ・脆弱性）
+
+両方の依頼文に `effective_scope` を書く。reviewer の依頼文には security-auditor と並列であることも書く。
 
 ## ステップ7: final gate
 
@@ -62,12 +80,21 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 
 `Final Gate: PASS` になるのは次をすべて満たすときだけで、1 つでも欠ければ `BLOCKED`。
 
-- 実行対象の stage（全体 = clean/simplify/perf/review+secure、`--mode=clean` = clean/review+secure、`--mode=simplify` = simplify/review+secure）がすべて完了している。スキップ・未実行・リバートしたままの放置は完了ではなく、全ファイルがリバートされて実質変更ゼロになった stage も未完了とする
+- 実行対象の stage がすべて完了している
+  - 全体 = clean/simplify/perf/review+secure、`--mode=clean` = clean/review+secure、`--mode=simplify` = simplify/review+secure
+  - スキップ・未実行・リバートしたままの放置は完了ではない
+  - 全ファイルがリバートされて実質変更ゼロになった stage も未完了とする
 - CRITICAL/HIGH が 0 件
 - テストと linter が green（ステップ2 で記録した既存の失敗を除く）
-- ステップ6 の `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際にある。無ければ「指摘ゼロ」ではなく「判定を取れなかった」として `BLOCKED` にする
+- ステップ6 の `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際にある
+  - 無ければ「指摘ゼロ」ではなく「判定を取れなかった」として `BLOCKED` にする
 
-ファイル単位のリバートの後も CRITICAL/HIGH の blocker が残ったら、リファクタ種別（デッドコード・到達しない余剰・可読性）の blocker だけを Skill ツールで `loop-dev` skill に渡す。振る舞いを変える指摘（セキュリティの穴・バグ）は、このコマンドの範囲（機能を変えない）を超えるので、最終要約に `/bugfix` 向けの残課題として書く。入力:
+ファイル単位のリバートの後も CRITICAL/HIGH の blocker が残ったときの扱い:
+
+- リファクタ種別（デッドコード・到達しない余剰・可読性）の blocker だけを Skill ツールで `loop-dev` skill に渡す
+- 振る舞いを変える指摘（セキュリティの穴・バグ）は、最終要約に `/bugfix` 向けの残課題として書く（機能を変えないというこのコマンドの範囲を超えるため）
+
+loop-dev への入力:
 
 - `task` = final gate のリファクタ種別の CRITICAL/HIGH 指摘の解消
 - `approved_plan` = blocker 一覧
@@ -98,7 +125,10 @@ claq_mem_learn --kind fact --scope repo --domain <domain> \
 
 ## ステップ9: 要約
 
-次のテンプレートで示す。Issues は `claq:reviewer` と `claq:security-auditor` の統合件数。部分モードで実行しなかった stage の行は件数の代わりに `skipped (--mode={mode})` と書く（0 と書くと「実行して変更なし」と区別できない）。
+次のテンプレートで示す。
+
+- Issues は `claq:reviewer` と `claq:security-auditor` の統合件数
+- 部分モードで実行しなかった stage の行は、件数の代わりに `skipped (--mode={mode})` と書く（0 と書くと「実行して変更なし」と区別できない）
 
 ```text
 Unified Refactor
