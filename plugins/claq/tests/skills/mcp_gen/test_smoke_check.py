@@ -93,7 +93,7 @@ class TestSmokeCheckSettings:
 
         def exchange(tools: list[str]) -> Any:
             """tools/list と tools/call に固定の応答を返す _exchange の代わりを作る。"""
-            return lambda requests, env=None: {1: {"result": {"tools": [{"name": name} for name in tools]}}, 2: {"result": unknown_tool}}
+            return lambda requests: {1: {"result": {"tools": [{"name": name} for name in tools]}}, 2: {"result": unknown_tool}}
 
         monkeypatch.setattr(module, "_exchange", exchange(["other"]))
         with pytest.raises(AssertionError, match="orders_get が未公開"):
@@ -115,6 +115,18 @@ class TestSmokeCheckSettings:
         module = _load_smoke_check(monkeypatch, _MINIMAL_SETTINGS)
         assert (module.cfg.INVALID_TOOL, module.cfg.PAGED_TOOL, module.cfg.MRTR_CASES) == ("", "", [])
         assert module.REQUEST_META["io.modelcontextprotocol/clientCapabilities"] == {}
+
+
+class TestSmokeCheckSpawn:
+    """smoke_check.py のサーバの起動。"""
+
+    def test_server_env_reaches_every_spawn(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SERVER_ENV は、どの検査の起動でも環境変数へ足される（署名付きカーソルの鍵が無いとサーバが起動時に落ちる）。"""
+        module = _load_smoke_check(monkeypatch, {**_MINIMAL_SETTINGS, "SERVER_ENV": {"FACADE_CURSOR_SECRET": "k"}})
+        seen: dict[str, Any] = {}
+        monkeypatch.setattr(module.subprocess, "Popen", lambda command, **options: seen.update(options))
+        module._spawn()
+        assert seen["env"]["FACADE_CURSOR_SECRET"] == "k"
 
 
 def _no_spawn(*args: Any, **kwargs: Any) -> Any:

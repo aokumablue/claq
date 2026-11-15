@@ -125,11 +125,12 @@ AUDIT.personal_returned("orders_get", CATALOG.personal_paths(returned), 1, princ
 
 ## smoke の設定
 
-署名付きカーソルにしたら、`smoke_config.py` の `PAGED_ENV` に実行ごとに作る鍵を渡す（固定の値を置くと、その値を
-本番に流用したときに誰でもカーソルを作れる）。
+署名付きカーソルにしたら、`smoke_config.py` の `SERVER_ENV` に実行ごとに作る鍵を渡す（固定の値を置くと、その値を
+本番に流用したときに誰でもカーソルを作れる）。`SERVER_ENV` は smoke_check.py がサーバを起動するたびに環境変数へ足す
+（鍵が無いとサーバは起動時に落ちる）。
 
 ```python
 import secrets
 
-PAGED_ENV: dict = {"FACADE_CURSOR_SECRET": secrets.token_hex(32)}
+SERVER_ENV: dict = {"FACADE_CURSOR_SECRET": secrets.token_hex(32)}
 ```
