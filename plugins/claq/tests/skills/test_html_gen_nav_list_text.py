@@ -55,6 +55,7 @@ def test_template_chart_text_is_uniform() -> None:
         pytest.param(('<a class="nav-item" href="#trend">', '<button class="nav-item" type="button">'), "<a href", id="nav-button"),
         pytest.param(('href="#contracts"', 'href="#missing"'), "#missing", id="nav-missing-target"),
         pytest.param(('href="#contracts"', 'href="/contracts"'), "<a href", id="nav-external-href"),
+        pytest.param(('href="#contracts"', 'href="#trend"'), "#trend が重複", id="nav-duplicate-target"),
         # 手書きの検索欄（role=search の手書きを含む）は結線されない
         pytest.param(("<main", '<input type="search" aria-label="検索"><main'), "検索欄を手書き", id="search-input"),
         pytest.param(("<main", '<div role="search"></div><main'), "検索欄を手書き", id="search-landmark"),
