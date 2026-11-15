@@ -68,6 +68,8 @@ BENIGN_TAGS: frozenset[str] = frozenset(
         "a", "b", "br", "code", "details", "div", "em", "h1", "h2", "h3",
         "hr", "i", "img", "li", "ol", "p", "pre", "s", "span", "strong",
         "summary", "table", "tbody", "td", "th", "thead", "tr", "ul",
+        # ハーネスが貼り付けを包むタグ。中身は依頼そのものなので、足場として捨てない。
+        "pasted_content",
     }
 )
 
