@@ -157,6 +157,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
   - 各イベントの実 payload（`session_id` / `transcript_path` など）を流し、exit code ではなく副作用を確かめる
   - `--bg`（非同期）フックの exit 0 は投げっぱなしの成功で、処理の成否と無関係。書いたはずのレコードを直接読む
   - `handoff` なら、`sessions` の行数ではなく `handoff` 列の中身を SELECT する（行数は SessionStart の `context` 側でも増える）
+  - `handoff` は、`transcript_path` が信頼 root（`~/.claude/projects` 等）の外だと要約を空にして exit 0 で終わる。検証用の transcript を別の場所に置くなら、そのディレクトリを `CLAQ_TRANSCRIPT_ROOTS` に渡す
 
 ### commands / skills / agents
 
@@ -184,6 +185,7 @@ DB へ書く操作は必ず後始末する。
 
 - mem の DB の位置は `CLAQ_DATA_PATH`（未設定なら `CLAQ_HOME`、それも無ければ `HOME` の配下の `.claq`）で決まる（`mem/settings.py`）
 - ここでは `CLAQ_DATA_PATH` で隔離する。取り違えると実 DB（`~/.claq/mem.db`）を汚す
+- `pre_compact` は `CLAQ_DATA_PATH` を見ず、`CLAQ_HOME`（未設定なら `HOME`）の配下の `.claq/session-data/compaction-log.txt` へ追記する。PreCompact を流す呼び出しでは、その 1 コマンドにだけ `CLAQ_HOME=固定パス` を前置する（前置しないと実ログに 1 行増える）
 - 破壊的な操作を実測するなら、使い捨ての作業ツリーと一時 DB を使う
 
 環境変数は Bash の呼び出しをまたいで残らないので、`$(mktemp -d)` は呼び出しごとに別のディレクトリになり、前の呼び出しで書いた内容を検証できない。固定パスを、毎回同じ式から導いて export する。
