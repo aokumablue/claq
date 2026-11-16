@@ -697,6 +697,7 @@ def _validate_nav_links(tags: _Tags) -> list[str]:
     """サイドバーの項目が、文書内の実在する節へ飛ぶリンクであることを検査する。
 
     ``<button>`` の項目や、飛び先の id が無いリンクは、押しても何も起きない。
+    同じ節へ飛ぶ項目が 2 つあると、同じ項目がサイドバーに重複して並ぶ（項目の行を複製する差し替えで起きる）。
 
     Args:
         tags: 開始タグと属性の一覧
@@ -706,6 +707,7 @@ def _validate_nav_links(tags: _Tags) -> list[str]:
     """
     ids = {attrs["id"] for _, attrs in tags if attrs.get("id")}
     violations: list[str] = []
+    seen: set[str] = set()
     for tag, attrs in tags:
         if not _has_class(attrs, "nav-item"):
             continue
@@ -714,6 +716,9 @@ def _validate_nav_links(tags: _Tags) -> list[str]:
             violations.append("ナビの項目 (.nav-item) が <a href=\"#id\"> ではない（押しても節へ移動しない）")
         elif href[1:] not in ids:
             violations.append(f"ナビの項目の飛び先 {href} が文書内に無い（id を付けた節が必要）")
+        elif href in seen:
+            violations.append(f"ナビの項目 {href} が重複している（同じ節への項目は 1 つにする）")
+        seen.add(href)
     return violations
 
 

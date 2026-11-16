@@ -39,24 +39,30 @@ cp /abs/skill/mcp-gen/assets/upstream-protection-overlay/facade/audit_log.py /ab
 ## 上流の呼び出しを方針に通す
 
 `UpstreamPolicy` には、条件に当たる部品だけを渡す（当たらない部品は引数ごと書かない。契約に無い値で絞ると、
-正当な呼び出しが `Throttled` で失敗する）。遮断器は常に入る。
+正当な呼び出しが `Throttled` で失敗する）。遮断器は常に入る（上流が落ちている間、再試行が呼び出しを 3 倍にして
+上流の契約の枠を使い切るのを止めるため）。遮断器が上流を呼ばない期間は次の 2 通りで決まる。
+
+- 上流が `retry_after` を示したら、回数を待たずにその時刻まで呼ばない（Retry-After は上流が次の要求までの待ちを指定する契約。
+  adapter が上流の Retry-After を `UpstreamError(..., retry_after=秒)` に写した値を使う）
+- 示さない一時的な失敗は、再試行を使い切った呼び出しが 5 回続いたら 30 秒呼ばない。5 回と 30 秒は契約から導けない判断の値なので、
+  上流の契約か利用者の指示に回復の確認の間隔が書かれているときだけ、その値に変える
 
 | 渡す部品 | 渡す条件 | 値の決め方 |
 |---|---|---|
-| `quota=UpstreamQuota(...)` | 上流の契約にレート制限（クォータ）がある | 契約の値より低くする（上流の 429 より先に絞る） |
-| `concurrency=ConcurrencyLimit(...)` | 上流の契約に同時実行の上限がある | 全主体の合計は契約の値より低くする。主体ごとの値は、主体が 1 人（stdio・認証の無いループバック）なら合計と同じ、共有のリモートなら合計より小さくする |
+| `quota=UpstreamQuota(...)` | 上流の契約にレート制限（クォータ）がある | 回復の速さは契約の値、貯められる上限（burst）は契約の 1 秒ぶんの回数にする。契約より低い値にするのは、余裕の幅が契約か利用者の指示に書かれているときだけ（自分で決めた幅で絞ると、契約が許す呼び出しが `Throttled` で失敗する） |
+| `concurrency=ConcurrencyLimit(...)` | 上流の契約に同時実行の上限がある | 全主体の合計は契約の値にする。主体ごとの値は、`_principal()` が固定値を返す間（stdio・認証の無いループバック）は合計と同じにする（小さくすると、実効の同時実行が契約を下回る）。主体を検証済みのトークンから導くようにしたら、利用者が決めた値に下げる |
 | `merge_same_requests=True` | 共有のリモート | 値は無い |
 
-渡した `UPSTREAM_BURST`・`UPSTREAM_CONCURRENCY`・`PRINCIPAL_CONCURRENCY` は、smoke_check.py が 1 回の起動で送る
-ツール呼び出しの数以上にする。
+渡した `UPSTREAM_BURST`・`UPSTREAM_CONCURRENCY`・`PRINCIPAL_CONCURRENCY` が、smoke_check.py が 1 回の起動で送る
+ツール呼び出しの数を下回ると、smoke が `Throttled` で落ちる。そのときも定数は契約の値のままにし、smoke の失敗として報告する。
 
 ```python
 from facade.limits import ConcurrencyLimit, UpstreamPolicy, UpstreamQuota
 
 UPSTREAM_RATE_PER_SECOND = 5.0  # 上流の契約: 毎秒 N 回（再試行も 1 回と数える）
-UPSTREAM_BURST = 10
+UPSTREAM_BURST = 5  # 契約の 1 秒ぶんの回数
 UPSTREAM_CONCURRENCY = 8  # 上流の契約: 同時 N 本（全主体の合計）
-PRINCIPAL_CONCURRENCY = 4  # 1 つの主体が上流の枠を使い切らないように
+PRINCIPAL_CONCURRENCY = 8  # _principal() が固定値の間は合計と同じ
 
 UPSTREAM_POLICIES = {
     "orders": UpstreamPolicy(

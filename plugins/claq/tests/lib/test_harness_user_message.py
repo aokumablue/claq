@@ -161,6 +161,13 @@ _LONG_BODY = (
             "/goal 末尾 \\",
             id="trailing-backslash",
         ),
+        # 貼り付けを包むタグは、タグだけを落として中身（依頼そのもの）を残す
+        pytest.param(
+            '<pasted_content id="e6aa">\n動作検証をしてください。\n</pasted_content id="e6aa">',
+            "動作検証をしてください。",
+            id="pasted-content-keeps-body",
+        ),
+        pytest.param("前置き <pasted_content>本文</pasted_content> 後置き", "前置き 本文 後置き", id="pasted-content-inline"),
     ],
 )
 def test_request_and_command_folding(text: str, expected: str) -> None:

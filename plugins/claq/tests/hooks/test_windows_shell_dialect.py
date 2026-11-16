@@ -32,6 +32,8 @@ from ._support import _repo_scope as _repo_scope
         # バックスラッシュが無ければ読み方は 1 通りだけ（余計な検査をしない）。
         ("rm ruff.toml", ("rm ruff.toml",)),
         (r"rm .\ruff.toml", (r"rm .\ruff.toml", "rm ./ruff.toml")),
+        # Windows のファイル名に使えない文字の直前の `\` は区切りにしない。
+        (r'grep "a>\|b=\"c" f', (r'grep "a>\|b=\"c" f',)),
     ],
 )
 def test_command_dialect_variants(command: str, expected: tuple[str, ...]) -> None:
@@ -90,6 +92,9 @@ def test_windows_write_is_detected(command: str, expected: str | None) -> None:
         r"sed -i 's/\.git\/hooks\/pre-commit//' notes.md",
         # クォート内のエスケープ空白は 1 トークンのままなので割れない。
         'rm "my\\\\ ruff.toml"',
+        # 引用内の `\"` と `\|`。Windows 読みで引用が早く閉じると、引用内の `>` がリダイレクトに化ける。
+        r'grep -n "<title>\|<h1\|role=\"img\"\|class=\"card" index.html | head -80',
+        r'grep "t>\|c=\"d" index.html',
     ],
 )
 def test_posix_escapes_do_not_become_false_positives(command: str) -> None:

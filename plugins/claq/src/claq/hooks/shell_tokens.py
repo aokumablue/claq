@@ -300,8 +300,11 @@ def _replace_unquoted_newlines(command: str) -> str:
     return "".join(result)
 
 
-# Windows 読みでパス区切り ``/`` へ変換するバックスラッシュ（直後が空白と ``/`` 以外）。
-_WINDOWS_SEPARATOR_BACKSLASH_RE = re.compile(r"\\(?=[^\s/])")
+# Windows 読みでパス区切り ``/`` へ変換するバックスラッシュ（直後がパス構成文字）。
+# Windows のファイル名に使えない ``" | < > * ?`` の直前は区切りではない。ここを変換すると、
+# ``grep "a>\|b=\"c" f`` の ``\"`` が ``/"`` になって引用が早く閉じ、引用内の ``>`` が
+# リダイレクトに見えて読み取り専用のコマンドを deny する。
+_WINDOWS_SEPARATOR_BACKSLASH_RE = re.compile(r"\\(?=[^\s/\"|<>*?])")
 
 # Windows 読みで除去するバックスラッシュ（直後が空白）。エスケープを持たない
 # PowerShell / cmd では ``rm my\\ ruff.toml`` は 2 引数で ``ruff.toml`` が実際に
