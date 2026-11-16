@@ -39,7 +39,9 @@ __all__ = [
 
 _FENCE = "---"
 _FLOW_END = ",]}"
-_UNSUPPORTED_PREFIXES = ("&", "*", "!")
+# アンカー / エイリアス / タグの開始記号（未対応）と、YAML が予約している記号（プレーンスカラーの先頭に置けない。
+# 通すと、厳密な YAML パーサ（Copilot など）で初めて読み込みエラーになる）。
+_UNSUPPORTED_PREFIXES = ("&", "*", "!", "`", "@", "%")
 _NULL_LITERALS = frozenset({"", "~", "null", "Null", "NULL"})
 _TRUE_LITERALS = frozenset({"true", "True", "TRUE"})
 _FALSE_LITERALS = frozenset({"false", "False", "FALSE"})
@@ -140,13 +142,17 @@ def _indent_width(line: str) -> int:
 
 
 def _check_unsupported(text: str) -> None:
-    """アンカー / エイリアス / タグの開始記号を検出して拒否する。
+    """アンカー / エイリアス / タグの開始記号と、YAML の予約記号を検出して拒否する。
+
+    予約記号（バッククォート・``@``・``%``）で始まる値は、引用符で囲めば書ける。
 
     Raises:
-        FrontmatterError: ``&`` ``*`` ``!`` で始まる場合。
+        FrontmatterError: ``&`` ``*`` ``!`` ``@`` ``%``、またはバッククォートで始まる場合。
     """
     if text[:1] in _UNSUPPORTED_PREFIXES:
-        raise FrontmatterError(f"'{text[:1]}' で始まる構文（アンカー/エイリアス/タグ）はサポートしません")
+        raise FrontmatterError(
+            f"'{text[:1]}' で始まる値は書けません（アンカー/エイリアス/タグ、または YAML の予約記号。値を引用符で囲む）"
+        )
 
 
 def _strip_comment(text: str) -> str:
