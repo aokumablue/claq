@@ -152,6 +152,42 @@ class TestUpstream:
         clock.now += 30
         assert asyncio.run(breaker.call(_ok)) == "ok"
 
+    @pytest.mark.parametrize(
+        ("threshold", "retry_after", "open_for"),
+        [
+            (5, 60.0, 60.0),
+            (1, 60.0, 60.0),
+            (1, 5.0, 30.0),
+            (5, 0.0, 0.0),
+            (5, -1.0, 0.0),
+            (5, math.nan, 0.0),
+            (5, math.inf, 0.0),
+        ],
+        ids=[
+            "retry-after-opens-before-threshold",
+            "retry-after-longer-than-reset",
+            "retry-after-shorter-than-reset",
+            "retry-after-zero",
+            "retry-after-negative",
+            "retry-after-nan",
+            "retry-after-inf",
+        ],
+    )
+    def test_circuit_breaker_follows_retry_after(
+        self, facade: types.SimpleNamespace, threshold: int, retry_after: float, open_for: float
+    ) -> None:
+        """上流が retry_after を示したら、回数を待たずにその時刻まで呼ばない（長いほうの期間を取り、有限の正の数だけ従う）。"""
+        error = facade.upstream.UpstreamError
+        clock = _Clock()
+        breaker = facade.breaker.CircuitBreaker(failure_threshold=threshold, reset_seconds=30, clock=clock)
+        with pytest.raises(error):
+            asyncio.run(breaker.call(_raising(error(429, retry_after=retry_after))))
+        if open_for:
+            clock.now += open_for - 1
+            assert _breaker_is_closed(facade, breaker) is False
+            clock.now += 1
+        assert _breaker_is_closed(facade, breaker) is True
+
     def test_fan_out(self, facade: types.SimpleNamespace) -> None:
         """成功・失敗・締切超えを分けて返し、全体は失敗にしない。"""
 

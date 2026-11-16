@@ -92,23 +92,23 @@ def model_message(error: UpstreamError) -> str:
     return "一時的に取得できません。時間を置いてから呼び直してください。"
 
 
-def _retry_delay(
-    error: UpstreamError, attempt: int, *, base_delay: float, max_delay: float, jitter: Callable[[], float]
-) -> float | None:
+def _retry_delay(error: UpstreamError, attempt: int, *, base_delay: float, jitter: Callable[[], float]) -> float | None:
     """次の試行までの待ち時間を決める。
+
+    上流が `retry_after` を示したらその値にする。示さなければ `base_delay` から倍々に伸ばす
+    （待ちの上限は置かない。試行は `attempts` 回までで、待ちが締切を越えるなら呼び出し側が諦める）。
 
     Args:
         error: 直前の失敗。
         attempt: 直前の試行の番号（0 始まり）。
         base_delay: 最初の待ち時間（秒）。
-        max_delay: 待ち時間の上限（秒）。
         jitter: 0 以上 1 未満の乱数を返す関数。
 
     Returns:
         待つ秒数。`retry_after` が NaN で再試行を諦めるときは None。
     """
     if error.retry_after is None:
-        return min(max_delay, base_delay * 2**attempt) * (0.5 + jitter() / 2)
+        return base_delay * 2**attempt * (0.5 + jitter() / 2)
     # NaN は締切との比較がすべて偽になり、締切を越えて待ってしまう
     if math.isnan(error.retry_after):
         return None
@@ -120,7 +120,6 @@ async def call_with_retry[T](
     *,
     attempts: int = 3,
     base_delay: float = 0.2,
-    max_delay: float = 2.0,
     deadline: float,
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
@@ -137,8 +136,7 @@ async def call_with_retry[T](
     Args:
         operation: 上流を呼ぶ関数。
         attempts: 最大の試行回数（初回を含む）。
-        base_delay: 最初の待ち時間（秒）。
-        max_delay: 待ち時間の上限（秒）。
+        base_delay: 最初の待ち時間（秒）。既定では 2 回の待ちの合計が 0.6 秒以下になり、締切の大半を試行に残す。
         deadline: 締切（`clock` と同じ基準の時刻）。
         sleep: 待つ関数。
         clock: 単調増加する現在時刻を返す関数。
@@ -156,7 +154,7 @@ async def call_with_retry[T](
         except UpstreamError as error:
             if not error.retryable or attempt == attempts - 1:
                 raise
-            delay = _retry_delay(error, attempt, base_delay=base_delay, max_delay=max_delay, jitter=jitter)
+            delay = _retry_delay(error, attempt, base_delay=base_delay, jitter=jitter)
             if delay is None or clock() + delay >= deadline:
                 raise
             logger.warning(
