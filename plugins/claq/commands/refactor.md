@@ -62,7 +62,7 @@ command: /refactor
 
 ## ステップ5: perf（`claq:code-refiner`）
 
-simplify の全グループが終わってから始める。依頼文に `mode: perf` と `effective_scope` を明示し、計測データは渡さない。変更ごとにテストし、失敗したらファイル単位で戻す。
+simplify の全グループが終わってから始める。依頼文に `mode: perf` と `effective_scope` を明示し、計測データは渡さない（計測して直すのは `/perf`）。変更ごとにテストし、失敗したらファイル単位で戻す。
 
 ## ステップ6: review
 

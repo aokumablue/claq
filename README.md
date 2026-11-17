@@ -78,7 +78,7 @@ claude plugin install claq@claq
 
 ---
 
-## 🚀 Commands (10)
+## 🚀 Commands (11)
 
 各コマンドの詳細はリンク先 `.md` ファイル参照。
 
@@ -94,6 +94,7 @@ claude plugin install claq@claq
 | [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
 | [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス] [--base <ref>]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |
 | [`/package-upgrade`](plugins/claq/commands/package-upgrade.md) | 依存更新 | `[パッケージ名[@版] ...]` | 対象と目標版の確定→破壊的変更の洗い出し→loop-dev で更新と追従→報告。指定なしはマイナー・パッチのみ |
+| [`/perf`](plugins/claq/commands/perf.md) | 性能改善 | `[パス] [--cmd "<計測>"] [--target <値>]` | 計測→code-refiner（計測データ付き）→再計測。ノイズ幅以下の変更は戻す |
 
 ---
 
@@ -129,7 +130,7 @@ claude plugin install claq@claq
 
 ## 🧭 Workflows
 
-claq が「どの場面でどう動くか」を 5 ジャンル・19 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。すべての Commands / Skills はいずれかの図に登場します。
+claq が「どの場面でどう動くか」を 5 ジャンル・20 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。すべての Commands / Skills はいずれかの図に登場します。
 
 ### 凡例
 
@@ -157,7 +158,7 @@ claq が「どの場面でどう動くか」を 5 ジャンル・19 のワーク
 
 | ジャンル | 収録ワークフロー |
 |---|---|
-| [実装](#実装) | 新機能開発 / バグ修正 / フルリファクタリング / コード単純化のみ / デッドコード掃除 / クイック往復モード / テストコード自動生成 / 依存更新 |
+| [実装](#実装) | 新機能開発 / バグ修正 / フルリファクタリング / コード単純化のみ / デッドコード掃除 / クイック往復モード / テストコード自動生成 / 依存更新 / 性能改善 |
 | [品質・セキュリティ](#品質セキュリティ) | セキュリティ重視の実装 / 品質管理サイクル / ハーネス定期メンテ / リリース前実起動検証 |
 | [スキル・知識管理](#スキル知識管理) | スキル新規作成・改善 / 知識蓄積サイクル / ループ収束品質診断 / 反復ループの中断復旧 |
 | [新規生成](#新規生成) | MCP サーバ新規構築 / shadcn/ui サイト・ダッシュボード新規作成 |
@@ -421,6 +422,32 @@ flowchart TD
 
 ```bash
 /package-upgrade requests@3
+```
+
+---
+
+### 性能改善
+
+```mermaid
+flowchart TD
+  classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
+  classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
+
+  A(["/perf [パス] --cmd"]):::cmd --> B["計測コマンドを決める<br/>指定 → 既存ベンチ → 最小スクリプト"]
+  B --> C["before を測る<br/>3 回の中央値 + プロファイル上位 5 件"]
+  C --> D["⚡ code-refiner<br/>mode=perf（計測データ付き）"]:::agent
+  D --> E["after を測る<br/>ノイズ幅以下の変更は戻す"]
+  E --> F["✅ reviewer"]:::agent
+  F --> G(["報告<br/>before / after"])
+```
+
+**トリガー**: 遅い処理を、数字で効果を確かめながら速くしたい
+**期待効果**: 実測で効いた変更だけが残るので、効かない最適化でコードが読みにくくならない
+
+**実行例**:
+
+```bash
+/perf src/report/ --cmd "python3 scripts/bench_report.py"
 ```
 
 ---
@@ -790,7 +817,7 @@ flowchart TB
   classDef store  fill:#374151,stroke:#1f2937,color:#fff,rx:4
 
   subgraph user["👤 User Layer"]
-    CMD["Commands (10)"]:::cmd
+    CMD["Commands (11)"]:::cmd
   end
 
   subgraph internal["⚙️ Internal Layer"]
