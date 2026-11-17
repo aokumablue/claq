@@ -82,10 +82,17 @@ baseline を取る（リポジトリ直下の `.venv` を有効化する）。
 
 ## ステップ2: レビュー（READ-ONLY・並列）
 
-対象に `claq:reviewer`（品質・設計・保守性）と `claq:security-auditor`（脆弱性）を同時に起動する。
+対象に `claq:reviewer`（品質・設計・保守性）を起動する。
 
-- 両方の結果を、深刻度（CRITICAL/HIGH/MEDIUM/LOW）・ファイル位置・行番号・推奨修正で統合する
-- reviewer の依頼文には、security-auditor と並列であることを書く
+`claq:security-auditor`（脆弱性）は、外部の攻撃者が届く入口に触れる回だけ並列に加える。
+
+- 例: 不信テキストをプロンプトへ注入する hook・恒久メモリの読み書き
+- 定義文書の文言だけの回では加えない
+
+結果のまとめ方:
+
+- 結果を、深刻度（CRITICAL/HIGH/MEDIUM/LOW）・ファイル位置・行番号・推奨修正で統合する
+- 並列のときは reviewer の依頼文にその旨を書く
 - reviewer の依頼文には、ステップ1 の web の動向に照らした廃止 API・仕様の版ずれという観点も書く
 
 hooks / `src/claq/hooks/` を含む回は、両ハーネス互換（原則4）を必須の観点にする。

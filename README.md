@@ -88,7 +88,7 @@ claude plugin install claq@claq
 | [`/feat-dev`](plugins/claq/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見+探索→残分岐確認→loop-dev 反復実装→学びの記録→サマリー の一気通貫 |
 | [`/bugfix`](plugins/claq/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 要件整理→再現テスト確立→loop-dev 反復修正→学びの記録 の一気通貫 |
 | [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review+secure→final gate の安全な自動連鎖。`--mode` で部分実行 |
-| [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
+| [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer（外部の攻撃者が届く入口に触れるときは security-auditor も並列）。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
 | [`/harness`](plugins/claq/commands/harness.md) | 品質管理 | `[scope] [--root=<path>] [--target-kind=repo\|consumer] [--format=text\|json] [--apply] [--audit-only]` | 監査→トップ3提示（既定はここで停止）。`--apply` で harness-tuner による改善適用と再採点まで進む |
 | [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--knowledge]` | 入力収集→skill-make（生成・grader/comparator/bench-analyzer による eval・改善）→完了ゲート |
 | [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
@@ -272,7 +272,7 @@ flowchart LR
     AC --> ASI3["✨ code-refiner #N<br/>mode=simplify（同時起動は上限4）"]:::agent
     ASI1 & ASI2 & ASI3 --> AP["⚡ code-refiner<br/>mode=perf"]:::agent
     AP --> AR["✅ reviewer"]:::agent
-    AP --> AS["🛡️ security-auditor"]:::agent
+    AP -.-> AS["🛡️ security-auditor<br/>外部の攻撃者が届く入口に触れるときだけ"]:::agent
     AR & AS --> GATE{{"final gate<br/>CRITICAL/HIGH 残→BLOCKED"}}
     GATE -.->|"blocker・テスト失敗あり"| LD["loop-dev<br/>task_type=refactor-fix"]:::skill
     GATE --> LEARN["学びの記録 → 要約"]
@@ -306,7 +306,7 @@ flowchart LR
   PRE --> AS2["✨ code-refiner #2<br/>mode=simplify"]:::agent
   PRE --> AS3["✨ code-refiner #3<br/>mode=simplify"]:::agent
   AS1 & AS2 & AS3 --> AR["✅ reviewer"]:::agent
-  AS1 & AS2 & AS3 --> ASEC["🛡️ security-auditor"]:::agent
+  AS1 & AS2 & AS3 -.-> ASEC["🛡️ security-auditor<br/>入口に触れるときだけ"]:::agent
   AR & ASEC --> GATE{{"final gate<br/>CRITICAL/HIGH 残→BLOCKED"}}
   GATE --> SUM(["学びの記録 → 要約"])
 ```
@@ -335,7 +335,7 @@ flowchart LR
   AC --> TEST(["✅ テスト検証<br/>ファイル単位"])
   TEST -->|失敗| REVERT(["git checkout -- file"])
   TEST -->|成功| NEXT(["次ファイルへ"])
-  NEXT --> RV(["✅ reviewer + 🛡️ security-auditor<br/>→ final gate → 学びの記録 → 要約"])
+  NEXT --> RV(["✅ reviewer（入口に触れるときは 🛡️ security-auditor も）<br/>→ final gate → 学びの記録 → 要約"])
 ```
 
 **トリガー**: 未使用コード・依存関係の削除
@@ -445,7 +445,7 @@ flowchart LR
   CP --> CF["/feat-dev"]:::cmd
   CF --> CR["/review"]:::cmd
 
-  subgraph review["⚙️ review 内部（並列）"]
+  subgraph review["⚙️ review 内部"]
     direction LR
     AR["✅ reviewer<br/>品質・設計"]:::agent
     AS["🛡️ security-auditor<br/>脆弱性・プロンプト境界"]:::agent
@@ -457,7 +457,7 @@ flowchart LR
 ```
 
 **トリガー**: 認証・決済・シークレット・API エンドポイント実装
-**期待効果**: reviewer（品質・設計）と security-auditor（脆弱性・プロンプト境界）を並列に当てる。利用者が点検だけを頼むときは `/secure`。CRITICAL/HIGH があればレポートの判定は `Block`（コミット不可）。後処理で、実挙動から裏取りできた指摘だけを修正する
+**期待効果**: reviewer（品質・設計）を当て、外部の攻撃者が届く入口に触れるときは security-auditor（脆弱性・プロンプト境界）も並列に当てる。利用者が点検だけを頼むときは `/secure`。CRITICAL/HIGH があればレポートの判定は `Block`（コミット不可）。後処理で、実挙動から裏取りできた指摘だけを修正する
 
 **実行例**:
 
@@ -511,7 +511,7 @@ flowchart LR
 
   subgraph maintain["⚙️ maintain 内部（6ステップ）"]
     direction TB
-    IN["入力収集<br/>baseline取得（pytest/ruff/audit）"] --> RV["✅ reviewer<br/>🛡️ security-auditor 並列レビュー"]:::agent
+    IN["入力収集<br/>baseline取得（pytest/ruff/audit）"] --> RV["✅ reviewer<br/>（注入経路に触れる回は 🛡️ security-auditor も）"]:::agent
     RV --> CLS["種別分類<br/>バグ/強化/仕様変更"]
     CLS --> FIX["🧪 tdd-writer 修正<br/>or 直接編集"]:::agent
     FIX --> GATE{{"final gate<br/>pytest/ruff/validator/audit 非退行"}}
