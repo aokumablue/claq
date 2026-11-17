@@ -16,7 +16,6 @@ from claq.ci.harness_audit_utils import (
     file_has_content,
     find_plugin_install,
     has_file_with_extension,
-    has_gitlab_security_scanning,
     has_python_tests,
     make_check,
     safe_parse_json,
@@ -42,7 +41,7 @@ VALID_FORMATS = {"text", "json"}
 VALID_TARGET_KINDS = {"repo", "consumer"}
 
 
-RUBRIC_VERSION = "2026-09-06"
+RUBRIC_VERSION = "2026-11-18"
 """採点ルーブリックの版。
 
 スコアはこの版の中でのみ比較可能で、版が上がった時点で過去のベースラインとは
@@ -152,16 +151,14 @@ def parse_args(argv: Sequence[str] | None) -> dict[str, Any]:
 
 
 class _HostingLayout(NamedTuple):
-    """consumer モードで見る CI・セキュリティ設定の置き場所と、それぞれを満たしているか。"""
+    """consumer モードで見る CI 設定の置き場所と、それを満たしているか。"""
 
     ci_path: str
-    security_path: str
     ci_pass: bool
-    security_pass: bool
 
 
 def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> _HostingLayout:
-    """consumer 向けに、ホスティングごとの CI・セキュリティ設定の置き場所と充足状況を返す。
+    """consumer 向けに、ホスティングごとの CI 設定の置き場所と充足状況を返す。
 
     ホスティングが不明なら、GitHub と GitLab のどちらの置き場所でも満たしたとみなす。
     """
@@ -169,24 +166,13 @@ def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> _Hosti
         github, gitlab = _hosting_layout(root_dir, GITHUB), _hosting_layout(root_dir, GITLAB)
         return _HostingLayout(
             ci_path=f"{github.ci_path} / {gitlab.ci_path}",
-            security_path=f"{github.security_path} / {gitlab.security_path}",
             ci_pass=github.ci_pass or gitlab.ci_pass,
-            security_pass=github.security_pass or gitlab.security_pass,
         )
     if hosting_service == GITLAB:
-        return _HostingLayout(
-            ci_path=".gitlab-ci.yml",
-            security_path=".gitlab-ci.yml",
-            ci_pass=file_has_content(root_dir, ".gitlab-ci.yml"),
-            security_pass=file_has_content(root_dir, "SECURITY.md") or has_gitlab_security_scanning(root_dir),
-        )
+        return _HostingLayout(ci_path=".gitlab-ci.yml", ci_pass=file_has_content(root_dir, ".gitlab-ci.yml"))
     return _HostingLayout(
         ci_path=".github/workflows/",
-        security_path="SECURITY.md",
         ci_pass=has_file_with_extension(root_dir, ".github/workflows", [".yml", ".yaml"]),
-        security_pass=file_has_content(root_dir, "SECURITY.md")
-        or file_has_content(root_dir, ".github/dependabot.yml")
-        or file_has_content(root_dir, ".github/codeql.yml"),
     )
 
 
@@ -305,35 +291,15 @@ def _consumer_memory_eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _consumer_security_checks(
-    root_dir: str | Path, hosting_label: str, security_path: str, security_pass: bool
-) -> list[dict[str, Any]]:
+def _consumer_security_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """consumer モードの Security Guardrails カテゴリのチェックを返す。"""
-    category = "Security Guardrails"
-    project_hooks = safe_read(root_dir, ".claude/settings.json")
     return [
         make_check(
-            check_id="consumer-security-policy", category=category, points=2, scopes=["repo"],
-            path=security_path,
-            description="プロジェクトがセキュリティポリシー・自動依存スキャンを公開している",
-            passed=security_pass,
-            fix=f"Add SECURITY.md or {hosting_label}-appropriate dependency/code scanning configuration to document the project security posture.",
-        ),
-        make_check(
-            check_id="consumer-secret-hygiene", category=category, points=2, scopes=["repo"],
+            check_id="consumer-secret-hygiene", category="Security Guardrails", points=2, scopes=["repo"],
             path=".gitignore",
             description="プロジェクトが一般的なシークレット環境ファイルを無視している",
             passed=".env" in safe_read(root_dir, ".gitignore"),
             fix="Ignore .env-style files in .gitignore so secrets do not land in the repo.",
-        ),
-        make_check(
-            check_id="consumer-hook-guardrails", category=category, points=2, scopes=["repo", "hooks"],
-            path=".claude/settings.json",
-            description="プロジェクトローカルフック設定がツール・プロンプトガードを参照している",
-            passed="PreToolUse" in project_hooks
-            or "beforeSubmitPrompt" in project_hooks
-            or file_has_content(root_dir, ".claude/hooks.json"),
-            fix="Add project-local hook settings or hook definitions for prompt/tool guardrails.",
         ),
     ]
 
@@ -346,13 +312,13 @@ def get_consumer_checks(root_dir: str | Path, hosting_service: str | None) -> li
         hosting_service: `github` / `gitlab`、または判定できなかったときの None。
     """
     hosting_label = SERVICE_LABELS[hosting_service] if hosting_service else _UNKNOWN_HOSTING_LABEL
-    ci_path, security_path, ci_pass, security_pass = _hosting_layout(root_dir, hosting_service)
+    ci_path, ci_pass = _hosting_layout(root_dir, hosting_service)
     return [
         *_consumer_tool_checks(root_dir),
         *_consumer_context_checks(root_dir),
         *_consumer_quality_checks(root_dir, hosting_label, ci_path, ci_pass),
         *_consumer_memory_eval_checks(root_dir),
-        *_consumer_security_checks(root_dir, hosting_label, security_path, security_pass),
+        *_consumer_security_checks(root_dir),
     ]
 
 

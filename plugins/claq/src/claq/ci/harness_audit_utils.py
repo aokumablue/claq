@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
@@ -175,19 +174,6 @@ def detect_target_mode(root_dir: str | Path) -> str:
     if all(file_exists(root_dir, marker) for marker in REPO_CORE_MARKERS) and file_exists(root_dir, HARNESS_MARKER):
         return "repo"
     return "consumer"
-
-
-_GITLAB_SECURITY_PATTERNS = (
-    r"(?mi)^\s*(dependency_scanning|sast|container_scanning|secret_detection|license_scanning)\s*:",
-    r"(?mi)^\s*-\s*template:\s*Security/",
-    r"(?mi)^\s*template:\s*Security/",
-)
-
-
-def has_gitlab_security_scanning(root_dir: str | Path) -> bool:
-    """GitLab CI に最低限のセキュリティスキャン設定があるかを確認する。"""
-    content = safe_read(root_dir, ".gitlab-ci.yml")
-    return any(re.search(pattern, content) for pattern in _GITLAB_SECURITY_PATTERNS)
 
 
 # consumer モードで「このプラグインが導入済みか」を見るときの探索先。
