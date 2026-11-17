@@ -49,7 +49,7 @@ user-invocable: false
 プロジェクトルートのマニフェストから決める。
 
 - `pyproject.toml` / `setup.cfg` → `python3 -m pytest -q`
-- `package.json` → `scripts.test`
+- `package.json` → `scripts.test`（無ければ未検出）
 - `go.mod` → `go test ./...`
 - `Cargo.toml` → `cargo test`
 - 複数当たれば対象ファイルの拡張子で選ぶ
@@ -57,7 +57,8 @@ user-invocable: false
 - linter も同じく、CLAUDE.md と設定ファイルから決める
 
 どれにも当たらなければ推測で組まない。
-出力に `テストコマンド未検出` と書き、収束は blocker ゼロだけで判定する。
+baseline と、収束判定のテストの条件を省く。
+出力の Assumptions に `テストコマンド未検出` と書く。
 
 ## 手順
 

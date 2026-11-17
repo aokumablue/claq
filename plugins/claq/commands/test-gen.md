@@ -37,7 +37,7 @@ command: /test-gen
 
 1. プロジェクトルートのマニフェストからテストコマンドを決める
    - `pyproject.toml` / `setup.cfg` → `python3 -m pytest -q`
-   - `package.json` → `scripts.test`
+   - `package.json` → `scripts.test`（無ければ未検出）
    - `go.mod` → `go test ./...`
    - `Cargo.toml` → `cargo test`
    - 複数当たれば対象ファイルの拡張子で選ぶ
