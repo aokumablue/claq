@@ -40,10 +40,6 @@ disable-model-invocation: true
 - パッケージ名と出所（リポジトリ URL・メンテナ）が一次資料と一致する
 - ビルド・配布経路の CI 権限が最小で、成果物の出所を検証している
 
-## ハードニングの例（穴として示せないときは提案に回す）
-
-CSP ヘッダ、CSRF トークンと `SameSite=Strict`、レート制限、RLS / RBAC の追加、依存更新の自動検出（Dependabot 等）、多層防御・二重検証。
-
 ## 永続メモリ
 
 - search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `security vulnerability {category}` / `{vulnerability_type} fix`
