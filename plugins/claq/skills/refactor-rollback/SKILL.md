@@ -22,8 +22,7 @@ preflight は、複数ファイルにまたがる変更・並列サブエージ�
    - 保存できなければ（書き込み不可・diff 取得失敗等）、そのファイルはリバート対象にせず Skip Rules へ回す
 1. 復旧コマンドの確定: 各ファイルが tracked か untracked かを `git ls-files` で判定する
    - tracked なら `git checkout -- {file}`、新規作成の untracked なら `rm {file}`
-   - untracked と判定しても、パスを canonicalize して、リポジトリルート配下の `..` を含まない相対パスであることを確かめる
-   - 満たさないパス（`..`・絶対パス・リポジトリ外）には `rm` を生成せず、SAFE/CAUTION も付けずに Skip Rules へ回す（範囲外パスの不可逆な削除を防ぐため）
+   - `rm` はリポジトリ内のパスにだけ生成する。外のパスは Skip Rules へ回す
 2. CAUTION の判定: 公開 API・外部 I/O・永続化の境界を含む、または依存グループをまたぐファイルに `CAUTION` を付ける
 3. 検証コマンドの紐付け: 各ファイルの `verify` には、そのファイルが属する `groups[i]` と同じ添字の `tests.group[i]` を使う
    - 同じグループのファイルは同じコマンドを共有する。`tests.group[0]` を全ファイルへ割り当てるような選び方はしない

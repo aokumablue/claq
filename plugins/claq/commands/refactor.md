@@ -1,7 +1,7 @@
 ---
 name: refactor
 description: 機能を変えずにコードをリファクタリングする（デッドコード削除・可読性・性能。差分または指定パス）。新機能は /feat-dev。
-argument-hint: "[ファイルパス] [--mode=clean|simplify]"
+argument-hint: "[ファイルパス] [--base <ref>] [--mode=clean|simplify]"
 command: /refactor
 ---
 
@@ -24,7 +24,7 @@ command: /refactor
 
 ## ステップ1: preflight（スコープ確定 + 実行準備）
 
-スコープは `refactor-prep` が確定する（引数パスがあれば渡す。結果は `scope_files`）。
+スコープは `refactor-prep` が確定する（引数パスと `--base` があれば渡す。結果は `scope_files`）。
 
 着手前に Skill ツールで次の 2 つを、この順で起動する（`refactor-rollback` は `refactor-prep` の出力を入力に取る）。どちらも省かない。
 
@@ -62,16 +62,20 @@ command: /refactor
 
 ## ステップ5: perf（`claq:code-refiner`）
 
-simplify の全グループが終わってから始める。依頼文に `mode: perf` と `effective_scope` を明示し、計測データは渡さない。変更ごとにテストし、失敗したらファイル単位で戻す。
+simplify の全グループが終わってから始める。依頼文に `mode: perf` と `effective_scope` を明示し、計測データは渡さない（計測して直すのは `/perf`）。変更ごとにテストし、失敗したらファイル単位で戻す。
 
-## ステップ6: review + secure（並列）
+## ステップ6: review
 
-次の 2 エージェントを同時に起動し、結果を統合する。
+`claq:reviewer`（品質・設計・保守性）を必ず起動する。
 
-- `claq:reviewer`（品質・設計・保守性）
-- `claq:security-auditor`（セキュリティ・脆弱性）
+`claq:security-auditor`（脆弱性）は、外部の攻撃者が届く入口に触れるときだけ並列に加える。
 
-両方の依頼文に `effective_scope` を書く。reviewer の依頼文には security-auditor と並列であることも書く。
+- 外部の攻撃者: ネットワーク上の client・他ユーザー・プロンプトへ入る不信テキスト
+- ローカル開発者本人だけが届く入口（CLI 引数・設定ファイル）では加えない
+- 届くか判断できないときは加える
+
+起動した全員の依頼文に `effective_scope` を書く。
+並列のときは reviewer の依頼文にその旨も書く。
 
 ## ステップ7: final gate
 
@@ -81,12 +85,12 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 `Final Gate: PASS` になるのは次をすべて満たすときだけで、1 つでも欠ければ `BLOCKED`。
 
 - 実行対象の stage がすべて完了している
-  - 全体 = clean/simplify/perf/review+secure、`--mode=clean` = clean/review+secure、`--mode=simplify` = simplify/review+secure
+  - 全体 = clean/simplify/perf/review、`--mode=clean` = clean/review、`--mode=simplify` = simplify/review
   - スキップ・未実行・リバートしたままの放置は完了ではない
   - 全ファイルがリバートされて実質変更ゼロになった stage も未完了とする
 - CRITICAL/HIGH が 0 件
 - テストと linter が green（ステップ2 で記録した既存の失敗を除く）
-- ステップ6 の `reviewer` / `security-auditor` の出力に `Blockers: {n}` 行が実際にある
+- ステップ6 で起動したエージェントの出力に `Blockers: {n}` 行が実際にある
   - 無ければ「指摘ゼロ」ではなく「判定を取れなかった」として `BLOCKED` にする
 
 ファイル単位のリバートの後も CRITICAL/HIGH の blocker が残ったときの扱い:
@@ -127,7 +131,7 @@ claq_mem_learn --kind fact --scope repo --domain <domain> \
 
 次のテンプレートで示す。
 
-- Issues は `claq:reviewer` と `claq:security-auditor` の統合件数
+- Issues はステップ6 で起動したエージェントの統合件数
 - 部分モードで実行しなかった stage の行は、件数の代わりに `skipped (--mode={mode})` と書く（0 と書くと「実行して変更なし」と区別できない）
 
 ```text
@@ -158,4 +162,5 @@ Learned:    {ステップ8 で記録した key / なし}
 ## 引数
 
 - 位置 #1: `[ファイルパス or ディレクトリ]`（省略時: 変更差分）
+- `--base <ref>`: 差分の基点（省略時: 未コミットの変更。無ければ既定ブランチとの分岐点）
 - `--mode=clean|simplify`: 部分モード（省略時: clean → simplify → perf → review の全段階）

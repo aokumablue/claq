@@ -44,12 +44,28 @@ user-invocable: false
 入力に不明点があっても質問で止まらない。反復1 の plan で仮に決め、出力の Assumptions に書く。
 仮決定は要件の文ではないので、コードのコメントと報告で「要件」として引用しない（仮決定から生じる入力の拒否・上限・続行経路は、再現できる失敗など別の根拠を引用できるときに書く）。
 
+## テストコマンドの検出
+
+プロジェクトルートのマニフェストから決める。
+
+- `pyproject.toml` / `setup.cfg` → `python3 -m pytest -q`
+- `package.json` → `scripts.test`（無ければ未検出）
+- `go.mod` → `go test ./...`
+- `Cargo.toml` → `cargo test`
+- 複数当たれば対象ファイルの拡張子で選ぶ
+- CLAUDE.md・AGENTS.md・CI 設定に指定があれば、それを優先する
+- linter も同じく、CLAUDE.md と設定ファイルから決める
+
+どれにも当たらなければ推測で組まない。
+baseline と、収束判定のテストの条件を省く。
+出力の Assumptions に `テストコマンド未検出` と書く。
+
 ## 手順
 
 ### 反復1（一発収束を狙う）
 
 1. plan: `claq:planner` を起動し（依頼文に `mode: decide` を書く）、単一のブループリントを確定させる。`approved_plan` があれば省く
-2. baseline: 検出したテストコマンドでフルスイートを 1 回実行し、既存 red のテスト失敗シグネチャ集合を記録する
+2. baseline: 「テストコマンドの検出」で決めたコマンドでフルスイートを 1 回実行し、既存 red のテスト失敗シグネチャ集合を記録する
    - 記録先は checkpoint の `## ベースライン`（形式と記録ルールは `../checkpoint/SKILL.md`）
    - run ごとに 1 回で、記録後は変えない
    - 収束判定と circuit breaker には、本 step で自ら取得した集合を使う。checkpoint から読み戻した値は使わない（記載は再開用）
@@ -62,7 +78,10 @@ user-invocable: false
    | 未使用コード削除 | `claq:code-refiner`（依頼文へ `mode: clean` を明示） |
    | 性能改善 | `claq:code-refiner`（依頼文へ `mode: perf` を明示） |
 
-   生成の直後に、検出したテストコマンドと linter を実行する（本リポジトリなら `python3 -m pytest -q` と `ruff check plugins/claq`。src と tests の両方）。
+   計画が複数フェーズなら、フェーズごとに generate とテストを回す。
+   evaluate は全フェーズの後に 1 回だけ行う。
+
+   生成の直後に、テストコマンドと linter を実行する（src と tests の両方）。
 
    - red なら、evaluate へ進む前に同じ担当エージェントに直させる
    - ただし `bugfix` / `refactor-fix` で baseline が green だったテストが red になったときは、重ねて直さない

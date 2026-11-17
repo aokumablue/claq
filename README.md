@@ -78,22 +78,23 @@ claude plugin install claq@claq
 
 ---
 
-## 🚀 Commands (10)
+## 🚀 Commands (11)
 
 各コマンドの詳細はリンク先 `.md` ファイル参照。
 
 | コマンド | 用途 | 引数 | 一言説明 |
 |---|---|---|---|
-| [`/plan`](plugins/claq/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
-| [`/feat-dev`](plugins/claq/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見+探索→残分岐確認→loop-dev 反復実装→学びの記録→サマリー の一気通貫 |
+| [`/plan`](plugins/claq/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画→承認後に loop-dev で実装。計画を先に見たいときに使う |
+| [`/feat-dev`](plugins/claq/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見+探索→残分岐確認→loop-dev 反復実装→学びの記録→サマリー の一気通貫。計画の承認を挟まない |
 | [`/bugfix`](plugins/claq/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 要件整理→再現テスト確立→loop-dev 反復修正→学びの記録 の一気通貫 |
-| [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review+secure→final gate の安全な自動連鎖。`--mode` で部分実行 |
-| [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer + security-auditor 並列。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
+| [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--base <ref>] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review→final gate の安全な自動連鎖。`--mode` で部分実行 |
+| [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス] [--base <ref>]`（省略=差分） | reviewer（外部の攻撃者が届く入口に触れるときは security-auditor も並列）。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
 | [`/harness`](plugins/claq/commands/harness.md) | 品質管理 | `[scope] [--root=<path>] [--target-kind=repo\|consumer] [--format=text\|json] [--apply] [--audit-only]` | 監査→トップ3提示（既定はここで停止）。`--apply` で harness-tuner による改善適用と再採点まで進む |
 | [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--knowledge]` | 入力収集→skill-make（生成・grader/comparator/bench-analyzer による eval・改善）→完了ゲート |
 | [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
-| [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |
+| [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス] [--base <ref>]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |
 | [`/package-upgrade`](plugins/claq/commands/package-upgrade.md) | 依存更新 | `[パッケージ名[@版] ...]` | 対象と目標版の確定→破壊的変更の洗い出し→loop-dev で更新と追従→報告。指定なしはマイナー・パッチのみ |
+| [`/perf`](plugins/claq/commands/perf.md) | 性能改善 | `[パス] [--cmd "<計測>"] [--target <値>]` | 計測→code-refiner（計測データ付き）→再計測。ノイズ幅以下の変更は戻す |
 
 ---
 
@@ -129,7 +130,7 @@ claude plugin install claq@claq
 
 ## 🧭 Workflows
 
-claq が「どの場面でどう動くか」を 5 ジャンル・19 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。すべての Commands / Skills はいずれかの図に登場します。
+claq が「どの場面でどう動くか」を 5 ジャンル・20 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。すべての Commands / Skills はいずれかの図に登場します。
 
 ### 凡例
 
@@ -157,7 +158,7 @@ claq が「どの場面でどう動くか」を 5 ジャンル・19 のワーク
 
 | ジャンル | 収録ワークフロー |
 |---|---|
-| [実装](#実装) | 新機能開発 / バグ修正 / フルリファクタリング / コード単純化のみ / デッドコード掃除 / クイック往復モード / テストコード自動生成 / 依存更新 |
+| [実装](#実装) | 新機能開発 / バグ修正 / フルリファクタリング / コード単純化のみ / デッドコード掃除 / クイック往復モード / テストコード自動生成 / 依存更新 / 性能改善 |
 | [品質・セキュリティ](#品質セキュリティ) | セキュリティ重視の実装 / 品質管理サイクル / ハーネス定期メンテ / リリース前実起動検証 |
 | [スキル・知識管理](#スキル知識管理) | スキル新規作成・改善 / 知識蓄積サイクル / ループ収束品質診断 / 反復ループの中断復旧 |
 | [新規生成](#新規生成) | MCP サーバ新規構築 / shadcn/ui サイト・ダッシュボード新規作成 |
@@ -178,8 +179,7 @@ flowchart LR
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
   classDef auto   fill:#ea580c,stroke:#c2410c,color:#fff,rx:4
 
-  U(["👤 新機能依頼"]) --> CP["/plan"]:::cmd
-  CP --> CF["/feat-dev"]:::cmd
+  U(["👤 新機能依頼"]) --> CF["/feat-dev"]:::cmd
 
   subgraph featdev["⚙️ feat-dev 内部（5ステップ）"]
     direction TB
@@ -209,8 +209,7 @@ flowchart LR
 **実行例**:
 
 ```bash
-/plan "ユーザー認証に 2FA を追加"
-/feat-dev
+/feat-dev "ユーザー認証に 2FA を追加"
 ```
 
 ---
@@ -258,8 +257,7 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  U(["🔧 リファクタ依頼"]) --> CP["/plan"]:::cmd
-  CP --> CREF["/refactor"]:::cmd
+  U(["🔧 リファクタ依頼"]) --> CREF["/refactor"]:::cmd
 
   subgraph refactor["⚙️ refactor 内部（9ステップ）"]
     direction TB
@@ -272,7 +270,7 @@ flowchart LR
     AC --> ASI3["✨ code-refiner #N<br/>mode=simplify（同時起動は上限4）"]:::agent
     ASI1 & ASI2 & ASI3 --> AP["⚡ code-refiner<br/>mode=perf"]:::agent
     AP --> AR["✅ reviewer"]:::agent
-    AP --> AS["🛡️ security-auditor"]:::agent
+    AP -.-> AS["🛡️ security-auditor<br/>外部の攻撃者が届く入口に触れるときだけ"]:::agent
     AR & AS --> GATE{{"final gate<br/>CRITICAL/HIGH 残→BLOCKED"}}
     GATE -.->|"blocker・テスト失敗あり"| LD["loop-dev<br/>task_type=refactor-fix"]:::skill
     GATE --> LEARN["学びの記録 → 要約"]
@@ -282,12 +280,11 @@ flowchart LR
 ```
 
 **トリガー**: 5件以上のリファクタ・大規模コード整理
-**期待効果**: clean → simplify（並列）→ perf → review+secure を安全に自動連鎖。各段階の失敗は即ファイル単位でリバートし、final gate で CRITICAL/HIGH が残れば loop-dev（`refactor-fix`）で解消を試み、それでも残れば BLOCKED
+**期待効果**: clean → simplify（並列）→ perf → review を安全に自動連鎖。各段階の失敗は即ファイル単位でリバートし、final gate で CRITICAL/HIGH が残れば loop-dev（`refactor-fix`）で解消を試み、それでも残れば BLOCKED
 
 **実行例**:
 
 ```bash
-/plan "認証層のユーティリティ重複を整理"
 /refactor src/auth/
 ```
 
@@ -306,13 +303,13 @@ flowchart LR
   PRE --> AS2["✨ code-refiner #2<br/>mode=simplify"]:::agent
   PRE --> AS3["✨ code-refiner #3<br/>mode=simplify"]:::agent
   AS1 & AS2 & AS3 --> AR["✅ reviewer"]:::agent
-  AS1 & AS2 & AS3 --> ASEC["🛡️ security-auditor"]:::agent
+  AS1 & AS2 & AS3 -.-> ASEC["🛡️ security-auditor<br/>入口に触れるときだけ"]:::agent
   AR & ASEC --> GATE{{"final gate<br/>CRITICAL/HIGH 残→BLOCKED"}}
   GATE --> SUM(["学びの記録 → 要約"])
 ```
 
 **トリガー**: 可読性・保守性向上のみ、機能変更なし
-**期待効果**: ファイルグループを並列（同時起動は上限4）で単純化。clean / perf はスキップするが、preflight・baseline・review+secure・final gate・学びの記録・要約は省かない
+**期待効果**: ファイルグループを並列（同時起動は上限4）で単純化。clean / perf はスキップするが、preflight・baseline・review・final gate・学びの記録・要約は省かない
 
 **実行例**:
 
@@ -335,11 +332,11 @@ flowchart LR
   AC --> TEST(["✅ テスト検証<br/>ファイル単位"])
   TEST -->|失敗| REVERT(["git checkout -- file"])
   TEST -->|成功| NEXT(["次ファイルへ"])
-  NEXT --> RV(["✅ reviewer + 🛡️ security-auditor<br/>→ final gate → 学びの記録 → 要約"])
+  NEXT --> RV(["✅ reviewer（入口に触れるときは 🛡️ security-auditor も）<br/>→ final gate → 学びの記録 → 要約"])
 ```
 
 **トリガー**: 未使用コード・依存関係の削除
-**期待効果**: 削除ごとにテスト実行、失敗時は即リバート。全ファイル完了後に review+secure と final gate を通し、安全に dead code を排除
+**期待効果**: 削除ごとにテスト実行、失敗時は即リバート。全ファイル完了後に review と final gate を通し、安全に dead code を排除
 
 **実行例**:
 
@@ -429,6 +426,32 @@ flowchart TD
 
 ---
 
+### 性能改善
+
+```mermaid
+flowchart TD
+  classDef cmd    fill:#2563eb,stroke:#1e40af,color:#fff,rx:6
+  classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
+
+  A(["/perf [パス] --cmd"]):::cmd --> B["計測コマンドを決める<br/>指定 → 既存ベンチ → 最小スクリプト"]
+  B --> C["before を測る<br/>3 回の中央値 + プロファイル上位 5 件"]
+  C --> D["⚡ code-refiner<br/>mode=perf（計測データ付き）"]:::agent
+  D --> E["after を測る<br/>ノイズ幅以下の変更は戻す"]
+  E --> F["✅ reviewer"]:::agent
+  F --> G(["報告<br/>before / after"])
+```
+
+**トリガー**: 遅い処理を、数字で効果を確かめながら速くしたい
+**期待効果**: 実測で効いた変更だけが残るので、効かない最適化でコードが読みにくくならない
+
+**実行例**:
+
+```bash
+/perf src/report/ --cmd "python3 scripts/bench_report.py"
+```
+
+---
+
 ## 品質・セキュリティ
 
 レビュー・監査・リリース検証など、品質とセキュリティを担保するワークフロー群です。
@@ -441,11 +464,10 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  U(["🔐 認証/決済/秘匿情報<br/>実装依頼"]) --> CP["/plan"]:::cmd
-  CP --> CF["/feat-dev"]:::cmd
-  CF --> CR["/review"]:::cmd
+  U(["🔐 認証/決済/秘匿情報<br/>実装依頼"]) --> CP["/plan<br/>承認後に loop-dev で実装"]:::cmd
+  CP --> CR["/review"]:::cmd
 
-  subgraph review["⚙️ review 内部（並列）"]
+  subgraph review["⚙️ review 内部"]
     direction LR
     AR["✅ reviewer<br/>品質・設計"]:::agent
     AS["🛡️ security-auditor<br/>脆弱性・プロンプト境界"]:::agent
@@ -457,14 +479,13 @@ flowchart LR
 ```
 
 **トリガー**: 認証・決済・シークレット・API エンドポイント実装
-**期待効果**: reviewer（品質・設計）と security-auditor（脆弱性・プロンプト境界）を並列に当てる。利用者が点検だけを頼むときは `/secure`。CRITICAL/HIGH があればレポートの判定は `Block`（コミット不可）。後処理で、実挙動から裏取りできた指摘だけを修正する
+**期待効果**: reviewer（品質・設計）を当て、外部の攻撃者が届く入口に触れるときは security-auditor（脆弱性・プロンプト境界）も並列に当てる。利用者が点検だけを頼むときは `/secure`。CRITICAL/HIGH があればレポートの判定は `Block`（コミット不可）。後処理で、実挙動から裏取りできた指摘だけを修正する
 
 **実行例**:
 
 ```bash
 /plan "決済モジュールに 3D セキュア対応を追加"
-/feat-dev
-/review
+/review --base main
 ```
 
 ---
@@ -511,7 +532,7 @@ flowchart LR
 
   subgraph maintain["⚙️ maintain 内部（6ステップ）"]
     direction TB
-    IN["入力収集<br/>baseline取得（pytest/ruff/audit）"] --> RV["✅ reviewer<br/>🛡️ security-auditor 並列レビュー"]:::agent
+    IN["入力収集<br/>baseline取得（pytest/ruff/audit）"] --> RV["✅ reviewer<br/>（注入経路に触れる回は 🛡️ security-auditor も）"]:::agent
     RV --> CLS["種別分類<br/>バグ/強化/仕様変更"]
     CLS --> FIX["🧪 tdd-writer 修正<br/>or 直接編集"]:::agent
     FIX --> GATE{{"final gate<br/>pytest/ruff/validator/audit 非退行"}}
@@ -796,7 +817,7 @@ flowchart TB
   classDef store  fill:#374151,stroke:#1f2937,color:#fff,rx:4
 
   subgraph user["👤 User Layer"]
-    CMD["Commands (10)"]:::cmd
+    CMD["Commands (11)"]:::cmd
   end
 
   subgraph internal["⚙️ Internal Layer"]

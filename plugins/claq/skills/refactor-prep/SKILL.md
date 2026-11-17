@@ -15,7 +15,11 @@ user-invocable: false
 
 ## 手順
 
-1. 対象の確定（優先順）: 引数パス（ディレクトリ = 配下の全ファイル / ファイル = そのファイル）→ `git diff --name-only HEAD`
+1. 対象の確定（優先順）:
+   1. 引数パス（ディレクトリ = 配下の全ファイル / ファイル = そのファイル）
+   2. `--base <ref>` 指定時: `git diff --name-only --diff-filter=d $(git merge-base HEAD <ref>)`
+   3. 未コミットの変更: `git diff --name-only --diff-filter=d HEAD`
+   4. 未コミットの変更が無ければ、既定ブランチ（`origin/HEAD`、無ければ `main`）との分岐点からの差分
 2. 分割: 同時に変える必要がある塊でグループにする。依存の薄いグループを先に処理する
 3. 依存の可視化: import・参照関係を確かめ、グループ間の依存順を `deps` に明示する（循環もそのまま残す）
 4. テストセットの確定: baseline（全体）・グループ単位・final gate（テスト + lint）
@@ -68,6 +72,18 @@ JSON 契約（`deps.from` / `deps.to` は `groups` 配列のインデックス�
 - 依存が不明なファイルは単独のグループにする
 - 公開 API を含む変更は最後のグループにする
 - Test Set に載せるコマンドは、テストファイルとランナー設定を Grep/Read で確かめてから出す。確かめられないコマンドは載せず「検証手段なし」と書く
+
+## テストコマンドの検出
+
+プロジェクトルートのマニフェストから決める。
+
+- `pyproject.toml` / `setup.cfg` → `python3 -m pytest -q`
+- `package.json` → `scripts.test`（無ければ未検出）
+- `go.mod` → `go test ./...`
+- `Cargo.toml` → `cargo test`
+- 複数当たれば対象ファイルの拡張子で選ぶ
+- CLAUDE.md・AGENTS.md・CI 設定に指定があれば、それを優先する
+- linter も同じく、CLAUDE.md と設定ファイルから決める
 
 ## 永続メモリ
 

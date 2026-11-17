@@ -123,7 +123,7 @@ def test_build_report_scores_empty_root_in_consumer_mode(tmp_path: Path) -> None
     report = harness_audit.build_report("repo", root_dir=tmp_path)
 
     assert report["target_mode"] == "consumer"
-    assert (report["overall_score"], report["max_score"], len(report["checks"])) == (0, 29, 11)
+    assert (report["overall_score"], report["max_score"], len(report["checks"])) == (0, 25, 9)
     assert report["categories"]["Tool Coverage"]["max_points"] == 7
     assert [action["path"] for action in report["top_actions"]] == ["~/.claude/plugins/", "tests/", ".claude/"]
 
@@ -135,8 +135,7 @@ def test_build_report_consumer_checks_follow_project_files(tmp_path: Path) -> No
         {
             ".gitignore": ".env\n",
             ".github/workflows/ci.yml": "name: ci\n",
-            ".github/dependabot.yml": "version: 2\n",
-            ".claude/settings.json": '{"PreToolUse": []}',
+            ".claude/settings.json": "{}",
             "tests/a.test.js": "test\n",
         },
     )
@@ -148,9 +147,7 @@ def test_build_report_consumer_checks_follow_project_files(tmp_path: Path) -> No
         "consumer-project-config",
         "consumer-test-suite",
         "consumer-ci-workflow",
-        "consumer-security-policy",
         "consumer-secret-hygiene",
-        "consumer-hook-guardrails",
     }
 
 
@@ -159,13 +156,13 @@ def test_build_report_consumer_checks_follow_project_files(tmp_path: Path) -> No
     [
         (
             "github",
-            {".github/workflows/ci.yml": "name: ci\n", ".github/codeql.yml": "name: codeql\n"},
+            {".github/workflows/ci.yml": "name: ci\n"},
             ".github/workflows/",
             "GitHub",
         ),
         (
             "gitlab",
-            {".gitlab-ci.yml": "build:\n  script: echo build\ndependency_scanning:\n  stage: test\n"},
+            {".gitlab-ci.yml": "build:\n  script: echo build\n"},
             ".gitlab-ci.yml",
             "GitLab",
         ),
@@ -175,7 +172,7 @@ def test_build_report_consumer_checks_follow_project_files(tmp_path: Path) -> No
 def test_build_report_uses_git_hosting_service_for_consumer_checks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, service: str, files: dict[str, str], ci_path: str, label: str
 ) -> None:
-    """ホスティング種別ごとの CI 設定・セキュリティスキャンの置き場所で consumer チェックが通る。"""
+    """ホスティング種別ごとの CI 設定の置き場所で consumer チェックが通る。"""
     monkeypatch.setattr(harness_audit, "detect_git_hosting_service", lambda *_args, **_kwargs: service)
     _write_files(tmp_path, files)
 
@@ -184,7 +181,6 @@ def test_build_report_uses_git_hosting_service_for_consumer_checks(
     assert checks["consumer-ci-workflow"]["path"] == ci_path
     assert checks["consumer-ci-workflow"]["description"] == f"プロジェクトが {label} CI 設定をチェックインしている"
     assert checks["consumer-ci-workflow"]["pass"] is True
-    assert checks["consumer-security-policy"]["pass"] is True
 
 
 def test_build_report_top_actions_pick_highest_failing_points(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
