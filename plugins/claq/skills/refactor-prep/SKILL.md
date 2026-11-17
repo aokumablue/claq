@@ -15,7 +15,11 @@ user-invocable: false
 
 ## 手順
 
-1. 対象の確定（優先順）: 引数パス（ディレクトリ = 配下の全ファイル / ファイル = そのファイル）→ `git diff --name-only HEAD`
+1. 対象の確定（優先順）:
+   1. 引数パス（ディレクトリ = 配下の全ファイル / ファイル = そのファイル）
+   2. `--base <ref>` 指定時: `git diff --name-only --diff-filter=d $(git merge-base HEAD <ref>)`
+   3. 未コミットの変更: `git diff --name-only --diff-filter=d HEAD`
+   4. 3 が空なら、既定ブランチ（`origin/HEAD`、無ければ `main`）を `<ref>` にして 2 を実行する
 2. 分割: 同時に変える必要がある塊でグループにする。依存の薄いグループを先に処理する
 3. 依存の可視化: import・参照関係を確かめ、グループ間の依存順を `deps` に明示する（循環もそのまま残す）
 4. テストセットの確定: baseline（全体）・グループ単位・final gate（テスト + lint）

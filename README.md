@@ -87,12 +87,12 @@ claude plugin install claq@claq
 | [`/plan`](plugins/claq/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
 | [`/feat-dev`](plugins/claq/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見+探索→残分岐確認→loop-dev 反復実装→学びの記録→サマリー の一気通貫 |
 | [`/bugfix`](plugins/claq/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 要件整理→再現テスト確立→loop-dev 反復修正→学びの記録 の一気通貫 |
-| [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review+secure→final gate の安全な自動連鎖。`--mode` で部分実行 |
-| [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス]`（省略=差分） | reviewer（外部の攻撃者が届く入口に触れるときは security-auditor も並列）。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
+| [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--base <ref>] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review→final gate の安全な自動連鎖。`--mode` で部分実行 |
+| [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス] [--base <ref>]`（省略=差分） | reviewer（外部の攻撃者が届く入口に触れるときは security-auditor も並列）。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
 | [`/harness`](plugins/claq/commands/harness.md) | 品質管理 | `[scope] [--root=<path>] [--target-kind=repo\|consumer] [--format=text\|json] [--apply] [--audit-only]` | 監査→トップ3提示（既定はここで停止）。`--apply` で harness-tuner による改善適用と再採点まで進む |
 | [`/skill-gen`](plugins/claq/commands/skill-gen.md) | スキル作成 | `[--commits=N] [--knowledge]` | 入力収集→skill-make（生成・grader/comparator/bench-analyzer による eval・改善）→完了ゲート |
 | [`/instinct`](plugins/claq/commands/instinct.md) | 知識管理 | `<list\|show\|search\|promote\|forget\|learn>` | 知識カードの棚卸し・昇格（`pending` → `active`）・アーカイブ |
-| [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |
+| [`/test-gen`](plugins/claq/commands/test-gen.md) | テストコード自動生成 | `[パス] [--base <ref>]`（省略=差分） | デシジョンテーブル設計→loop-dev 実装→検証。承認待ちは置かない。言語非依存 |
 | [`/package-upgrade`](plugins/claq/commands/package-upgrade.md) | 依存更新 | `[パッケージ名[@版] ...]` | 対象と目標版の確定→破壊的変更の洗い出し→loop-dev で更新と追従→報告。指定なしはマイナー・パッチのみ |
 
 ---

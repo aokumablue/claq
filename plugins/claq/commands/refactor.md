@@ -1,7 +1,7 @@
 ---
 name: refactor
 description: 機能を変えずにコードをリファクタリングする（デッドコード削除・可読性・性能。差分または指定パス）。新機能は /feat-dev。
-argument-hint: "[ファイルパス] [--mode=clean|simplify]"
+argument-hint: "[ファイルパス] [--base <ref>] [--mode=clean|simplify]"
 command: /refactor
 ---
 
@@ -24,7 +24,7 @@ command: /refactor
 
 ## ステップ1: preflight（スコープ確定 + 実行準備）
 
-スコープは `refactor-prep` が確定する（引数パスがあれば渡す。結果は `scope_files`）。
+スコープは `refactor-prep` が確定する（引数パスと `--base` があれば渡す。結果は `scope_files`）。
 
 着手前に Skill ツールで次の 2 つを、この順で起動する（`refactor-rollback` は `refactor-prep` の出力を入力に取る）。どちらも省かない。
 
@@ -162,4 +162,5 @@ Learned:    {ステップ8 で記録した key / なし}
 ## 引数
 
 - 位置 #1: `[ファイルパス or ディレクトリ]`（省略時: 変更差分）
+- `--base <ref>`: 差分の基点（省略時: 未コミットの変更。無ければ既定ブランチとの分岐点）
 - `--mode=clean|simplify`: 部分モード（省略時: clean → simplify → perf → review の全段階）
