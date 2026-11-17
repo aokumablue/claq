@@ -280,7 +280,7 @@ flowchart LR
 ```
 
 **トリガー**: 5件以上のリファクタ・大規模コード整理
-**期待効果**: clean → simplify（並列）→ perf → review+secure を安全に自動連鎖。各段階の失敗は即ファイル単位でリバートし、final gate で CRITICAL/HIGH が残れば loop-dev（`refactor-fix`）で解消を試み、それでも残れば BLOCKED
+**期待効果**: clean → simplify（並列）→ perf → review を安全に自動連鎖。各段階の失敗は即ファイル単位でリバートし、final gate で CRITICAL/HIGH が残れば loop-dev（`refactor-fix`）で解消を試み、それでも残れば BLOCKED
 
 **実行例**:
 
@@ -309,7 +309,7 @@ flowchart LR
 ```
 
 **トリガー**: 可読性・保守性向上のみ、機能変更なし
-**期待効果**: ファイルグループを並列（同時起動は上限4）で単純化。clean / perf はスキップするが、preflight・baseline・review+secure・final gate・学びの記録・要約は省かない
+**期待効果**: ファイルグループを並列（同時起動は上限4）で単純化。clean / perf はスキップするが、preflight・baseline・review・final gate・学びの記録・要約は省かない
 
 **実行例**:
 
@@ -336,7 +336,7 @@ flowchart LR
 ```
 
 **トリガー**: 未使用コード・依存関係の削除
-**期待効果**: 削除ごとにテスト実行、失敗時は即リバート。全ファイル完了後に review+secure と final gate を通し、安全に dead code を排除
+**期待効果**: 削除ごとにテスト実行、失敗時は即リバート。全ファイル完了後に review と final gate を通し、安全に dead code を排除
 
 **実行例**:
 

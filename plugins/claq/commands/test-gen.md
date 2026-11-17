@@ -29,7 +29,7 @@ command: /test-gen
 1. 引数パス（ディレクトリ = 配下の全ソースファイル / ファイル = そのファイル）
 2. `--base <ref>` 指定時: `git diff --name-only --diff-filter=d $(git merge-base HEAD <ref>)`
 3. 未コミットの変更: `git diff --name-only --diff-filter=d HEAD`
-4. 3 が空なら、既定ブランチ（`origin/HEAD`、無ければ `main`）を `<ref>` にして 2 を実行する
+4. 未コミットの変更が無ければ、既定ブランチ（`origin/HEAD`、無ければ `main`）との分岐点からの差分
 
 空なら `テスト対象なし` と書いて終える。
 
