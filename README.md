@@ -84,8 +84,8 @@ claude plugin install claq@claq
 
 | コマンド | 用途 | 引数 | 一言説明 |
 |---|---|---|---|
-| [`/plan`](plugins/claq/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画。コード前にユーザー確認 |
-| [`/feat-dev`](plugins/claq/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見+探索→残分岐確認→loop-dev 反復実装→学びの記録→サマリー の一気通貫 |
+| [`/plan`](plugins/claq/commands/plan.md) | 実装前計画 | `[要件説明]` | 要件言い換え→リスク評価→段階的計画→承認後に loop-dev で実装。計画を先に見たいときに使う |
+| [`/feat-dev`](plugins/claq/commands/feat-dev.md) | 新機能開発 | `[機能説明]` | 発見+探索→残分岐確認→loop-dev 反復実装→学びの記録→サマリー の一気通貫。計画の承認を挟まない |
 | [`/bugfix`](plugins/claq/commands/bugfix.md) | バグ修正 | `[症状] [パス]` | 要件整理→再現テスト確立→loop-dev 反復修正→学びの記録 の一気通貫 |
 | [`/refactor`](plugins/claq/commands/refactor.md) | リファクタリング | `[パス] [--base <ref>] [--mode=simplify\|clean]` | preflight→baseline→clean→simplify→perf→review→final gate の安全な自動連鎖。`--mode` で部分実行 |
 | [`/review`](plugins/claq/commands/review.md) | コードレビュー | `[パス] [--base <ref>]`（省略=差分） | reviewer（外部の攻撃者が届く入口に触れるときは security-auditor も並列）。レビュー工程（ステップ1〜3）は **READ-ONLY**（security-auditor はツール権限で技術的強制、reviewer はプロンプト指示ベース）。後処理（ステップ4）で、裏取りできた CRITICAL/HIGH だけを種別ごとに自律修正 |
@@ -178,8 +178,7 @@ flowchart LR
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
   classDef auto   fill:#ea580c,stroke:#c2410c,color:#fff,rx:4
 
-  U(["👤 新機能依頼"]) --> CP["/plan"]:::cmd
-  CP --> CF["/feat-dev"]:::cmd
+  U(["👤 新機能依頼"]) --> CF["/feat-dev"]:::cmd
 
   subgraph featdev["⚙️ feat-dev 内部（5ステップ）"]
     direction TB
@@ -209,8 +208,7 @@ flowchart LR
 **実行例**:
 
 ```bash
-/plan "ユーザー認証に 2FA を追加"
-/feat-dev
+/feat-dev "ユーザー認証に 2FA を追加"
 ```
 
 ---
@@ -258,8 +256,7 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  U(["🔧 リファクタ依頼"]) --> CP["/plan"]:::cmd
-  CP --> CREF["/refactor"]:::cmd
+  U(["🔧 リファクタ依頼"]) --> CREF["/refactor"]:::cmd
 
   subgraph refactor["⚙️ refactor 内部（9ステップ）"]
     direction TB
@@ -287,7 +284,6 @@ flowchart LR
 **実行例**:
 
 ```bash
-/plan "認証層のユーティリティ重複を整理"
 /refactor src/auth/
 ```
 
@@ -441,9 +437,8 @@ flowchart LR
   classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
   classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
 
-  U(["🔐 認証/決済/秘匿情報<br/>実装依頼"]) --> CP["/plan"]:::cmd
-  CP --> CF["/feat-dev"]:::cmd
-  CF --> CR["/review"]:::cmd
+  U(["🔐 認証/決済/秘匿情報<br/>実装依頼"]) --> CP["/plan<br/>承認後に loop-dev で実装"]:::cmd
+  CP --> CR["/review"]:::cmd
 
   subgraph review["⚙️ review 内部"]
     direction LR
@@ -463,8 +458,7 @@ flowchart LR
 
 ```bash
 /plan "決済モジュールに 3D セキュア対応を追加"
-/feat-dev
-/review
+/review --base main
 ```
 
 ---
