@@ -37,10 +37,12 @@ command: /test-gen
 
 1. プロジェクトルートのマニフェストからテストコマンドを決める
    - `pyproject.toml` / `setup.cfg` → `python3 -m pytest -q`
-   - `package.json` → `scripts.test`（無ければ検出失敗）
+   - `package.json` → `scripts.test`
    - `go.mod` → `go test ./...`
    - `Cargo.toml` → `cargo test`
    - 複数当たれば対象ファイルの拡張子で選ぶ
+   - CLAUDE.md・AGENTS.md・CI 設定に指定があれば、それを優先する
+   - linter も同じく、CLAUDE.md と設定ファイルから決める
    - どれにも当たらなければ推測でコマンドを組まず、`BLOCKED: テストコマンドを検出できません（探索したマニフェスト={列挙}）` として止まる
 2. 言語に応じたカバレッジコマンドを選ぶ
 3. 未到達のブランチを記録する

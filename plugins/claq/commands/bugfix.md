@@ -44,7 +44,7 @@ command: /bugfix
 
 Skill ツールで `loop-dev` skill を起動し、plan→generate→evaluate を最大 2 反復で収束させる。入力:
 
-- `task` = 再現テスト・原因候補を含む修正要件
+- `task` = 修正要件。再現テストのシグネチャ（`ファイル::テスト名`）と原因候補を書く
 - `task_type` = `bugfix`
 - `converge_extra` = 「再現テスト green + 回帰テスト追加済み」
 

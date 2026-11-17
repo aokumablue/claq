@@ -73,6 +73,18 @@ JSON 契約（`deps.from` / `deps.to` は `groups` 配列のインデックス�
 - 公開 API を含む変更は最後のグループにする
 - Test Set に載せるコマンドは、テストファイルとランナー設定を Grep/Read で確かめてから出す。確かめられないコマンドは載せず「検証手段なし」と書く
 
+## テストコマンドの検出
+
+プロジェクトルートのマニフェストから決める。
+
+- `pyproject.toml` / `setup.cfg` → `python3 -m pytest -q`
+- `package.json` → `scripts.test`
+- `go.mod` → `go test ./...`
+- `Cargo.toml` → `cargo test`
+- 複数当たれば対象ファイルの拡張子で選ぶ
+- CLAUDE.md・AGENTS.md・CI 設定に指定があれば、それを優先する
+- linter も同じく、CLAUDE.md と設定ファイルから決める
+
 ## 永続メモリ
 
 - search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `refactor preflight scope split dependency testset`
