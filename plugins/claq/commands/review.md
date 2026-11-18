@@ -16,7 +16,8 @@ command: /review
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
-  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `review violation security` / `{変更ファイル名}`）
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+    - クエリ例: `review violation security` / `{変更ファイル名}`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
   - 既存カードと同じ違反が再発していれば「繰り返し違反」と注記する（深刻度は上げない。繰り返しは severity の根拠にならない）
 - 記録: ステップ5 の基準で `claq_mem_learn` を使う
@@ -57,7 +58,7 @@ command: /review
 子へ届くのは依頼文だけなので、依頼文に次を書く。
 
 - 起動した全員: ステップ1 のスコープ
-- reviewer: security-auditor を並列に起動したときはその旨
+- reviewer: security-auditor を並列に起動したときは「`security-auditor` との並列起動」
 - reviewer: スコープを引数パスで決めたときは `scope: path`
 
 対象に `.md`（定義文書）を含むときは、reviewer の依頼文に次の観点を加える。
@@ -67,12 +68,20 @@ command: /review
 
 ## ステップ3: レポート
 
-次を載せる: 深刻度（CRITICAL / HIGH / MEDIUM / LOW）・ファイル位置と行番号・問題の説明・推奨修正・過去の類似違反（mem から取得）。
+各指摘に次を載せる。
+
+- 深刻度（CRITICAL / HIGH / MEDIUM / LOW）
+- ファイル位置と行番号
+- 問題の説明
+- 推奨修正
+- 過去の類似違反（mem から取得）
+
 CRITICAL または HIGH が 1 件でもあれば、レポートの判定を `Block`（コミット不可）とする。
 
 ## ステップ4: 後処理（自律実行）
 
-BLOCKER（CRITICAL/HIGH）の指摘だけを次の種別に分類して修正する。WARNING・INFO は「提案」として一覧に示す。提案は採否を利用者が決め、既定では実施しない。
+- BLOCKER（CRITICAL/HIGH）の指摘だけを次の種別に分類して修正する
+- WARNING・INFO は「提案」として一覧に示す。提案は採否を利用者が決め、既定では実施しない
 
 | 種別 | 判定 |
 |---|---|
@@ -107,7 +116,9 @@ BLOCKER（CRITICAL/HIGH）の指摘だけを次の種別に分類して修正す
 - バグ + リファクタ: bugfix の完了（テスト green）を確認してから refactor-fix を順に実行する
 - 仕様変更: `/plan` の提示に留める（要件の判断はユーザーの領分なので自律実行しない）
 
-途中で失敗したら（loop-dev 未収束・テスト赤）後続へ進まず、止まって状況を報告する。完了後に再帰的なレビューはしない。最後に元の指摘の解消状況（見送りを含む）を一覧で示す。
+- 途中で失敗したら（loop-dev 未収束・テスト赤）後続へ進まず、止まって状況を報告する
+- 完了後に再帰的なレビューはしない
+- 最後に元の指摘の解消状況（見送りを含む）を一覧で示す
 
 ## ステップ5: 学びの記録（毎回実行・記録は該当時のみ）
 

@@ -16,7 +16,8 @@ command: /refactor
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
-  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`）
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+    - クエリ例: `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: ステップ8 の基準で `claq_mem_learn` を使う
 - 相対パスの md: このファイルは `commands/` にある
@@ -63,7 +64,11 @@ command: /refactor
 
 ## ステップ5: perf（`claq:code-refiner`）
 
-simplify の全グループが終わってから始める。依頼文に `mode: perf` と `effective_scope` を明示し、計測データは渡さない（計測して直すのは `/perf`）。変更ごとにテストし、失敗したらファイル単位で戻す。
+simplify の全グループが終わってから始める。
+
+- 依頼文に `mode: perf` と `effective_scope` を明示する
+- 計測データは渡さない（計測して直すのは `/perf`）
+- 変更ごとにテストし、失敗したらファイル単位で戻す
 
 ## ステップ6: review
 
@@ -75,8 +80,8 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 - ローカル開発者本人だけが届く入口（CLI 引数・設定ファイル）では加えない
 - 届くか判断できないときは加える
 
-起動した全員の依頼文に `effective_scope` を書く。
-並列のときは reviewer の依頼文にその旨も書く。
+- 起動した全員の依頼文に `effective_scope` を書く
+- security-auditor を並列に加えたときは、reviewer の依頼文に「`security-auditor` との並列起動」と書く（reviewer がセキュリティ観点を省き、二重報告を防ぐ）
 
 ## ステップ7: final gate
 

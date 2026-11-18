@@ -16,7 +16,8 @@ command: /harness
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
-  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `harness audit score` / `harness config optimization audit`）
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+    - クエリ例: `harness audit score` / `harness config optimization audit`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 - 相対パスの md: このファイルは `commands/` にある
@@ -24,8 +25,8 @@ command: /harness
 
 ## 使い方
 
-`claq_run` には `--root` と `--target-kind repo|consumer` を常に渡す。ユーザーが省いたら、監査対象のルートと種別を決めて渡す。
-`claq_run` へ渡さないと cwd から自動判定され、provider リポジトリ直下を consumer と誤判定しうる。
+- `claq_run` には `--root` と `--target-kind repo|consumer` を常に渡す（渡さないと cwd から自動判定され、provider リポジトリ直下を consumer と誤判定しうる）
+- ユーザーが省いたら、監査対象のルートと種別を自分で決めて渡す
 
 ## ステップ1: ベースライン取得
 
