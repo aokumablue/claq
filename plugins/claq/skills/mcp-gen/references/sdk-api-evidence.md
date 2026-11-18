@@ -19,8 +19,8 @@
 - Streamable HTTP のヘッダ強制（実測）
 
 採取条件: `mcp==2.1.1` / Python 3.14 / stdio トランスポート（2026-08-31 時点で PyPI 最新）。
-次節だけは `mcp==2.3.0`（2026-10-02 公開）で採取した。2.1.1 の時点のスケルトンは、
-2.3.0 でも smoke_check の全項目に合格した（版を上げても壊れていないことの確認）。
+次節だけは `mcp==2.3.0`（2026-10-02 公開）で採取した。
+2.1.1 の時点のスケルトンは、2.3.0 でも smoke_check の全項目に合格した（版を上げても壊れていないことの確認）。
 以下は**ドキュメントの引用ではなく実際に走らせて得た出力**である。
 SDK を更新したら再採取して差分を見ること。
 
@@ -34,8 +34,7 @@ requires-python: >=3.10
 
 ## 2.3.0 で採取した項目（スケルトンの guard.py が頼る挙動）
 
-`mcp_types.LATEST_PROTOCOL_VERSION == "2026-07-28"`、`mcp-types==2.3.0` に依存、
-`Requires-Python: >=3.10`。
+`mcp_types.LATEST_PROTOCOL_VERSION == "2026-07-28"`、`mcp-types==2.3.0` に依存、`Requires-Python: >=3.10`。
 
 | 項目 | 実測 | スケルトンの対処 |
 |---|---|---|
@@ -61,8 +60,8 @@ from mcp.server.mcpserver import Context             # ハンドラに注入さ�
 from mcp.server.transport_security import TransportSecuritySettings
 ```
 
-`FastMCP` は 2.x で `MCPServer` に改名された。`mcp/server/fastmcp.py` は
-**まだ存在する**ため、記憶で `FastMCP` と書いても import が通り起動もする。
+`FastMCP` は 2.x で `MCPServer` に改名された。
+`mcp/server/fastmcp.py` は**まだ存在する**ため、記憶で `FastMCP` と書いても import が通り起動もする。
 これが最も危険な失敗モード（壊れているのに動く）。
 
 ## `MCPServer.__init__` の主な引数（実測シグネチャ）
@@ -83,8 +82,7 @@ MCPServer(name=None, title=None, description=None, instructions=None,
           subscriptions=None, middleware=None)
 ```
 
-- `cache_hints: Mapping[CacheableMethod, CacheHint]`
-  `CacheHint(ttl_ms: int = 0, scope: Literal["public","private"] = "private")`
+- `cache_hints: Mapping[CacheableMethod, CacheHint]` `CacheHint(ttl_ms: int = 0, scope: Literal["public","private"] = "private")`
 - `resource_security` の既定は**安全側**（パストラバーサル・絶対パス・NUL を拒否）。
 
 ## デコレータ
@@ -129,17 +127,16 @@ mcp.run_streamable_http_async(host="127.0.0.1", port=8000,
 mcp.streamable_http_app(...) -> Starlette      # 既存 ASGI へマウントする場合
 ```
 
-`transport="sse"` は非推奨トランスポート（2024-11-05 HTTP+SSE）。新規では選ばない。
+`transport="sse"` は非推奨トランスポート（2024-11-05 HTTP+SSE）。
+新規では選ばない。
 
-`TransportSecuritySettings()` の既定値（実測）:
-`{'enable_dns_rebinding_protection': True, 'allowed_hosts': [], 'allowed_origins': []}`
-— 保護は既定で有効だが**許可リストは空**。明示的に列挙すること。
+`TransportSecuritySettings()` の既定値（実測）: `{'enable_dns_rebinding_protection': True, 'allowed_hosts': [], 'allowed_origins': []}` — 保護は既定で有効だが**許可リストは空**。
+明示的に列挙すること。
 
 ## MRTR（追加入力の要求）— `ctx.elicit` は使わない
 
-`Context.elicit` は docstring 上「ツール実行中に対話的に情報を求める」と読めるが、
-**サーバ発リクエスト（旧経路）を張る実装**であり、2026-07-28 のステートレスな
-トランスポートでは張れずに失敗する。実測:
+`Context.elicit` は docstring 上「ツール実行中に対話的に情報を求める」と読めるが、**サーバ発リクエスト（旧経路）を張る実装**であり、2026-07-28 のステートレスなトランスポートでは張れずに失敗する。
+実測:
 
 ```
 {"jsonrpc":"2.0","id":1,"error":{"code":-32600,
@@ -147,10 +144,9 @@ mcp.streamable_http_app(...) -> Starlette      # 既存 ASGI へマウントす�
             back-channel for server-initiated requests."}}
 ```
 
-MRTR の経路は**リゾルバによる依存注入**である。ツール引数を
-`Annotated[T, Resolve(fn)]` で宣言し、`fn` が `Elicit(...)` / `Sample(...)` /
-`ListRoots()` を返す。SDK がそれを `InputRequiredResult` へ束ね、
-クライアントの再送で解決して本体を実行する。
+MRTR の経路は**リゾルバによる依存注入**である。
+ツール引数を `Annotated[T, Resolve(fn)]` で宣言し、`fn` が `Elicit(...)` / `Sample(...)` / `ListRoots()` を返す。
+SDK がそれを `InputRequiredResult` へ束ね、クライアントの再送で解決して本体を実行する。
 
 ```python
 from typing import Annotated
@@ -174,8 +170,8 @@ async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)])
     return f"deleted {target}" if confirm.approve else "cancelled"
 ```
 
-受け方は 2 通りあり、**decline / cancel 時のワイヤ出力が違う**。実測（同一サーバ・
-同一リクエストに `{"action": "decline"}` を返した場合）:
+受け方は 2 通りあり、**decline / cancel 時のワイヤ出力が違う**。
+実測（同一サーバ・同一リクエストに `{"action": "decline"}` を返した場合）:
 
 | 受け方 | `isError` | `content` |
 |---|---|---|
@@ -183,17 +179,15 @@ async def danger(target: str, confirm: Annotated[Confirm, Resolve(ask_confirm)])
 | `Annotated[ElicitationResult[T], Resolve(fn)]` | `false` | ハンドラが返した文字列（例 `aborted (decline)`） |
 
 つまり素の `T` は「拒否＝呼び出しの失敗」という意味になる。
-**確認・同意の用途では `ElicitationResult[T]` を使う**（拒否は正常な結果であり、
-「中止しました」を戻り値で返せる必要があるため）。素の `T` が適切なのは、
-入力が取れなければ処理を続けられない場合だけ。
-`ElicitationResult` は `action`（`accept` / `decline` / `cancel`）と、
-accept のときだけ埋まる `data` を持つ。
-- リゾルバを使うツールは `async def` でも同期 `def` でもよい（実測。同期でも
-  `input_required` → 再送 → 解決まで通る）。同期関数はスレッドプールで走る。
-- `Sample` / `ListRoots` に decline は無い。ただし **Sampling と Roots は非推奨**なので
-  新規実装では使わない。実質使うのは `Elicit` だけ。
-- クライアントが対応 capability を宣言していない場合、SDK は
-  `MissingRequiredClientCapability`（`-32021`）を返す。
+**確認・同意の用途では `ElicitationResult[T]` を使う**（拒否は正常な結果であり、「中止しました」を戻り値で返せる必要があるため）。
+素の `T` が適切なのは、入力が取れなければ処理を続けられない場合だけ。
+`ElicitationResult` は `action`（`accept` / `decline` / `cancel`）と、accept のときだけ埋まる `data` を持つ。
+- リゾルバを使うツールは `async def` でも同期 `def` でもよい（実測。同期でも `input_required` → 再送 → 解決まで通る）。
+  同期関数はスレッドプールで走る。
+- `Sample` / `ListRoots` に decline は無い。
+  ただし **Sampling と Roots は非推奨**なので新規実装では使わない。
+  実質使うのは `Elicit` だけ。
+- クライアントが対応 capability を宣言していない場合、SDK は `MissingRequiredClientCapability`（`-32021`）を返す。
 
 ### 確認用途の完全な形と smoke の設定
 
@@ -237,8 +231,8 @@ async def items_delete(
     return DeleteResult(deleted=True, message="削除しました")
 ```
 
-- `smoke_config.py` に次を足し、承認と拒否の両分岐を検査する（1 往復目だけでは、拒否が
-  エラーになる実装の誤りを見つけられない）。`CLIENT_CAPABILITIES` が無いと `-32021` で落ちる。
+- `smoke_config.py` に次を足し、承認と拒否の両分岐を検査する（1 往復目だけでは、拒否がエラーになる実装の誤りを見つけられない）。
+  `CLIENT_CAPABILITIES` が無いと `-32021` で落ちる。
   書き込みのツールを足したので `READ_ONLY_SERVER = False` にする。
 
   ```python
@@ -251,9 +245,7 @@ async def items_delete(
   ]
   ```
 
-- 承認分岐が事前状態に依存するなら、ケースに `"setup": [(ツール名, 引数), ...]` を足して
-  同一プロセスへ先に送る（空のストアへの削除は「対象が無い」エラーになり、配線の正否を
-  判別できない）。
+- 承認分岐が事前状態に依存するなら、ケースに `"setup": [(ツール名, 引数), ...]` を足して同一プロセスへ先に送る（空のストアへの削除は「対象が無い」エラーになり、配線の正否を判別できない）。
 
 実測ワイヤ（1 往復目 → 再送 → 完了）:
 
@@ -283,17 +275,17 @@ async def items_delete(
   "structuredContent":{"result":"deleted db"}}}
 ```
 
-`requestState` の `v1.` 接頭辞は SDK の AEAD 保護済みブロブ
-（`AESGCMRequestStateCodec`）。仕様は `requestState` を**攻撃者制御入力**として
-扱うことを要求しており、SDK 既定の codec がその完全性保護を担う。
-自前で `requestState` を組み立てるなら、認証主体・短い TTL・元リクエストの識別子を
-保護対象ペイロードへ入れて毎回検証すること。
+`requestState` の `v1.` 接頭辞は SDK の AEAD 保護済みブロブ（`AESGCMRequestStateCodec`）。
+仕様は `requestState` を**攻撃者制御入力**として扱うことを要求しており、SDK 既定の codec がその完全性保護を担う。
+自前で `requestState` を組み立てるなら、認証主体・短い TTL・元リクエストの識別子を保護対象ペイロードへ入れて毎回検証すること。
 
-再送は**別の JSON-RPC id** で来る。同じ id で送るのは仕様違反。
+再送は**別の JSON-RPC id** で来る。
+同じ id で送るのは仕様違反。
 
 ## エラー設計 — 素の例外はメッセージが伏せられる
 
-実測（`mcp` 2.1.1）。**ここを間違えると `isError` は立つのにモデルが何も学べない。**
+実測（`mcp` 2.1.1）。
+**ここを間違えると `isError` は立つのにモデルが何も学べない。**
 
 | ツール本体で投げるもの | ワイヤに出る `content` | モデルは直せるか |
 |---|---|---|
@@ -305,9 +297,7 @@ async def items_delete(
 from mcp.server.mcpserver.exceptions import ToolError
 ```
 
-`mcp.server.mcpserver.exceptions` が公開する例外:
-`MCPServerError` / `ToolError` / `UnexpectedToolError` /
-`ResourceError` / `ResourceNotFoundError` / `UnexpectedResourceError`。
+`mcp.server.mcpserver.exceptions` が公開する例外: `MCPServerError` / `ToolError` / `UnexpectedToolError` / `ResourceError` / `ResourceNotFoundError` / `UnexpectedResourceError`。
 
 ### 引数の制約は Field で宣言する（自前の if より強い）
 
@@ -315,8 +305,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 samples: Annotated[int, Field(ge=1, le=100, description="サンプル数。1〜100")]
 ```
 
-実測: `inputSchema` に `"minimum": 1, "maximum": 100` が載り、違反時は
-pydantic の検証メッセージがそのままモデルへ届く（`ToolError` 相当の扱い）。
+実測: `inputSchema` に `"minimum": 1, "maximum": 100` が載り、違反時は pydantic の検証メッセージがそのままモデルへ届く（`ToolError` 相当の扱い）。
 
 ```
 Error executing tool fetch: 1 validation error for fetchArguments
@@ -326,15 +315,15 @@ count
 
 ## ログ — プロトコル機能は非推奨
 
-`Context` の `log` / `info` / `debug` / `warning` / `error` はすべて
-`__deprecated__` を持つ（実測）:
+`Context` の `log` / `info` / `debug` / `warning` / `error` はすべて `__deprecated__` を持つ（実測）:
 
 ```
 The logging capability is deprecated as of 2026-07-28 (SEP-2577).
 ```
 
-置き換えは標準ライブラリ。`MCPServer(log_level="INFO")` を渡すと SDK が
-`basicConfig()` を面倒見る（既に設定済みなら触らない）。出力先は stderr。
+置き換えは標準ライブラリ。
+`MCPServer(log_level="INFO")` を渡すと SDK が `basicConfig()` を面倒見る（既に設定済みなら触らない）。
+出力先は stderr。
 
 ```python
 import logging
@@ -343,27 +332,27 @@ logger = logging.getLogger(__name__)
 logger.info("searching for %r", query)
 ```
 
-ログはモデルには届かない（届くのは戻り値だけ）。運用者のためのもの。
+ログはモデルには届かない（届くのは戻り値だけ）。
+運用者のためのもの。
 `ctx.report_progress()` は非推奨では**ない**ので、進捗はこちらを使う。
 
 ## デプロイ時に効く設定
 
-- **`transport_security` を設定せずに実ホスト名で公開すると全リクエストが
-  `421 Misdirected Request` になる。** 既定は localhost のみ。
-  裸のホスト名とポート付きの両方を `allowed_hosts` に挙げる
-  （`["mcp.example.com", "mcp.example.com:*"]`）。`allowed_origins` は
-  ブラウザ由来のリクエストにのみ効く。リバースプロキシが Host/Origin を
-  制御しているなら `enable_dns_rebinding_protection=False`。
+- **`transport_security` を設定せずに実ホスト名で公開すると全リクエストが `421 Misdirected Request` になる。**
+  既定は localhost のみ。
+  裸のホスト名とポート付きの両方を `allowed_hosts` に挙げる（`["mcp.example.com", "mcp.example.com:*"]`）。
+  `allowed_origins` はブラウザ由来のリクエストにのみ効く。
+  リバースプロキシが Host/Origin を制御しているなら `enable_dns_rebinding_protection=False`。
 - **複数インスタンスで MRTR を使うなら `RequestStateSecurity(keys=[32バイトの共有鍵])`。**
   既定はプロセスごとに鍵を生成するため、再送が別ワーカーへ行くと復号に失敗する。
   併せて**全インスタンスで同じサーバ名**にする（名前が封印トークンの audience になる）。
 - `subscriptions/listen` の長命ストリームは 1 レプリカに貼り付く。
-  SDK 同梱の `InMemorySubscriptionBus` は単一プロセス専用。プロセス跨ぎは
-  `SubscriptionBus` プロトコル（2 メソッド）を Redis / NATS 等で自前実装する。
-- `stateless_http=True` は**レガシー版（2025-11-25 以前）向けの逃げ道**で、
-  サーバ→クライアント機能を無効化する。2026-07-28 は元からステートレスなので
-  この版だけを相手にするなら触る必要がない。
-- SDK は `workers=` もヘルスチェック経路も TLS 設定も持たない。ASGI サーバ側で行う。
+  SDK 同梱の `InMemorySubscriptionBus` は単一プロセス専用。
+  プロセス跨ぎは `SubscriptionBus` プロトコル（2 メソッド）を Redis / NATS 等で自前実装する。
+- `stateless_http=True` は**レガシー版（2025-11-25 以前）向けの逃げ道**で、サーバ→クライアント機能を無効化する。
+  2026-07-28 は元からステートレスなのでこの版だけを相手にするなら触る必要がない。
+- SDK は `workers=` もヘルスチェック経路も TLS 設定も持たない。
+  ASGI サーバ側で行う。
 
 ## 実測ワイヤ出力
 
@@ -414,22 +403,16 @@ logger.info("searching for %r", query)
 
 ## 検証時の落とし穴（実測で踏んだもの）
 
-stdio で生 JSON-RPC を流すとき、**リクエストを書いた直後に stdin を閉じると
-成功応答が返らない**。サーバが処理を終える前にシャットダウンするため。
-失敗が速いケース（未知ツール）だけ応答が返るので、
-「特定のツールだけ壊れている」ように誤読しやすい。
-全応答を受け取るまで stdin を開いたままにすること
-（`assets/template/smoke_check.py` はそう実装してある）。
+stdio で生 JSON-RPC を流すとき、**リクエストを書いた直後に stdin を閉じると成功応答が返らない**（サーバが処理を終える前にシャットダウンするため）。
+失敗が速いケース（未知ツール）だけ応答が返るので、「特定のツールだけ壊れている」ように誤読しやすい。
+全応答を受け取るまで stdin を開いたままにすること（`assets/template/smoke_check.py` はそう実装してある）。
 
 
 ## 上流の一次資料
 
-- Python SDK ドキュメント: <https://py.sdk.modelcontextprotocol.io/>
-  （`migration/` `whats-new/` `deprecated/` `handlers/multi-round-trip/`
-  `handlers/elicitation/` `handlers/logging/` `servers/handling-errors/`
-  `run/deploy/` が特に効く）
+- Python SDK ドキュメント: <https://py.sdk.modelcontextprotocol.io/>（`migration/` `whats-new/` `deprecated/` `handlers/multi-round-trip/` `handlers/elicitation/` `handlers/logging/` `servers/handling-errors/` `run/deploy/` が特に効く）
 - SDK リポジトリ: <https://github.com/modelcontextprotocol/python-sdk>
-  2.x で書かれた実例は `examples/mcpserver/` と `examples/servers/`。
+  - 2.x で書かれた実例は `examples/mcpserver/` と `examples/servers/`
 
 ### 高スターの MCP サーバを写経してはいけない
 
@@ -441,14 +424,11 @@ stdio で生 JSON-RPC を流すとき、**リクエストを書いた直後に s
 | `github/github-mcp-server` | Go |
 | `modelcontextprotocol/python-sdk` | **2.x の実例はここの `examples/` だけ** |
 
-星の多さは「最新仕様である」ことを意味しない。むしろ実績のあるサーバほど
-1.x に固定されており、写経すると旧仕様が入る。2.x の実例として信頼できるのは
-SDK リポジトリの `examples/` のみ。
+星の多さは「最新仕様である」ことを意味しない。
+むしろ実績のあるサーバほど 1.x に固定されており、写経すると旧仕様が入る。
+2.x の実例として信頼できるのは SDK リポジトリの `examples/` のみ。
 
-そのうえで **`examples/` も上流のドキュメントより遅れている**:
-`examples/mcpserver/logging_and_progress.py` は非推奨の `await ctx.info(...)` を、
-`examples/servers/simple-streamablehttp/` は非推奨の `send_log_message` を
-（pyright の `reportDeprecated` 抑止コメント付きで）今も使っている。
+そのうえで **`examples/` も上流のドキュメントより遅れている**: `examples/mcpserver/logging_and_progress.py` は非推奨の `await ctx.info(...)` を、`examples/servers/simple-streamablehttp/` は非推奨の `send_log_message` を（pyright の `reportDeprecated` 抑止コメント付きで）今も使っている。
 例を読むときは `deprecated/` のページと突き合わせること。
 
 
@@ -463,7 +443,6 @@ SDK リポジトリの `examples/` のみ。
 | `MCP-Protocol-Version` あり・`Mcp-Method` なし | `400` `-32020` `mcp-method header does not match the request body's method` |
 | MCP エンドポイントへの `GET` | `400` |
 
-1〜3 行目は仕様どおり（`Mcp-Name` が要るのは `tools/call` / `resources/read` / `prompts/get` だけ。
-`MCP-Protocol-Version` 欠落は `400`。本文と食い違うヘッダは `-32020`）。4 行目は仕様との差異: 仕様は GET に
-`405` を SHOULD とするが SDK 2.1.1 は `400` を返す。旧クライアントの探索は `400` / `404` / `405` のどれでも
-進むので実害は無いが、`405` を期待した検査は落ちる。
+1〜3 行目は仕様どおり（`Mcp-Name` が要るのは `tools/call` / `resources/read` / `prompts/get` だけ。`MCP-Protocol-Version` 欠落は `400`。本文と食い違うヘッダは `-32020`）。
+4 行目は仕様との差異: 仕様は GET に `405` を SHOULD とするが SDK 2.1.1 は `400` を返す。
+旧クライアントの探索は `400` / `404` / `405` のどれでも進むので実害は無いが、`405` を期待した検査は落ちる。

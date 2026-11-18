@@ -24,15 +24,31 @@
 
 ## 上級編: 盲検比較
 
-スキルの 2 版をより厳密に比べたいときは、盲検比較を使える（`../../../agents/comparator.md` と `../../../agents/bench-analyzer.md`）。どちらがどちらかを明かさずに 2 つの出力を独立したエージェントに渡して品質を判定させ、その勝因を分析する。bench-analyzer（`posthoc_comparison`。両方に SKILL.md がある `old_skill` との比較に限る）へは、`compare-<ID>/comparison.json` と、`mapping.json` で引いた勝者・敗者それぞれの SKILL.md と run の `transcript.md` を渡す（`winner` が `TIE` の比較は渡さない）。返値の改善案は「5. 分析結果をもとに改善する」の材料にする。
+スキルの 2 版をより厳密に比べたいときは、盲検比較を使える（`../../../agents/comparator.md` と `../../../agents/bench-analyzer.md`）。
+
+- どちらがどちらかを明かさずに 2 つの出力を独立したエージェントに渡して品質を判定させ、その勝因を分析する
+- bench-analyzer（`posthoc_comparison`）を使うのは、両方に SKILL.md がある `old_skill` との比較に限る
+- bench-analyzer へ渡すもの: `compare-<ID>/comparison.json`、`mapping.json` で引いた勝者・敗者それぞれの SKILL.md と run の `transcript.md`
+- `winner` が `TIE` の比較は bench-analyzer へ渡さない
+- 返値の改善案は、eval-workflow の「5. 分析結果をもとに改善する」の材料にする
 
 ## 説明文の最適化
 
-SKILL.md の前置きの `description` は、Claude がスキルを呼ぶかどうかを左右する主要因である。作成・改善の後、次の手順で description のトリガー精度を上げる。train/holdout で過適合を避ける収束判断の考え方は `skill-tune`（ステップ7 の hold-out 過適合チェック）に従う。
+SKILL.md の前置きの `description` は、Claude がスキルを呼ぶかどうかを左右する主要因である。
+
+- 作成・改善の後、次の手順で description のトリガー精度を上げる
+- train/holdout で過適合を避ける収束判断の考え方は `skill-tune`（ステップ7 の hold-out 過適合チェック）に従う
 
 ### 1. トリガー用 eval クエリを作る
 
-`should_trigger` の true/false を混ぜた 20 件を JSON で保存する。should-trigger は 8〜10 件（同じ意図の別表現を広く）、should-not-trigger も 8〜10 件（近いが別のタスクが必要なもの）。クエリは実際のユーザーが打つ具体的な例にする（パス・列名・会社名・URL などの背景付き。小文字・略語・タイポ・口語も可。長さにばらつきを持たせ、エッジケースを重視する）。
+`should_trigger` の true/false を混ぜた 20 件を JSON で保存する。
+
+- should-trigger は 8〜10 件（同じ意図の別表現を広く）
+- should-not-trigger も 8〜10 件（近いが別のタスクが必要なもの）
+- クエリは実際のユーザーが打つ具体的な例にする
+  - パス・列名・会社名・URL などの背景を付ける
+  - 小文字・略語・タイポ・口語も可
+  - 長さにばらつきを持たせ、エッジケースを重視する
 
 ```json
 [
