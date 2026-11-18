@@ -330,7 +330,7 @@ flowchart LR
   CREF --> PRE(["preflight + baseline"])
   PRE --> AC["🧹 code-refiner<br/>mode=clean"]:::agent
   AC --> TEST(["✅ テスト検証<br/>ファイル単位"])
-  TEST -->|失敗| REVERT(["git checkout -- file"])
+  TEST -->|失敗| REVERT(["stage 前の控えへ戻す"])
   TEST -->|成功| NEXT(["次ファイルへ"])
   NEXT --> RV(["✅ reviewer（入口に触れるときは 🛡️ security-auditor も）<br/>→ final gate → 学びの記録 → 要約"])
 ```
