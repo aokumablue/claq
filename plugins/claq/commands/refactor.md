@@ -31,7 +31,8 @@ command: /refactor
 - `refactor-prep` skill: 対象分割・依存可視化・テストセットを確定する（fork 実行。結果は報告で受け取る）
 - `refactor-rollback` skill: ファイル単位のリバート計画（Rollback Blueprint）を作る（inline 実行で本セッションに展開される）
 
-複数ファイルを戻すときは Rollback Blueprint の `Order` に従う。
+各 stage の開始前に、Rollback Blueprint の手順で対象ファイルを控える。
+ファイルを戻すときは、その stage の控えへ戻す。複数なら `Order` に従う。
 
 `refactor-rollback` の出力を受け取った直後に、実効スコープを確定する（precondition gate）。
 
@@ -49,7 +50,7 @@ command: /refactor
 デッドコードを削除する。
 
 - 依頼文に `mode: clean` と `effective_scope` を明示する（モードも依頼文で渡さないと子へ届かない）
-- ファイルを 1 つ適用するごとにテストする。失敗したら `git checkout -- <file>` でそのファイルだけ戻して続ける
+- ファイルを 1 つ適用するごとにテストする。失敗したらそのファイルだけ戻して続ける
 
 ## ステップ4: simplify（並列, `claq:code-refiner`）
 
@@ -80,7 +81,7 @@ simplify の全グループが終わってから始める。依頼文に `mode: 
 ## ステップ7: final gate
 
 1. `refactor-prep` の `tests.final` を再実行する
-2. 失敗した変更はファイル単位で戻して再検証する
+2. 失敗した変更は、その変更を入れた stage の控えへファイル単位で戻して再検証する
 
 `Final Gate: PASS` になるのは次をすべて満たすときだけで、1 つでも欠ければ `BLOCKED`。
 
