@@ -8,9 +8,8 @@ user-invocable: true
 
 ## 原則: 色はテンプレートから複製し、記憶で書かない
 
-配色は `assets/template/tokens.css` に生成済みで、その正本は
-`references/tokens.json`（shadcn/ui レジストリの逐語コピー）。Tailwind 既定色、
-`#0d1117`、`#2563eb` の類を 1 つでも手書きすると検査で落ちる。
+- 配色は `assets/template/tokens.css` に生成済みで、その正本は `references/tokens.json`（shadcn/ui レジストリの逐語コピー）
+- Tailwind 既定色・`#0d1117`・`#2563eb` の類を 1 つでも手書きすると検査で落ちる
 
 | 避ける | 代わりに |
 |---|---|
@@ -65,18 +64,18 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 
 ### 3. 中身を差し替える
 
-差し替える: タイトル、指標の名前と数値、チャートのデータと `<desc>`、表、
-ナビゲーション項目、`html[data-base]`（手順1で選んだベースカラー）、
-`html[data-page-kind]`。
+差し替える: タイトル・指標の名前と数値・チャートのデータと `<desc>`・表・ナビゲーション項目・`html[data-base]`（手順1で選んだベースカラー）・`html[data-page-kind]`。
 
 - データ由来の文字列は、書く場所（表のセル・SVG の title/desc・軸ラベル・凡例・属性値）を問わず HTML エスケープする
 - フォント・画像・スクリプトは外部から読まず同梱する（CSP が外部オリジンを許さない）
 - Web フォントは手順2 で複製した `fonts/` のものを `styles.css` が読む
 
-触らない: `tokens.css`（生成物）、`app.js`、`button[data-theme-value="light"|"dark"]`、
-`<head>` の `app.js` 読み込み位置（body 末尾へ移すと初回に白がちらつく）、
-`.chart-scroll` ラッパ、`@media (prefers-reduced-motion: reduce)` ブロック、
-`svg[role="img"]` の `<title>`/`<desc>`、`data-origin="0"`。
+触らない:
+
+- `tokens.css`（生成物）・`app.js`・`button[data-theme-value="light"|"dark"]`
+- `<head>` の `app.js` 読み込み位置（body 末尾へ移すと初回に白がちらつく）
+- `.chart-scroll` ラッパ・`@media (prefers-reduced-motion: reduce)` ブロック
+- `svg[role="img"]` の `<title>`/`<desc>`・`data-origin="0"`
 
 足さない: 動作の無い操作部品（例: 期間切替・CSV・レポート作成・通知・すべて表示・ヘッダの全体検索）。
 
@@ -104,12 +103,13 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 - クリーム色・オフホワイトの背景（背景は `var(--background)` のまま）
 - ピル形のボタン（新しく足すボタンは `--radius-md`）
 
-どれもテンプレートの外から持ち込まれやすい意匠で、shadcn/ui の見た目から外れる。
-テンプレートに既にある要素（配色ピッカーの円形ボタン・バッジなど）の形は変えない。
+- 理由: 上の意匠はテンプレートの外から持ち込まれやすく、shadcn/ui の見た目から外れる
+- テンプレートに既にある要素（配色ピッカーの円形ボタン・バッジなど）の形は変えない
 
-グラフ種別は上から順に当て、最初に当たった行で確定する（詳細と根拠は
-`references/design.md`「グラフ種別の選定」）。迷って選び直さない。種別が回ごとに
-揺れる原因は知識不足ではなく、同点のときの決め手が無いことである。
+グラフ種別は次の表を上から順に当て、最初に当たった行で確定する（詳細と根拠は `references/design.md`「グラフ種別の選定」）。
+
+- 迷って選び直さない
+- 理由: 種別が回ごとに揺れる原因は知識不足ではなく、同点のときの決め手が無いことにある
 
 | # | データがこうなら | 使う |
 |---|---|---|
@@ -125,31 +125,28 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 | 10 | 大小比較（上記以外） | 縦棒 |
 | 11 | 意味のある分類が 8 以上で省けない | 表 |
 
-時間は必ず横軸へ置く。例外は規則 8 の構成比で、時点を行として縦に並べる。縦横の向きは見た目の好みで決めない。
-選んだ種別の SVG 骨格・viewBox 幅の上限・余白の取り方は `references/chart-forms.md` から写して使う。
-
-軸の無いグラフは出荷しない。直交軸チャートには目盛りラベルと目盛り線を
-最低 3 本ずつ（通常 5〜7 本）置き、刻みは 1・2・5 の倍数にする。検査が落とす。
+- 時間は必ず横軸へ置く。例外は規則 8 の構成比で、時点を行として縦に並べる
+- 縦横の向きは見た目の好みで決めない
+- 選んだ種別の SVG 骨格・viewBox 幅の上限・余白の取り方は `references/chart-forms.md` から写して使う
+- 軸の無いグラフは出荷しない（検査が落とす）
+  - 直交軸チャートには目盛りラベルと目盛り線を最低 3 本ずつ（通常 5〜7 本）置く
+  - 刻みは 1・2・5 の倍数にする
 
 チャートを増減するときの注意（詳細は `references/design.md`）:
 
 - 座標は viewBox 内の数値で持つ。系列色は `var(--chart-1..5)`
-- 値はマークの `<title>` に書く（`app.js` がホバー・タップで浮き札にする）。
-  時系列は全時点に当たり判定（`.hover-col`）を置き、点を間引いて値の届かない時点を作らない。
-  同じ値を図の直下の `<details class="chart-data">` の表にも置く（キーボード・読み上げ向け。
-  凡例に値があるドーナツ・積み上げ横棒は不要）
-- viewBox の縦横比がそのまま図の縦横比になる。高さの上限に固定 px を書かない
-  （広い画面でレターボックスが働き図だけ小さく残る）。`clamp(320px, 46vh, 620px)`
+- 値はマークの `<title>` に書く（`app.js` がホバー・タップで浮き札にする）
+  - 時系列は全時点に当たり判定（`.hover-col`）を置き、点を間引いて値の届かない時点を作らない
+  - 同じ値を図の直下の `<details class="chart-data">` の表にも置く（キーボード・読み上げ向け。凡例に値があるドーナツ・積み上げ横棒は不要）
+- viewBox の縦横比がそのまま図の縦横比になる
+  - 高さの上限に固定 px を書かず、`clamp(320px, 46vh, 620px)` にする（固定 px だと広い画面でレターボックスが働き、図だけ小さく残る）
 - 図の中の文字は、軸名・凡例・値のラベルも含めすべて `<text class="axis-text">`（軸名は `axis-text axis-title`）
   - `font-size` を個別に書かない（`check_site.py` が落とす）
 - x 軸のラベル帯と y 軸の目盛り幅を viewBox の内側に取る（幅は `references/chart-forms.md`「余白の取り方」で数える）
-- 静止状態を完成形にする。動きは `[data-animate="in"]` の下だけに書く。
-  `opacity: 0` を静止状態に置いたり `animation-fill-mode: forwards` を使うと、
-  背面タブ・JS 無効・印刷で真っ白なページになる（検査で落ちる）
-- 円弧の開始位置は SVG 属性の `stroke-dashoffset`。CSS で宣言しない
-  （CSS が属性より優先され、全セグメントが重なる）
-- 潰した SVG（`preserveAspectRatio="none"`）に `stroke-dasharray` のドローを
-  使わない。`clip-path` で拭う
+- 静止状態を完成形にする。動きは `[data-animate="in"]` の下だけに書く
+  - `opacity: 0` を静止状態に置いたり `animation-fill-mode: forwards` を使ったりすると、背面タブ・JS 無効・印刷で真っ白なページになる（検査で落ちる）
+- 円弧の開始位置は SVG 属性の `stroke-dashoffset` で書き、CSS で宣言しない（CSS が属性より優先され、全セグメントが重なる）
+- 潰した SVG（`preserveAspectRatio="none"`）に `stroke-dasharray` のドローを使わず、`clip-path` で拭う
 - ドーナツ以外の図は `.chart-scroll` で包む（`check_site.py` が落とす）
 - `auto-fit` のグリッドに `span` を掛けない。列数を明示する
 
@@ -165,14 +162,11 @@ python3 /abs/path/to/dest/check_site.py /abs/path/to/dest
 
 `check_site.py` のコントラスト検査は `tokens.json` 上の値で測るので、描画された姿はブラウザでも確かめる。
 
-1. `python3 -m http.server` で配信して開く（`file://` は localStorage が使えず
-   永続を確認できない）
-2. DevTools コンソールに `e2e_contrast.js` を貼り付けて実行する。
-   5 ベースカラー × ライト/ダークの 10 ブロックを巡回する。`verdict` が `GREEN` なら受け入れ、
-   `RED` なら `failures`・`textFailures`・`behaviorFailures` に出た項目を直す。`GREEN` なら、
-   図の文字の描画後の大きさ（12〜13px）と、一覧の検索・絞り込みの動作も通っている
-3. 幅 320 / 390 / 768 / 1280 / 1920px で `document.documentElement.scrollWidth` が
-   `clientWidth` と一致することを見る（横スクロールが出ていない証拠）
+1. `python3 -m http.server` で配信して開く（`file://` は localStorage が使えず、永続を確認できない）
+2. DevTools コンソールに `e2e_contrast.js` を貼り付けて実行する（5 ベースカラー × ライト/ダークの 10 ブロックを巡回する）
+   - `verdict` が `GREEN` なら受け入れる。図の文字の描画後の大きさ（12〜13px）と、一覧の検索・絞り込みの動作も通っている
+   - `RED` なら `failures`・`textFailures`・`behaviorFailures` に出た項目を直す
+3. 幅 320 / 390 / 768 / 1280 / 1920px で `document.documentElement.scrollWidth` が `clientWidth` と一致することを見る（横スクロールが出ていない証拠）
 4. 再読込してもテーマとベースカラーが保たれ、白がちらつかないことを見る
 5. 図が描き切った状態で止まること、モーションを切っても全部読めることを見る
 6. サイドバーの全項目を実際にクリックし、その節へスクロールして現在地が付くこと（狭い幅ではサイドバーが閉じること）を見る
@@ -205,7 +199,6 @@ python3 /abs/path/to/dest/check_site.py /abs/path/to/dest
 
 ## 永続メモリ
 
-- 参照: `claq_run claq.mem.cli search "shadcn ui web template"`
-  （`. "$HOME/.claq/env.sh"` 前提）→ 本文が要る key だけ
-  `claq_run claq.mem.cli show <key>`
-- 記録: 再利用可能な学びだけ `claq_mem_learn`。基準は `../learn/SKILL.md`
+- 参照: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "shadcn ui web template"` を実行する
+  - 本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
+- 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md`

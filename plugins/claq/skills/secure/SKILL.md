@@ -10,7 +10,8 @@ disable-model-invocation: true
 ## 手順
 
 1. 対象の入口（HTTP・CLI・ファイル・アップロード・プロンプトへ入る外部由来の文字列）を列挙する
-2. 各入口に届く攻撃者（ネットワーク上の client・他ユーザー・プロンプトへ入る不信テキスト）を特定する。ローカル開発者本人と同一 UID のプロセスだけが届く入口は `到達経路なし` として終える
+2. 各入口に届く攻撃者（ネットワーク上の client・他ユーザー・プロンプトへ入る不信テキスト）を特定する
+   - ローカル開発者本人と同一 UID のプロセスだけが届く入口は `到達経路なし` として終える
 3. 届く入口に下の観点を当て、攻撃者が今のコードで得るもの（情報漏洩・権限奪取・任意実行・改ざん）を 1 行で書けたものを穴とする
    - クラウド・IaC・CI/CD・デプロイ設定が対象なら、`references/cloud-infrastructure-security.md` の観点も同じ条件で当てる
 4. 穴は、その得るものを無くす最小の変更で塞ぎ、塞いだ穴ごとにテストを書く（未認証→401、権限なし→403、境界タグを混ぜた入力が境界を越えない、等）
@@ -20,7 +21,10 @@ disable-model-invocation: true
 ## 穴の観点
 
 - シークレット: キー・トークン・パスワードがコードや履歴に無く、実行時に環境変数・シークレットマネージャーから入る
-- 入力: 外部入力を入口で 1 回スキーマ検証している。アップロードはサイズ・形式を入口で決めている。エラー応答に機微情報が出ない
+- 入力:
+  - 外部入力を入口で 1 回スキーマ検証している
+  - アップロードはサイズ・形式を入口で決めている
+  - エラー応答に機微情報が出ない
 - SQL・シェル: クエリはパラメータ化、コマンドは引数リスト形式
 - 認証・認可: 機微な操作の前に認可を確かめる。トークンは httpOnly クッキー
 - XSS: 利用者提供の HTML をエスケープ・サニタイズして出す
@@ -42,7 +46,8 @@ disable-model-invocation: true
 
 ## 永続メモリ
 
-- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `security vulnerability {category}` / `{vulnerability_type} fix`
+- search: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+  - クエリ例: `security vulnerability {category}` / `{vulnerability_type} fix`
   - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 特定の入口に結び付く学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
 

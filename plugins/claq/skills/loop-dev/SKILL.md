@@ -42,7 +42,9 @@ user-invocable: false
 - `commit`: 既定 `true`
 
 入力に不明点があっても質問で止まらない。反復1 の plan で仮に決め、出力の Assumptions に書く。
-仮決定は要件の文ではないので、コードのコメントと報告で「要件」として引用しない（仮決定から生じる入力の拒否・上限・続行経路は、再現できる失敗など別の根拠を引用できるときに書く）。
+
+- 仮決定は要件の文ではないので、コードのコメントと報告で「要件」として引用しない
+- 仮決定から生じる入力の拒否・上限・続行経路は、再現できる失敗など別の根拠を引用できるときに書く
 
 ## テストコマンドの検出
 
@@ -56,9 +58,11 @@ user-invocable: false
 - CLAUDE.md・AGENTS.md・CI 設定に指定があれば、それを優先する
 - linter も同じく、CLAUDE.md と設定ファイルから決める
 
-どれにも当たらなければ推測で組まない。
-baseline と、収束判定のテストの条件を省く。
-出力の Assumptions に `テストコマンド未検出` と書く。
+どれにも当たらないとき:
+
+- 推測でコマンドを組まない
+- baseline と、収束判定のテストの条件を省く
+- 出力の Assumptions に `テストコマンド未検出` と書く
 
 ## 手順
 
@@ -85,7 +89,7 @@ baseline と、収束判定のテストの条件を省く。
 
    - red なら、evaluate へ進む前に同じ担当エージェントに直させる
    - ただし `bugfix` / `refactor-fix` で baseline が green だったテストが red になったときは、重ねて直さない
-     - その generate が加えた編集の逆適用だけで取り消し、該当の blocker は未解消のまま残す
+     - 直前の generate が加えた編集の逆適用だけで取り消し、該当の blocker は未解消のまま残す
      - 呼び出し前からある未コミットの編集まで巻き込む操作は使わない（`git checkout --`・`git restore`・`git reset --hard`・`git stash`・`git clean`）
    - 報告する PASS/FAIL は、本セッションで実際に実行したツール出力だけを根拠にする。未実行の項目は未検証と書く
    - Edit/Write が成功していれば、確認のための再 Read はしない（失敗時はツールがエラーを返す）
@@ -96,7 +100,7 @@ baseline と、収束判定のテストの条件を省く。
    - ローカル開発者本人だけが届く入口（CLI 引数・設定ファイル）の変更では加えない
    - 届くかを判断できないときは加える（到達経路は security-auditor が判定する）
    - security-auditor は Bash を持たず diff を取れないので、依頼文へ diff 本文か変更ファイルの一覧を載せる
-   - 並列のときは reviewer の依頼文にその旨を書き、同じ応答に Agent 呼び出しを並べる
+   - security-auditor を並列に加えるときは、reviewer の依頼文に「`security-auditor` との並列起動」と書き、同じ応答に Agent 呼び出しを並べる
    - reviewer の依頼文に載せるもの:
      - `verify_mode: reexecute`
      - 失敗テストのシグネチャ（反復履歴の tests= と同じもの）
@@ -138,7 +142,9 @@ baseline と、収束判定のテストの条件を省く。
    - 「提案」へ回った blocker は未解消として数え、Proposals に転記する
    - baseline が green だったテストが red になったときの扱いは、反復1 の generate と同じ
 3. circuit breaker を判定する（`## circuit breaker`）。hard trigger なら evaluate を飛ばす
-4. evaluate: reviewer を再実行する。依頼文に前回の blocker 一覧を渡し、その解消と反復2 の差分が持ち込んだ問題だけを見させる（反復1 で指摘されなかった既存コードの問題は掘り起こさない）
+4. evaluate: reviewer を再実行する
+   - 依頼文に前回の blocker 一覧を渡し、その解消と反復2 の差分が持ち込んだ問題だけを見させる
+   - 反復1 で指摘されなかった既存コードの問題は掘り起こさせない
    - security-auditor を再実行するのは、次のどちらかのときだけ
      - 反復1 の security-auditor が `Blockers` 1 以上を返した
      - 反復2 の差分が反復1 と同じ起動条件に触れる
@@ -181,7 +187,8 @@ checkpoint skill は呼ばず、そのフォーマット（`../checkpoint/SKILL.
 ## コミット方針
 
 - 各反復の収束判定が green になったら自動でコミットする（メッセージは変更要約 1 行。反復番号は checkpoint の反復履歴に記録するのでメッセージには書かない）
-- コミット前に対象リポジトリの CLAUDE.md / AGENTS.md / CONTRIBUTING.md のコミット禁止・ブランチ規約を確認する。禁止されていればコミットせず、出力に「未コミット（理由）」と書く
+- コミット前に対象リポジトリの CLAUDE.md / AGENTS.md / CONTRIBUTING.md のコミット禁止・ブランチ規約を確認する
+  - 禁止されていればコミットせず、出力に「未コミット（理由）」と書く
 - `--no-verify` などでフックを迂回しない（保護フックは Python 3.12 未満で fail-open するため、この行が唯一の歯止めになる環境がある）
 - `git add` と `git commit` は別々のツール呼び出しに分ける
   - `git add -A && git commit -m ...` のように 1 回の Bash 呼び出しにまとめると、commit 品質フック（`pre_bash_commit_quality`）が実行前の index しか見られず deny する
@@ -233,7 +240,8 @@ Proposals:   {提案（採否は利用者。既定では実施しない） or "-
 `<claq-memory>` の注入（SessionStart の `mem context`。`status='active'` の知識のみ）を受けて起動する。
 本 skill は `context: fork` なので注入が届くが、委譲先のサブエージェントには届かない。渡したい知識があれば依頼文に書く。
 
-- search: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `loop-dev iteration blocker converge {task キーワード}`）
+- search: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+  - クエリ例: `loop-dev iteration blocker converge {task キーワード}`
   - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 実装中に踏んだ罠・判明した事実は `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
   - 反復の収束状況そのもの（生ログ）は知識カードに混ぜない。記録先は checkpoint の `## 反復履歴`（`../checkpoint/SKILL.md`）
