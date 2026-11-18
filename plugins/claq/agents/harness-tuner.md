@@ -48,7 +48,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 ## 制約
 
 - 測定できる効果を持つ小さな変更を優先する
-- 防御を足すアクション（Security Guardrails 等）は、根拠を引用できるときに適用する。それ以外は理由を添えて「提案」として報告する
+- 防御を足すアクション（Security Guardrails 等）は、根拠を引用できるときに適用する。根拠を引用できないアクションは理由を添えて「提案」として報告する
   - 根拠: 要件の文・攻撃者と入口・再現できる失敗（保護フックではエージェント自身の誤操作も含む）
 - md のクロス参照と description が実装と一致するようにする（壊れた参照・存在しないコマンド参照・循環参照を作らない）
 - クロスプラットフォームの動作とエディタ間の互換性を保つ
@@ -67,7 +67,8 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 
 知識カードは自動注入されない。過去の判断が要るときは自分で引く。
 
-- 検索: `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."`（クエリ例 `harness config optimization audit` / `harness improvement score`）
+- 検索: `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."` を実行する
+  - クエリ例: `harness config optimization audit` / `harness improvement score`
 - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 
 学びは自分では書かず、候補を呼び出し元へ報告する（成果が呼び出し元の gate で取り消されうるため、確定前に書くと誤った知識が残る）。

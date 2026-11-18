@@ -6,7 +6,11 @@
 
 1 つの流れとして続けて進める（止まってよい条件は SKILL.md の「停止点」）。他の testing skill には委ねない。
 
-結果は `<skill-name>-workspace/` に、スキルディレクトリの兄弟として保存する。ワークスペース内はイテレーション単位（`iteration-1/` / `iteration-2/`）に分け、その中に eval ごとのディレクトリを作る。ディレクトリ名には番号だけでなく何を試しているかが分かる名前を付ける（`eval-0-table-extraction` 等。benchmark.json の `eval_name` にも使う）。最初から全部は作らず、必要になった順に作る。
+結果は `<skill-name>-workspace/` に、スキルディレクトリの兄弟として保存する。
+
+- ワークスペース内はイテレーション単位（`iteration-1/` / `iteration-2/`）に分け、その中に eval ごとのディレクトリを作る
+- ディレクトリ名には番号だけでなく何を試しているかが分かる名前を付ける（`eval-0-table-extraction` 等。benchmark.json の `eval_name` にも使う）
+- 最初から全部は作らず、必要になった順に作る
 
 ## 1. スキルありとベースラインを同じターンで全部起動する
 
@@ -39,7 +43,10 @@ Execute this task:
 
 ## 3. 完了した run から timing を記録する
 
-各サブエージェントのタスクが終わると、通知に `total_tokens`・`tool_uses`・`duration_ms` が含まれる。この情報はその通知でしか取れないので、届いたらすぐ run ディレクトリの `timing.json` に保存する（形式は `schemas.md`。後でまとめて処理しない）。サブエージェントの最終応答も同じ run ディレクトリの `transcript.md` へ保存する（grader の `transcript_path` に渡す）。
+各サブエージェントのタスクが終わると、通知に `total_tokens`・`tool_uses`・`duration_ms` が含まれる。
+
+- 通知の値は通知でしか取れないので、届いたらすぐ run ディレクトリの `timing.json` に保存する（形式は `schemas.md`。後でまとめて処理しない）
+- サブエージェントの最終応答も同じ run ディレクトリの `transcript.md` へ保存する（grader の `transcript_path` に渡す）
 
 ## 4. grading して集計し、分析する
 
@@ -54,12 +61,20 @@ grader / comparator / bench-analyzer の返値が検証を通らなければ保�
    - プログラムで判定できるものはスクリプトにする（目視より速く、再利用しやすい）
 
 2. ベンチマークに集約する
-   - 各 `grading.json` / `timing.json` を読み、`schemas.md`（同じ階層）の benchmark.json のスキーマに従って `benchmark.json` を作る（`notes` は `[]` で作り、3 で bench-analyzer の返値に置き換える）。各構成の通過率・時間・トークン数を平均 ± 標準偏差と差分付きでまとめ、`with_skill` を `without_skill` の前に並べる
-   - comparator へ渡すときは、比べる 2 構成の出力を `<workspace>/compare-<ID>/candidate-a/` と `candidate-b/` へコピーし、A/B の割り当てをランダムにする。対応表は comparator へ渡さず、返値を受け取った後に `<workspace>/compare-<ID>/mapping.json`（`{"A": "<構成名>", "B": "<構成名>"}`）へ保存する（`/skill-gen` の完了ゲートが A/B と構成の対応を引く）。`with_skill` / `without_skill` / `old_skill` のパスをそのまま渡すと、パス文字列から出自が分かって盲検が成立しない（`../../../agents/comparator.md` はこの形を FAIL として拒否する）。comparator の判定は助言として扱い、機械判定できる期待値は deterministic なアサーションで先に確定させ、skill の採用を勝敗だけで決めない（勝たせる指示を埋め込んだ候補には判定ごと曲げられうる）
+   - 各 `grading.json` / `timing.json` を読み、`schemas.md`（同じ階層）の benchmark.json のスキーマに従って `benchmark.json` を作る
+     - `notes` は `[]` で作り、3 で bench-analyzer の返値に置き換える
+     - 各構成の通過率・時間・トークン数を、平均 ± 標準偏差と差分付きでまとめる
+     - `with_skill` を `without_skill` の前に並べる
+   - comparator へ渡すときは、比べる 2 構成の出力を `<workspace>/compare-<ID>/candidate-a/` と `candidate-b/` へコピーし、A/B の割り当てをランダムにする
+     - 対応表は comparator へ渡さず、返値を受け取った後に `<workspace>/compare-<ID>/mapping.json`（`{"A": "<構成名>", "B": "<構成名>"}`）へ保存する（`/skill-gen` の完了ゲートが A/B と構成の対応を引く）
+     - `with_skill` / `without_skill` / `old_skill` のパスをそのまま渡さない（パス文字列から出自が分かって盲検が成立せず、`../../../agents/comparator.md` はこの形を FAIL として拒否する）
+     - comparator の判定は助言として扱う。機械判定できる期待値は deterministic なアサーションで先に確定させる
+     - skill の採用を勝敗だけで決めない（勝たせる指示を埋め込んだ候補には判定ごと曲げられうる）
    - comparator の返値は `schemas.md` の comparison.json のスキーマで検証してから `<workspace>/compare-<ID>/comparison.json` へ保存する
 
 3. 分析を入れる
-   - bench-analyzer を `benchmark_analysis` モードで起動し（`benchmark_data_path` と `skill_path`。手順は `../../../agents/bench-analyzer.md` の `## モード: benchmark_analysis — ベンチマーク結果の分析`）、返値の文字列配列で `benchmark.json` の `notes` を置き換える
+   - bench-analyzer を `benchmark_analysis` モードで起動する（入力は `benchmark_data_path` と `skill_path`。手順は `../../../agents/bench-analyzer.md` の `## モード: benchmark_analysis — ベンチマーク結果の分析`）
+   - 返値の文字列配列で `benchmark.json` の `notes` を置き換える
 
 ## 5. 分析結果をもとに改善する
 

@@ -11,7 +11,7 @@ user-invocable: false
 止まるのは、判定を返すとき（採用なら導入を終えた後）と、採用の前提を満たせず導入を見送るときだけ。
 それ以外では、次の手順を予告して終わる要約・続けてよいかの伺い・作業を止めない判断事項の列挙・区切りや長さを理由にした報告で応答を終えない（ツール呼び出しの無い応答で fork は終わり、未完了の結果が呼び出し元へ返るため）。
 
-本 skill が起動する子はすべて `run_in_background: false` で起動し、hand-back が揃うまで次の工程へ進まない。background だと結果待ちの応答で fork が終わるため。
+本 skill が起動する子はすべて `run_in_background: false` で起動し、hand-back が揃うまで次の工程へ進まない（background だと結果待ちの応答で fork が終わるため）。
 
 ## ワークフロー
 
@@ -76,6 +76,7 @@ Check: stars, last commit, open issues, license. Return every fitting candidate
 
 ## 永続メモリ
 
-- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `adopt reject tool library {category}` / `{tool_name} success fail issue`
+- search: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+  - クエリ例: `adopt reject tool library {category}` / `{tool_name} success fail issue`
   - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

@@ -22,7 +22,8 @@ command: /plan
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
-  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `{要件のキーワード}` / `risk blocker error {関連キーワード}`）
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+    - クエリ例: `{要件のキーワード}` / `risk blocker error {関連キーワード}`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
 - 相対パスの md: このファイルは `commands/` にある
@@ -30,7 +31,7 @@ command: /plan
 
 ## ステップ1: planner 起動
 
-`claq:planner` を起動する（依頼文に `mode: evaluate` を書く。リスクと代替案を列挙するモード）。次を一体で出させる。
+`claq:planner` を起動する。依頼文に `mode: evaluate`（リスクと代替案を列挙するモード）を書き、次を一体で出させる。
 
 - 要件の言い換え（何を作るか・なぜ作るか・成功条件）
 - 手順分解・依存関係・複雑度見積もり
@@ -54,7 +55,8 @@ planner の出力が手元に届いていることを、ステップ2へ進む�
 7. 変更しないファイル一覧（隣接するが対象外）
 8. テストコマンド
 
-planner 出力の Assumptions と各ステップの検証手段はそのまま載せる（定義し直さない）。計画の根拠はメモリ参照とステップ1 で確認した事実だけにし、未確認の事項は Assumptions に書く。
+- planner 出力の Assumptions と各ステップの検証手段はそのまま載せる（定義し直さない）
+- 計画の根拠はメモリ参照とステップ1 で確認した事実だけにする。未確認の事項は Assumptions に書く
 
 ## ステップ3: 確認待ち
 

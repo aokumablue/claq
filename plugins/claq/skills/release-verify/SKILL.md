@@ -22,7 +22,8 @@ drift の判定は `../maintain/SKILL.md`、脆弱性の観点は `../secure/SKI
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
-  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `release verify smoke {コンポーネント名}` / `bypass 実測 exit code`）
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+    - クエリ例: `release verify smoke {コンポーネント名}` / `bypass 実測 exit code`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
   - root ポインタが未記録の文脈では `claq_run` が exit 127 で解決できないので、開発リポジトリの `.venv`（claq が入っている）で `python3 -m claq.mem.cli search "..."` を直接叩く
 - 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
@@ -57,7 +58,8 @@ echo "measured=$MEASURED_ROOT via=$VIA gate=$GATE_ROOT"
 ```
 
 - source の行をパイプへ流さない。`. "$HOME/.claq/env.sh" | head` のようにするとサブシェルで実行されて helper が残らず、解決できている文脈を「ポインタ未記録」と誤診する
-- 2 つの root が一致しなければ、リポジトリで通った修正は測定 root にまだ入っていない。一致しない状態の指摘には、どちらの root で測ったかを必ず添える
+- 2 つの root が一致しなければ、リポジトリで通った修正は測定 root にまだ入っていない
+  - 一致しない状態の指摘には、どちらの root で測ったかを必ず添える
 - 起動経路で実行される木が変わる。2 つの経路の結果を同じ表に混ぜない
   - `$PLUGIN_ROOT/src/claq/launcher.py` 経由: launcher が自分の `src` を `sys.path` の先頭へ挿すので、PLUGIN_ROOT の木を実行する
   - `python3 -m claq.モジュール名`: PLUGIN_ROOT を見ない
@@ -149,7 +151,9 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
   - 末尾に `; echo "exit=$?"` を足すと、表示は正しくても複合コマンド全体の終了コードが `echo` の 0 になる
   - 複合の rc を記録する仕組みでは、全フックが合格に見える。記録するなら `rc=$?` で退避してから表示する
 - 16 通りで同じ exit code にならなければ、payload の作り方ではなく、まず実装側のバイパスを疑う（形状の差はバイパスを炙り出す検出器として流している）
-- 陽性と陰性を対で流す。フックごとに「ブロックされるべき payload」と「通るべき payload」を用意し、exit code で判別できることを確かめる。判別できない測定（両方 0、両方 2）は無効
+- 陽性と陰性を対で流す
+  - フックごとに「ブロックされるべき payload」と「通るべき payload」を用意し、exit code で判別できることを確かめる
+  - 判別できない測定（両方 0、両方 2）は無効
 - 状態に依存するフック（`pre_bash_commit_quality` 等、staged の内容や worktree を見るもの）は、使い捨ての git リポジトリで流す
   - 検出対象（`debugger` 行・秘密鍵形式の文字列など）を staged にしてから流す
   - 空のリポジトリでの exit 0 は、検査対象が 0 件だった場合と区別できないので、素通りの証拠にならない
@@ -157,7 +161,8 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
   - 各イベントの実 payload（`session_id` / `transcript_path` など）を流し、exit code ではなく副作用を確かめる
   - `--bg`（非同期）フックの exit 0 は投げっぱなしの成功で、処理の成否と無関係。書いたはずのレコードを直接読む
   - `handoff` なら、`sessions` の行数ではなく `handoff` 列の中身を SELECT する（行数は SessionStart の `context` 側でも増える）
-  - `handoff` は、`transcript_path` が信頼 root（`~/.claude/projects` 等）の外だと要約を空にして exit 0 で終わる。検証用の transcript を別の場所に置くなら、そのディレクトリを `CLAQ_TRANSCRIPT_ROOTS` に渡す
+  - `handoff` は、`transcript_path` が信頼 root（`~/.claude/projects` 等）の外だと要約を空にして exit 0 で終わる
+    - 検証用の transcript を別の場所に置くなら、そのディレクトリを `CLAQ_TRANSCRIPT_ROOTS` に渡す
 
 ### commands / skills / agents
 
@@ -185,10 +190,11 @@ DB へ書く操作は必ず後始末する。
 
 - mem の DB の位置は `CLAQ_DATA_PATH`（未設定なら `CLAQ_HOME`、それも無ければ `HOME` の配下の `.claq`）で決まる（`mem/settings.py`）
 - ここでは `CLAQ_DATA_PATH` で隔離する。取り違えると実 DB（`~/.claq/mem.db`）を汚す
-- `pre_compact` は `CLAQ_DATA_PATH` を見ず、`CLAQ_HOME`（未設定なら `HOME`）の配下の `.claq/session-data/compaction-log.txt` へ追記する。PreCompact を流す呼び出しでは、その 1 コマンドにだけ `CLAQ_HOME=固定パス` を前置する（前置しないと実ログに 1 行増える）
+- `pre_compact` は `CLAQ_DATA_PATH` を見ず、`CLAQ_HOME`（未設定なら `HOME`）の配下の `.claq/session-data/compaction-log.txt` へ追記する
+  - PreCompact を流す呼び出しでは、その 1 コマンドにだけ `CLAQ_HOME=固定パス` を前置する（前置しないと実ログに 1 行増える）
 - 破壊的な操作を実測するなら、使い捨ての作業ツリーと一時 DB を使う
 
-環境変数は Bash の呼び出しをまたいで残らないので、`$(mktemp -d)` は呼び出しごとに別のディレクトリになり、前の呼び出しで書いた内容を検証できない。固定パスを、毎回同じ式から導いて export する。
+固定パスを、毎回同じ式から導いて export する（環境変数は Bash の呼び出しをまたいで残らず、`$(mktemp -d)` は呼び出しごとに別のディレクトリになって、前の呼び出しで書いた内容を検証できないため）。
 
 ```bash
 # 毎回の Bash 呼び出しの先頭でこの 2 行を実行する。同じ式なので必ず同じパスになる
@@ -227,8 +233,11 @@ claq_run claq.ci.scan_scaffold_drift
   - 再現を試みて失敗 → `NO-FIX`（根拠 = 再現手順と観測結果）
   - 再現を試みていない → `Unadjudicated`
 - 台帳の外に「要裁定」のような別節を作らない（別節に置いた指摘は出力の恒等式に数えられないまま終わる）
-- 一次証跡の無い指摘に severity を付けない。自分で再現していない項目は `unrated` に数え、エージェントが申告した severity を転記しない（転記は自己申告を証跡として採用するのと同じ）
-- 自分の計測も疑う。計測が「効いていない」側に倒れていないかを、入力長を変えて確かめる（長さに対して時間が伸びないなら、計測が攻撃形状を作れていない可能性を先に疑う）
+- 一次証跡の無い指摘に severity を付けない
+  - 自分で再現していない項目は `unrated` に数える
+  - エージェントが申告した severity を転記しない（転記は自己申告を証跡として採用するのと同じ）
+- 自分の計測も疑う。計測が「効いていない」側に倒れていないかを、入力長を変えて確かめる
+  - 長さに対して時間が伸びないなら、計測が攻撃形状を作れていない可能性を先に疑う
 - 「存在の測定」と「実効性の測定」を混同しない
   - `harness_audit` の `Security Guardrails` は保護フックの存在を測るだけで、同カテゴリが満点のままバイパスが素通りしうる
   - 実効性は実 payload の exit code でしか測れない
@@ -263,8 +272,10 @@ NO-FIX にする形:
 6. 失敗の後に続行する経路（握り潰し・既定値・再試行・代替経路）は、続行を決めた文（要件・利用者の指示・外部 API 契約）を引用できるときに書く
 7. 5・6 で書いたものは、根拠をコメント 1 行と報告の「追加した防御」に残す
 8. 要件に無い改善（ベストプラクティス由来を含む）は、報告の「提案」に理由と出典を付けて書くだけにする。採否は利用者が決める
-9. 不具合は原因の箇所で直す。変更で使われなくなったコード・テスト・互換分岐は同じ変更で消す
-10. 抽象と設定項目は、今ある呼び出し元が使う分だけ作る。コメントは「なぜ」を書く
+9. 不具合は原因の箇所で直す
+10. 変更で使われなくなったコード・テスト・互換分岐は同じ変更で消す
+11. 抽象と設定項目は、今ある呼び出し元が使う分だけ作る
+12. コメントは「なぜ」を書く
 
 検証ゲートは次の 4 つすべて。
 

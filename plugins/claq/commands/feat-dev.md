@@ -22,7 +22,8 @@ command: /feat-dev
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
-  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `feat-dev workflow {feature}` / `phase blocker feature`）
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+    - クエリ例: `feat-dev workflow {feature}` / `phase blocker feature`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: ステップ4 の基準で `claq_mem_learn` を使う
 - 相対パスの md: このファイルは `commands/` にある
@@ -40,7 +41,9 @@ command: /feat-dev
 
 ## ステップ2: 残分岐確認
 
-grillme を起動した場合はその結果を、省いた場合は依頼時点の要件を前提にする。探索で新たに生じ、選び方で作業が大きく変わる分岐だけを、推奨回答付きで確認する。新しい分岐が無ければ本ステップは省く。
+- 前提: grillme を起動した場合はその結果、省いた場合は依頼時点の要件
+- 確認するのは、探索で新たに生じ、選び方で作業が大きく変わる分岐だけ。推奨回答を付けて聞く
+- 新しい分岐が無ければ本ステップは省く
 
 ## ステップ3: loop-dev 反復実装
 
@@ -77,7 +80,7 @@ claq_mem_learn --kind fact --scope repo --domain <domain> \
 
 ## ステップ5: サマリー
 
-変更ファイル・追加テスト・残課題を一覧にし、loop-dev の箱形出力（Loop-Dev Result）を転記する。報告は loop-dev の箱形出力などの一次証跡だけに基づけ、未確認の事項を完了として書かない。
+変更ファイル・追加テスト・残課題を一覧にし、loop-dev の箱形出力（Loop-Dev Result）を転記する。報告の根拠は箱形出力などの一次証跡に限り、未確認の事項を完了として書かない。
 
 ```
 ### 変更ファイル

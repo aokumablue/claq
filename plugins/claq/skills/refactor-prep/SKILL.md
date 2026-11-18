@@ -87,6 +87,7 @@ JSON 契約（`deps.from` / `deps.to` は `groups` 配列のインデックス�
 
 ## 永続メモリ
 
-- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `refactor preflight scope split dependency testset`
+- search: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+  - クエリ例: `refactor preflight scope split dependency testset`
   - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

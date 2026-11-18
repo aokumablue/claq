@@ -9,7 +9,8 @@ user-invocable: false
 ## 記録か提案か
 
 - 明示の依頼・決定（「ADRにして」「この決定を記録」「X を採用しよう」「Y ではなく X を使うべき」）→ ワークフローへ進む
-- 暗黙の決定（比較の結論、DB スキーマ・アーキテクチャパターンの選択）とエージェント自身の選択 → 記録を 1 行で提案するだけにし、ファイルは作らない。ADR の本文は、利用者が下した決定として書ける文だけで作る
+- 暗黙の決定（比較の結論、DB スキーマ・アーキテクチャパターンの選択）とエージェント自身の選択 → 記録を 1 行で提案するだけにし、ファイルは作らない
+- ADR の本文は、利用者が下した決定として書ける文だけで作る
 
 ## ADR フォーマット
 
@@ -34,7 +35,10 @@ user-invocable: false
 4. 扱う問いに最も近いトピックファイルへ追記する
    - どのトピックにも属さないときだけ、新しいトピックファイル（連番なしの `<slug>.md`）を作り、`docs/adr/README.md` の「トピック」表に 1 行足す
 
-書き込んだ結果は次を満たすようにする: README のトピック表とディスク上のファイルが一致する / 各トピックファイルに「共通原則」と決定の節がある。
+書き込んだ結果は次の 2 つを満たすようにする。
+
+- README のトピック表とディスク上のファイルが一致する
+- 各トピックファイルに「共通原則」と決定の節がある
 
 既存の決定を撤回するときは、本文を現行の規則へ書き換え、撤回前の記述は残さない。
 
@@ -51,6 +55,7 @@ docs/adr/
 
 ## 永続メモリ
 
-- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `ADR architecture decision {topic}` / `{technology} vs alternative decision`
+- search: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+  - クエリ例: `ADR architecture decision {topic}` / `{technology} vs alternative decision`
   - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

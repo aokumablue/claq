@@ -16,7 +16,8 @@ command: /perf
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
-  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `perf bottleneck {対象ファイルパス}`）
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+    - クエリ例: `perf bottleneck {対象ファイルパス}`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: ステップ5 で、効いた・効かなかった最適化だけを `claq_mem_learn --kind pitfall` か `howto` で残す
 
@@ -47,7 +48,7 @@ command: /perf
 
 ## ステップ4: after を測って判定する
 
-1. テストを実行する。red になったら、そのファイルの変更を逆適用で戻す
+1. テストを実行する。red になったら、red の原因になったファイルの変更を逆適用で戻す
 2. 計測コマンドを 3 回実行し、中央値を after にする
 3. 改善がノイズ幅以下なら、ファイルごとに戻して測り直し、効いた変更だけ残す
 4. `claq:reviewer` で差分をレビューする。BLOCKER のあるファイルは変更を戻す

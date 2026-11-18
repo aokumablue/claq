@@ -12,7 +12,8 @@ command: /instinct
 ## 永続メモリ
 
 - 参照: SessionStart が `<claq-memory>`（`status='active'` の知識）を注入済み
-  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."`（クエリ例 `{棚卸し対象の domain}` / `{key}`）
+  - 追加で要るとき: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+    - クエリ例: `{棚卸し対象の domain}` / `{key}`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: 本コマンド自身の実行結果は記録しない（棚卸しはセッション限りの作業で、記録するとノイズになる）
 - 相対パスの md: このファイルは `commands/` にある

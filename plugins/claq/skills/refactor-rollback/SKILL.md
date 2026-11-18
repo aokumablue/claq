@@ -26,7 +26,8 @@ preflight は、複数ファイルにまたがる変更・並列サブエージ�
    - `tests.group` が空配列、`tests.group[i]` が空文字列、または添字が範囲外なら、`verify` は `NOT_AVAILABLE` にする
      - File Rules に残したうえで Skip Rules にも記録する。実行できない検証を実行できるかのように出力しない
    - `tests.baseline` / `tests.final` は Blueprint 全体の前後で使うもので、個々の File Rule には割り当てない
-4. 復旧順序: `deps` をトポロジカル順に解決し、リバートは依存の逆順で行う。循環依存に属するファイルは Skip Rules に `cyclic-dependency` として記録する
+4. 復旧順序: `deps` をトポロジカル順に解決し、リバートは依存の逆順で行う
+   - 循環依存に属するファイルは Skip Rules に `cyclic-dependency` として記録する
 5. Rollback Blueprint を出力する
 
 ## 出力形式
@@ -53,6 +54,7 @@ Skip Rules:
 
 ## 永続メモリ
 
-- search: `claq_run claq.mem.cli search "..."`（`. "$HOME/.claq/env.sh"` 前提）— クエリ例 `refactor rollback blueprint {file_path}` / `revert failure pattern`
+- search: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "..."` を実行する
+  - クエリ例: `refactor rollback blueprint {file_path}` / `revert failure pattern`
   - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」

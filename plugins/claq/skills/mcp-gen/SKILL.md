@@ -8,12 +8,10 @@ user-invocable: true
 
 ## 大前提: スケルトンを複製し、記憶で書かない
 
-2026-07-28 は旧仕様を削除した破壊的改訂である。学習データにある形も、
-星の多い既存サーバも、旧仕様である。
-
-最悪なのは、旧仕様でも import が通りサーバが起動すること。クラッシュしない
-ので誤りに気づけない。ゼロから書かず、写経もせず、`assets/` のスケルトンを複製する。
-言語は Python（公式 SDK `mcp` 2.x）だけを扱う。
+- 2026-07-28 は旧仕様を削除した破壊的改訂である。学習データにある形も、星の多い既存サーバも、旧仕様である
+- 最悪なのは、旧仕様でも import が通りサーバが起動すること（クラッシュしないので誤りに気づけない）
+- ゼロから書かず、写経もせず、`assets/` のスケルトンを複製する
+- 言語は Python（公式 SDK `mcp` 2.x）だけを扱う
 
 | 旧仕様（書かない） | 2026-07-28 |
 |---|---|
@@ -53,9 +51,11 @@ user-invocable: true
 | 共有のリモート（複数の利用者）・個人情報を返す | `references/remote-auth.md` と、同上の upstream-protection-overlay |
 | 実行中に利用者の確認が要る | `references/sdk-api-evidence.md` の MRTR 節 |
 
-上流の API を包むときは、ツールを決める前に問いのカタログを作る。利用者が実際に聞く問いを
-10〜30 件集め、それぞれに「どのツールをどの引数で呼べば答えられるか」を書く
-（ツールを API ごとではなく問いから決めるため）。問いを集められないときは、利用者に例を求める。
+上流の API を包むときは、ツールを決める前に問いのカタログを作る（ツールを API ごとではなく問いから決めるため）。
+
+- 利用者が実際に聞く問いを 10〜30 件集める
+- 各問いに「どのツールをどの引数で呼べば答えられるか」を書く
+- 問いを集められないときは、利用者に例を求める
 
 ### 2. スケルトンを複製する
 
@@ -89,32 +89,38 @@ cp /abs/skill/mcp-gen/assets/facade-overlay/adapters.py /abs/path/to/dest/adapte
 cp -R /abs/skill/mcp-gen/assets/facade-overlay/facade /abs/path/to/dest/facade
 ```
 
-`pyproject.toml` は `pyproject.toml.template` の中身を読んで Write ツールで作る。重ね合わせたなら
-`only-include` に `"adapters.py"` と `"facade"` を足す。
-（Bash で書くと、生成先が作業中の git リポジトリ内なら内容によらず保護フックに止められる。
-Write でも、lint・テスト・カバレッジの節やキー（`ignore` / `select` / `exclude` / `addopts` / `fail_under` 等）を含むと止められる）
+`pyproject.toml` は `pyproject.toml.template` の中身を読んで Write ツールで作る。重ね合わせたなら `only-include` に `"adapters.py"` と `"facade"` を足す。
+
+- Bash で書かない理由: 生成先が作業中の git リポジトリ内なら、内容によらず保護フックに止められる
+- Write でも、lint・テスト・カバレッジの節やキー（`ignore` / `select` / `exclude` / `addopts` / `fail_under` 等）を含むと止められる
 
 ### 3. ツールを設計する
 
-`references/tool-design.md` を読み、ツールの一覧（名前・類型・引数・出力・注釈）を決める。
-上流の API を包むなら `references/facade.md` も読み、正規ドメインモデルと項目カタログを決める。
-問いのカタログを作ったなら、その全ての問いに答えるツール呼び出しの列があること。
+- `references/tool-design.md` を読み、ツールの一覧（名前・類型・引数・出力・注釈）を決める
+- 上流の API を包むなら `references/facade.md` も読み、正規ドメインモデルと項目カタログを決める
+- 問いのカタログを作ったなら、カタログの全ての問いに、答えるツール呼び出しの列を用意する
 
 ### 4. 編集する
 
-差し替える: `SERVER_NAME` / `SERVER_VERSION` / `instructions` / `cache_hints`、
-`pyproject.toml` の `name` と `[project.scripts]` のコマンド名（`SERVER_NAME` にそろえる）、
-見本のツール・リソース・プロンプト（不要なら削除）、受信側のレート制限の定数（`TOOL_CALLS_PER_WINDOW` /
-`TOOL_CALL_WINDOW_SECONDS`）と主体を返す `_principal`。重ね合わせたなら `CATALOG`・
-出力モデル・`adapters.py` の偽物（実際の上流の呼び出しに置き換える）も。upstream-protection-overlay を重ねたら、
-条件に当たる部品だけを渡し、上限の定数を上流の契約に合わせる（`references/upstream-protection.md`）。
+差し替える:
 
-触らない: `install_guard(mcp, ...)` と `run(mcp)` の呼び出し（上限は定数で差し替える）、`guard.py`、`smoke_check.py`、
-`smoke_static.py`、`facade/` の部品。`transport.py` は公開するホスト名を足すとき以外は触らない。
+- `SERVER_NAME` / `SERVER_VERSION` / `instructions` / `cache_hints`
+- `pyproject.toml` の `name` と `[project.scripts]` のコマンド名（`SERVER_NAME` にそろえる）
+- 見本のツール・リソース・プロンプト（不要なら削除）
+- 受信側のレート制限の定数（`TOOL_CALLS_PER_WINDOW` / `TOOL_CALL_WINDOW_SECONDS`）と、主体を返す `_principal`
+- 重ね合わせたなら `CATALOG`・出力モデル・`adapters.py` の偽物（実際の上流の呼び出しに置き換える）
+- upstream-protection-overlay を重ねたら、条件に当たる部品だけを渡し、上限の定数を上流の契約に合わせる（`references/upstream-protection.md`）
 
-ツールの書き方（説明・引数・出力・失敗・注釈・状態）は `references/tool-design.md` に従う。
-検査の対象は `smoke_config.py` に書く。値の選び方はファイル内のコメントに従い、サンプルの
-ままにしない（検証が実サーバを見なくなる）。
+触らない:
+
+- `install_guard(mcp, ...)` と `run(mcp)` の呼び出し（上限は定数で差し替える）
+- `guard.py`・`smoke_check.py`・`smoke_static.py`・`facade/` の部品
+- `transport.py`（公開するホスト名を足すときだけ触る）
+
+検査と書き方:
+
+- ツールの書き方（説明・引数・出力・失敗・注釈・状態）は `references/tool-design.md` に従う
+- 検査の対象は `smoke_config.py` に書く。値の選び方はファイル内のコメントに従い、サンプルのままにしない（検証が実サーバを見なくなる）
 
 ツール以外で守ること:
 
@@ -129,20 +135,26 @@ Write でも、lint・テスト・カバレッジの節やキー（`ignore` / `s
 6. 失敗の後に続行する経路（握り潰し・既定値・再試行・代替経路）は、続行を決めた文（要件・利用者の指示・外部 API 契約）を引用できるときに書く
 7. 5・6 で書いたものは、根拠をコメント 1 行と報告の「追加した防御」に残す
 8. 要件に無い改善（ベストプラクティス由来を含む）は、報告の「提案」に理由と出典を付けて書くだけにする。採否は利用者が決める
-9. 不具合は原因の箇所で直す。変更で使われなくなったコード・テスト・互換分岐は同じ変更で消す
-10. 抽象と設定項目は、今ある呼び出し元が使う分だけ作る。コメントは「なぜ」を書く
-- `cache_hints` を意図して設定する。既定は `ttl_ms=0` / `scope="private"`（毎回
-  取り直し）。キーを置ける先は `tools/list` / `prompts/list` / `resources/list` /
-  `resources/templates/list` / `resources/read` / `server/discover` の 6 つ。
-  公開する面のキーを書き忘れるとその応答だけ `ttlMs=0` に取り残される
-  （`resources/read` の忘れが多い）。公開しない面のキーは消す。
-  主体や認可で内容が変わる応答（一覧と `resources/read`）に `"public"` を付けない。
-- ログは標準 `logging`。`MCPServer(log_level=...)` を渡せば SDK が設定する。
-  出力は stderr。`print` は stdout を汚して JSON-RPC フレームを壊す。
-  ログはモデルに届かない（届くのは戻り値だけ）。進捗は `ctx.report_progress()`。
-- 生成コードの説明文に旧 API 名を書かない。説明文に書いただけでも手順 5 の検査が当たる。
-  触れるなら「`Context` の `elicit` メソッド」のように名前を分割する。
-- 全ての関数に docstring を付ける。
+9. 不具合は原因の箇所で直す
+10. 変更で使われなくなったコード・テスト・互換分岐は同じ変更で消す
+11. 抽象と設定項目は、今ある呼び出し元が使う分だけ作る
+12. コメントは「なぜ」を書く
+
+MCP サーバ固有で守ること:
+
+- `cache_hints` を意図して設定する
+  - 既定は `ttl_ms=0` / `scope="private"`（毎回取り直し）
+  - キーを置ける先は `tools/list` / `prompts/list` / `resources/list` / `resources/templates/list` / `resources/read` / `server/discover` の 6 つ
+  - 公開する面のキーを書き忘れると、その応答だけ `ttlMs=0` に取り残される（`resources/read` の忘れが多い）
+  - 公開しない面のキーは消す
+  - 主体や認可で内容が変わる応答（一覧と `resources/read`）に `"public"` を付けない
+- ログは標準 `logging` で、出力は stderr
+  - `MCPServer(log_level=...)` を渡せば SDK が設定する
+  - `print` は stdout を汚して JSON-RPC フレームを壊す
+  - ログはモデルに届かない（届くのは戻り値だけ）。進捗は `ctx.report_progress()` で返す
+- 生成コードの説明文に旧 API 名を書かない（説明文に書いただけでも手順 5 の検査が当たる）
+  - 触れるなら「`Context` の `elicit` メソッド」のように名前を分割する
+- 全ての関数に docstring を付ける
 
 ### 5. 検証する（省略不可）
 
@@ -152,45 +164,46 @@ Write でも、lint・テスト・カバレッジの節やキー（`ignore` / `s
 "$PY" /abs/path/to/dest/smoke_check.py
 ```
 
-exit code 0 を確認するまで完了報告しない。`FAIL` の文面には直し方が書いてある。
-完了報告に `追加した防御`（file:line と引用した根拠）を書く。無ければ「なし」と書く。
-`提案`（理由と出典）は、該当があるときだけ書く。
-旧仕様の名前が当たったときは、その意味を `references/spec-2026-07-28.md` の表で確かめる。
-`WARN` は文面に従う（走査できなかったファイルは、そのファイルに旧仕様の名前が無いかを確かめる。版の不一致なら、
-スケルトンを信じず先に SDK の changelog を読み直す）。
+- exit code 0 を確認するまで完了報告しない。`FAIL` の文面には直し方が書いてある
+- 旧仕様の名前が当たったときは、その意味を `references/spec-2026-07-28.md` の表で確かめる
+- `WARN` は文面に従う
+  - 走査できなかったファイル: そのファイルに旧仕様の名前が無いかを確かめる
+  - 版の不一致: スケルトンを信じず、先に SDK の changelog を読み直す
+- 完了報告に `追加した防御`（file:line と引用した根拠）を書く。無ければ「なし」と書く
+- `提案`（理由と出典）は、該当があるときだけ書く
 
 ### 6. 登録と評価の手順を渡す
 
-`README.md` のクライアント設定 JSON を生成先の絶対パスで埋めて提示する。
-`command` は `mcp` が入った `python3` の絶対パス。問いのカタログを作ったなら、
-README の「エージェントでの評価」の手順と合わせて渡す（実際のホストとモデルで解かせ、
-誤りを説明・既定値・ツールの境界に帰着させて直す）。
+- `README.md` のクライアント設定 JSON を生成先の絶対パスで埋めて提示する
+- `command` は `mcp` が入った `python3` の絶対パスにする
+- 問いのカタログを作ったなら、README の「エージェントでの評価」の手順と合わせて渡す
+  - 評価の手順: 実際のホストとモデルで解かせ、誤りを説明・既定値・ツールの境界に帰着させて直す
 
 ## MRTR（ツール実行中の確認・追加入力）
 
-スケルトンには入れていない。要るときは `references/sdk-api-evidence.md` の MRTR 節の形で足し、
-同節の `smoke_config.py` の設定（承認と拒否の両分岐）を書く。
+スケルトンには入れていない。要るときは次のとおり足す。
+
+- `references/sdk-api-evidence.md` の MRTR 節の形で実装する
+- 同節の `smoke_config.py` の設定（承認と拒否の両分岐）を書く
 
 ## スケルトンの範囲外
 
-HTTP の OAuth と、複数インスタンスでの運用。スケルトンの HTTP は認証を持たないので、
-ループバック（127.0.0.1 / ::1 / localhost）でだけ待ち受け、それ以外の `--host` は起動時に拒否する。
-満たすべき要件と進め方は `references/remote-auth.md`。stdio は認可仕様の対象外で、
-資格情報は環境変数から取る。
+範囲外は、HTTP の OAuth と複数インスタンスでの運用。
+
+- スケルトンの HTTP は認証を持たないので、ループバック（127.0.0.1 / ::1 / localhost）でだけ待ち受け、それ以外の `--host` は起動時に拒否する
+- 範囲外を満たすべき要件と進め方は `references/remote-auth.md` にある
+- stdio は認可仕様の対象外で、資格情報は環境変数から取る
 
 ## 詰まったときに見るところ
 
-- `server/discover` / `resultType` / `_meta.serverInfo` / `inputSchema` /
-  `outputSchema` / `structuredContent` / 引数検証は SDK が自動でやる（`guard.py` が補正する
-  3 点、未知の引数の拒否・公開する inputSchema の整形・structuredContent の写しの text を除く）。
-  これらを自前で実装しようとしていたら、記憶で書いている兆候。
-- HTTP で `400 Bad Request: Missing session ID` → `MCP-Protocol-Version` ヘッダの
-  付け忘れ。この仕様にセッションは存在しない。真に受けて実装すると廃止済みの
-  機構を作り込む。
+- 次は SDK が自動でやる: `server/discover` / `resultType` / `_meta.serverInfo` / `inputSchema` / `outputSchema` / `structuredContent` / 引数検証
+  - 例外は `guard.py` が補正する 3 点（未知の引数の拒否・公開する inputSchema の整形・structuredContent の写しの text）
+  - SDK が自動でやる処理を自前で実装しようとしていたら、記憶で書いている兆候
+- HTTP で `400 Bad Request: Missing session ID` → `MCP-Protocol-Version` ヘッダの付け忘れ
+  - 2026-07-28 の仕様にセッションは存在しない。エラー文を真に受けて実装すると、廃止済みの機構を作り込む
 
 ## 永続メモリ
 
-- 参照: `claq_run claq.mem.cli search "mcp server protocol template"`
-  （`. "$HOME/.claq/env.sh"` 前提）→ 本文が要る key だけ
-  `claq_run claq.mem.cli show <key>`
-- 記録: 再利用可能な学びだけ `claq_mem_learn`。基準は `../learn/SKILL.md`
+- 参照: `. "$HOME/.claq/env.sh"` のあと `claq_run claq.mem.cli search "mcp server protocol template"` を実行する
+  - 本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
+- 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md`
