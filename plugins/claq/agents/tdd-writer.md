@@ -100,7 +100,8 @@ RED → GREEN → REFACTOR → REPEAT
 
 知識カードは自動注入されない。過去の判断が要るときは自分で引く。
 
-- 検索: `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."`（クエリ例 `test pattern` / `bug fix regression test`）
+- 検索: `. "$HOME/.claq/env.sh"` のあとに `claq_run claq.mem.cli search "..."` を実行する
+  - クエリ例: `test pattern` / `bug fix regression test`
 - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 
 学びは自分では書かず、候補を呼び出し元へ報告する（成果が呼び出し元の gate で取り消されうるため、確定前に書くと誤った知識が残る）。
