@@ -189,7 +189,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}
 DB へ書く操作は必ず後始末する。
 
 - mem の DB の位置は `CLAQ_DATA_PATH`（未設定なら `CLAQ_HOME`、それも無ければ `HOME` の配下の `.claq`）で決まる（`mem/settings.py`）
-- ここでは `CLAQ_DATA_PATH` で隔離する。取り違えると実 DB（`~/.claq/mem.db`）を汚す
+- 本 skill では `CLAQ_DATA_PATH` で隔離する。取り違えると実 DB（`~/.claq/mem.db`）を汚す
 - `pre_compact` は `CLAQ_DATA_PATH` を見ず、`CLAQ_HOME`（未設定なら `HOME`）の配下の `.claq/session-data/compaction-log.txt` へ追記する
   - PreCompact を流す呼び出しでは、その 1 コマンドにだけ `CLAQ_HOME=固定パス` を前置する（前置しないと実ログに 1 行増える）
 - 破壊的な操作を実測するなら、使い捨ての作業ツリーと一時 DB を使う
@@ -294,6 +294,8 @@ cd plugins/claq && python3 -m pytest -q --cov  # fail_under=100 はこのディ�
   - 同じ壊れ方が残りうる隣を選ぶ（先勝ちなら別の先頭キー・別の別名フィールド・allow 側と deny 側）
 - 回帰ゲートは回帰を検出するだけで、バイパスが閉じた証拠ではない（同じ欠陥が別の経路に残っていても 3 ゲートは緑になる）
 
+修正サイクル全体の扱い:
+
 - 再実測はリポジトリの作業ツリーに対して行う。測定 root が配布ビルドなら、その指摘は再インストールするまで測定 root では閉じていないので、`Build:` 行にそう書く
 - `git add` と `git commit` は別の Bash 呼び出しに分ける（同じ呼び出しだと品質フックが実行前の index しか見られず deny する）
 - 修正が禁止された実行（調査目的・READ-ONLY）でも、この工程は飛ばさない（飛ばすと終了条件3 を判定できない）
@@ -346,8 +348,11 @@ NO-FIX:
 Learned:    {知識カードの key} / なし
 ```
 
-- `Gate: BLOCKED` になるのは、次のいずれか: `Not run` が 1 以上 / `Unadjudicated` が 1 以上 / `Build:` が `same=no`
-  - `same=no` のときは `Gate: PASS` を出さない（`Fixed` は修理 root で閉じた件数で、測定 root には未反映。配布ビルドを測りながらリポジトリの修正結果で合格にしない）
+- `Gate: BLOCKED` になるのは、次のいずれかのとき
+  - `Not run` が 1 以上
+  - `Unadjudicated` が 1 以上
+  - `Build:` が `same=no`
+- `same=no` のときは `Gate: PASS` を出さない（`Fixed` は修理 root で閉じた件数で、測定 root には未反映。配布ビルドを測りながらリポジトリの修正結果で合格にしない）
 - 行の恒等式は `Findings 合計 = Fixed + NO-FIX + Pending + Unadjudicated`
   - どの指摘（エージェントの主張を含む）も 4 行のどれかに入る
   - 恒等式の母集合は `Findings` 行で、単位は指摘。`= {合計}` には 4 スロットすべての和を書く

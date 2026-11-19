@@ -80,8 +80,10 @@ simplify の全グループが終わってから始める。
 - ローカル開発者本人だけが届く入口（CLI 引数・設定ファイル）では加えない
 - 届くか判断できないときは加える
 
-- 起動した全員の依頼文に `effective_scope` を書く
-- security-auditor を並列に加えたときは、reviewer の依頼文に「`security-auditor` との並列起動」と書く（reviewer がセキュリティ観点を省き、二重報告を防ぐ）
+子へ届くのは依頼文だけなので、依頼文に次を書く。
+
+- 起動した全員: `effective_scope`
+- reviewer: security-auditor を並列に加えたときは「`security-auditor` との並列起動」（reviewer がセキュリティ観点を省き、二重報告を防ぐ）
 
 ## ステップ7: final gate
 
@@ -157,7 +159,8 @@ Learned:    {ステップ8 で記録した key / なし}
 
 ## 部分モード
 
-`--mode=clean` はステップ1 → 2 → 3 → 6 → 7 → 8 → 9、`--mode=simplify` はステップ1 → 2 → 4 → 6 → 7 → 8 → 9 を実行する。
+- `--mode=clean`: ステップ1 → 2 → 3 → 6 → 7 → 8 → 9 を実行する
+- `--mode=simplify`: ステップ1 → 2 → 4 → 6 → 7 → 8 → 9 を実行する
 
 ## ルール
 

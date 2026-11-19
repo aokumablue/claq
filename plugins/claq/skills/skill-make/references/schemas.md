@@ -48,7 +48,8 @@ skillのeval定義。スキルディレクトリ内の `evals/evals.json` に置
 
 ## grading.json
 
-grader エージェントの返値。形式と不変条件は `../../../agents/grader.md` の「出力契約」「出力形式」が正。`<run-dir>/grading.json` に置く。
+grader エージェントの返値。`<run-dir>/grading.json` に置く。
+形式と不変条件は `../../../agents/grader.md` の「出力契約」「出力形式」が正。
 
 ---
 
@@ -161,4 +162,5 @@ eval-workflow §4 の集約結果。`<workspace>/iteration-<N>/benchmark.json` �
 
 ## comparison.json
 
-comparator エージェントの返値。形式は `../../../agents/comparator.md` の「出力契約」「出力形式」が正。`<workspace>/compare-<ID>/comparison.json` に置く。
+comparator エージェントの返値。`<workspace>/compare-<ID>/comparison.json` に置く。
+形式は `../../../agents/comparator.md` の「出力契約」「出力形式」が正。

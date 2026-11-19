@@ -43,7 +43,11 @@ loop-dev の実行履歴（checkpoint の反復履歴 + git log）を全件走�
 | `outcome_health` | ループの結果 | 収束率・circuit-break 率・blocker 再発率が最低基準を満たす |
 | `observation_coverage` | 観測できた割合 | 9 領域のうち実測できた領域の割合。N/A は分母に残す |
 
-最低基準（下回ったら `outcome_health` を満点にしない）: 収束率 80% 以上 / Circuit-Break 率 20% 以下 / Blocker 再発率 20% 以下。
+最低基準（下回ったら `outcome_health` を満点にしない）:
+
+- 収束率 80% 以上
+- Circuit-Break 率 20% 以下
+- Blocker 再発率 20% 以下
 
 `outcome_health` は `10 × 満たした基準の数 / 3` を小数第 1 位へ丸めた値にする（3 つ満たして 10.0、2 つで 6.7、1 つで 3.3、0 で 0.0）。
 
