@@ -3,7 +3,11 @@
 Streamable HTTP で複数の利用者に公開するサーバの規則。
 ループバック以外へ公開するのは、認可を実装してからにする。
 
-SDK の認可機能（`token_verifier` など）はこのスキルでは実測していないので、使う前に SDK のドキュメント（<https://py.sdk.modelcontextprotocol.io/>）と仕様（<https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization>）を読み、smoke に 401 / 403 の検査を足してから使う。
+SDK の認可機能（`token_verifier` など）はこのスキルでは実測していない。
+使う前に次の 2 つを読み、smoke に 401 / 403 の検査を足してから使う。
+
+- SDK のドキュメント: <https://py.sdk.modelcontextprotocol.io/>
+- 仕様: <https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization>
 
 ## 目次
 

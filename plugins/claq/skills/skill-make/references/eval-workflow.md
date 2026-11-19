@@ -31,7 +31,8 @@ Execute this task:
 ベースライン（プロンプトは同じ。ベースラインの種類は状況で決まる）:
 
 - 新しいスキルを作る場合: スキルなし。`without_skill/outputs/` に保存する
-- 既存スキルを改善する場合: 旧版をベースラインにする。編集前に `cp -r <skill-path> <workspace>/skill-snapshot/` でスナップショットを取り、そのコピーを使う。保存先は `old_skill/outputs/`
+- 既存スキルを改善する場合: 旧版をベースラインにする。`old_skill/outputs/` に保存する
+  - 編集前に `cp -r <skill-path> <workspace>/skill-snapshot/` でスナップショットを取り、旧版にはそのコピーを使う
 
 ## 2. 期待値（expectations）を書く
 
