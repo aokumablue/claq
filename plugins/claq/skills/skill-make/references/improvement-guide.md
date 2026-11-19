@@ -59,7 +59,8 @@ SKILL.md の前置きの `description` は、Claude がスキルを呼ぶかど�
 
 ### 2. 候補を反復評価する
 
-eval セットを train 60% / holdout 40% に手で分け、description の候補ごとに train 側で `should_trigger` の判定精度を確かめ、holdout 側で過適合していないかを確かめる。
+eval セットを train 60% / holdout 40% に手で分ける。
+description の候補ごとに、train 側で `should_trigger` の判定精度を確かめ、holdout 側で過適合していないかを確かめる。
 
 ### 3. 結果を反映する
 
