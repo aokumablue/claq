@@ -141,9 +141,13 @@ eval-workflow §4 の集約結果。`<workspace>/iteration-<N>/benchmark.json` �
 - `runs[]`: 個々の実行結果
   - `eval_id`: 数値ID
   - `eval_name`: eval ディレクトリ名
-  - `configuration`: `"with_skill"` か、比較ベースラインの `"without_skill"` / `"old_skill"`（既存スキル改善パスは `old_skill` を出力する）。ベースライン名は fixture 全体で一方だけに揃える
+  - `configuration`: `"with_skill"` か、比較ベースラインの `"without_skill"` / `"old_skill"`
+    - 既存スキル改善パスは `old_skill` を出力する
+    - ベースライン名は fixture 全体で一方だけに揃える
   - `run_number`: 実行番号（1, 2, 3...）
-  - `result`: `pass_rate`/`passed`/`failed`/`total`/`time_seconds`/`tokens`/`tool_calls` を含む（`time_seconds` は timing.json の `duration_ms` ÷ 1000、`tool_calls` は `tool_uses`）。計測できない値は `null` にし、理由をその run の `notes` に書く（`0` で代用しない）
+  - `result`: `pass_rate`/`passed`/`failed`/`total`/`time_seconds`/`tokens`/`tool_calls` を含む
+    - `time_seconds` は timing.json の `duration_ms` ÷ 1000、`tool_calls` は `tool_uses`
+    - 計測できない値は `null` にし、理由をその run の `notes` に書く（`0` で代用しない）
   - `expectations`: 期待値ごとの判定。**欠けると `bench-analyzer` が FAIL する**
   - `notes`: その run の補足（計測できなかった値の理由など）
 - `run_summary`: 構成ごとの統計
