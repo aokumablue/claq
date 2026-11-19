@@ -410,7 +410,8 @@ stdio で生 JSON-RPC を流すとき、**リクエストを書いた直後に s
 
 ## 上流の一次資料
 
-- Python SDK ドキュメント: <https://py.sdk.modelcontextprotocol.io/>（`migration/` `whats-new/` `deprecated/` `handlers/multi-round-trip/` `handlers/elicitation/` `handlers/logging/` `servers/handling-errors/` `run/deploy/` が特に効く）
+- Python SDK ドキュメント: <https://py.sdk.modelcontextprotocol.io/>
+  - 特に効くページ: `migration/` `whats-new/` `deprecated/` `handlers/multi-round-trip/` `handlers/elicitation/` `handlers/logging/` `servers/handling-errors/` `run/deploy/`
 - SDK リポジトリ: <https://github.com/modelcontextprotocol/python-sdk>
   - 2.x で書かれた実例は `examples/mcpserver/` と `examples/servers/`
 
@@ -428,7 +429,12 @@ stdio で生 JSON-RPC を流すとき、**リクエストを書いた直後に s
 むしろ実績のあるサーバほど 1.x に固定されており、写経すると旧仕様が入る。
 2.x の実例として信頼できるのは SDK リポジトリの `examples/` のみ。
 
-そのうえで **`examples/` も上流のドキュメントより遅れている**: `examples/mcpserver/logging_and_progress.py` は非推奨の `await ctx.info(...)` を、`examples/servers/simple-streamablehttp/` は非推奨の `send_log_message` を（pyright の `reportDeprecated` 抑止コメント付きで）今も使っている。
+そのうえで **`examples/` も上流のドキュメントより遅れている**。
+次の 2 つは非推奨の API を今も使っている。
+
+- `examples/mcpserver/logging_and_progress.py`: `await ctx.info(...)`
+- `examples/servers/simple-streamablehttp/`: `send_log_message`（pyright の `reportDeprecated` 抑止コメント付き）
+
 例を読むときは `deprecated/` のページと突き合わせること。
 
 
