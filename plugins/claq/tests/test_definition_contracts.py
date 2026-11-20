@@ -125,9 +125,9 @@ def test_planner_callers_state_mode() -> None:
 
 
 def test_callers_of_candidate_reporting_agents_consume_candidates() -> None:
-    """学びの候補を呼び出し元へ報告する agent を起動する定義は、その候補を取捨する手順を持つ。
+    """学びの候補を呼び出し元へ報告する agent は返却形式にその欄を持ち、起動する定義は候補を取捨する手順を持つ。
 
-    子は自分では知識カードを書かないため、呼び出し元が拾わなければ候補は失われる。
+    子は自分では知識カードを書かないため、欄が無いか呼び出し元が拾わなければ候補は失われる。
     """
     reporters = [
         path.stem
@@ -135,6 +135,12 @@ def test_callers_of_candidate_reporting_agents_consume_candidates() -> None:
         if path.parts[0] == "agents" and _CANDIDATE_REPORT in text
     ]
     assert reporters, "学びの候補を報告する agent が見つからない"
+    no_field = [
+        str(path)
+        for path, text in _corpus()
+        if path.parts[0] == "agents" and path.stem in reporters and _CANDIDATE_CONSUME not in text
+    ]
+    assert not no_field, "返却形式に学びの候補の欄が無い:\n" + "\n".join(no_field)
     missing = [
         str(path)
         for path, text in _corpus()
