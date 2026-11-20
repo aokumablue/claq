@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from claq.mem import cli, cmd_context
+from claq.mem import logger as mem_logger
 from claq.mem import settings as settings_mod
 from claq.mem.database import Database
 from claq.mem.models import Knowledge
@@ -62,8 +63,14 @@ def _run_cli(
 
     stdout = io.StringIO()
     stderr = io.StringIO()
-    with redirect_stdout(stdout), redirect_stderr(stderr):
-        exit_code = cli.main()
+    # logger は初回の setup で stderr を掴んだまま使い回すため、前のテストの初期化が残ると
+    # logger の stderr 出力がこの捕捉に入らない。前後で捨て、捕捉した stderr へ掴ませる。
+    mem_logger.reset()
+    try:
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = cli.main()
+    finally:
+        mem_logger.reset()
     return stdout.getvalue(), stderr.getvalue(), exit_code
 
 

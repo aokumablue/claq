@@ -31,6 +31,15 @@ _FORMATTER = _RedactingFormatter(
 _PACKAGE_LOGGER_NAME = "claq.mem"
 """ハンドラを持つ親ロガーの名前。``get`` が返すロガーはこの子なので、ハンドラへ伝播する。"""
 
+_FILE_ONLY_ATTR = "claq_file_only"
+
+FILE_ONLY = {_FILE_ONLY_ATTR: True}
+"""ログ呼び出しの ``extra`` に渡すと、その記録をファイルにだけ書き stderr へは出さない。
+
+呼び出し側が利用者向けの 1 行を自分で stderr へ出す経路で使う。stderr へも流すと同じ失敗が
+2 行になり、host が通知に使う 1 行目が時刻付きの記録に置き換わる。
+"""
+
 _initialized = False
 _lock = threading.Lock()
 
@@ -63,9 +72,10 @@ def _file_handler(log_dir: Path) -> logging.Handler:
 
 
 def _stderr_handler() -> logging.Handler:
-    """WARNING 以上を stderr へ出す Handler を作る。"""
+    """WARNING 以上を stderr へ出す Handler を作る。``FILE_ONLY`` を付けた記録は出さない。"""
     handler = logging.StreamHandler(sys.stderr)
     handler.setLevel(logging.WARNING)
+    handler.addFilter(lambda record: not getattr(record, _FILE_ONLY_ATTR, False))
     handler.setFormatter(_FORMATTER)
     return handler
 
