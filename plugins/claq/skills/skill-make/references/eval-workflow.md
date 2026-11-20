@@ -61,7 +61,8 @@ grader / comparator / bench-analyzer の返値が検証を通らなければ保�
 すべての run が終わったら:
 
 1. 各 run を grading する
-   - grader サブエージェント（`../../../agents/grader.md`）を起動するか、その本文に従って inline で評価する
+   - `claq:grader` を起動するか、`../../../agents/grader.md` の本文に従って inline で評価する
+   - 起動するときは、依頼文に `expectations`・`transcript_path`・`outputs_dir` を載せる
    - grader の返値（判定 JSON）を schema 検証してから `grading.json` へ保存する
    - inline で評価するときも grader の「出力形式」と同じ JSON を作る
    - プログラムで判定できるものはスクリプトにする（目視より速く、再利用しやすい）
@@ -71,7 +72,7 @@ grader / comparator / bench-analyzer の返値が検証を通らなければ保�
      - `notes` は `[]` で作り、3 で bench-analyzer の返値に置き換える
      - 各構成の通過率・時間・トークン数を、平均 ± 標準偏差と差分付きでまとめる
      - `with_skill` を `without_skill` の前に並べる
-   - comparator へ渡すときは、比べる 2 構成の出力を `<workspace>/compare-<ID>/candidate-a/` と `candidate-b/` へコピーし、A/B の割り当てをランダムにする
+   - `claq:comparator` へ渡すときは、比べる 2 構成の出力を `<workspace>/compare-<ID>/candidate-a/` と `candidate-b/` へコピーし、A/B の割り当てをランダムにする
      - 対応表は comparator へ渡さず、返値を受け取った後に `<workspace>/compare-<ID>/mapping.json`（`{"A": "<構成名>", "B": "<構成名>"}`）へ保存する（`/skill-gen` の完了ゲートが A/B と構成の対応を引く）
      - `with_skill` / `without_skill` / `old_skill` のパスをそのまま渡さない（パス文字列から出自が分かって盲検が成立せず、`../../../agents/comparator.md` はこの形を FAIL として拒否する）
      - comparator の判定は助言として扱う。機械判定できる期待値は deterministic なアサーションで先に確定させる
@@ -79,7 +80,7 @@ grader / comparator / bench-analyzer の返値が検証を通らなければ保�
    - comparator の返値は `schemas.md` の comparison.json のスキーマで検証してから `<workspace>/compare-<ID>/comparison.json` へ保存する
 
 3. 分析を入れる
-   - bench-analyzer を `benchmark_analysis` モードで起動する（入力は `benchmark_data_path` と `skill_path`。手順は `../../../agents/bench-analyzer.md` の `## モード: benchmark_analysis — ベンチマーク結果の分析`）
+   - `claq:bench-analyzer` を起動し、依頼文に `mode: benchmark_analysis` を書く（入力は `benchmark_data_path` と `skill_path`。手順は `../../../agents/bench-analyzer.md` の `## モード: benchmark_analysis — ベンチマーク結果の分析`）
    - 返値の文字列配列で `benchmark.json` の `notes` を置き換える
 
 ## 5. 分析結果をもとに改善する
