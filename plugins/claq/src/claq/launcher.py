@@ -19,7 +19,7 @@ import runpy
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 _USAGE = "Usage: python3 src/claq/launcher.py [--bg] <module> [args...]"
 # 落ちると保護が外れる PreToolUse の保護フック（hooks.json の matcher 付きエントリ）。
 _PROTECTION_HOOKS = frozenset(
@@ -38,11 +38,11 @@ def build_env() -> dict[str, str]:
     repo-local `.venv` の有無は見ず、VIRTUAL_ENV の付与や venv/bin の PATH 前置も行わない。
 
     Returns:
-        CLAUDE_PLUGIN_ROOT（未設定時のみ REPO_ROOT）、PYTHONIOENCODING=utf-8:replace、
-        REPO_ROOT/src を先頭に置いた PYTHONPATH を含む環境変数の辞書。
+        CLAUDE_PLUGIN_ROOT（未設定時のみ PLUGIN_ROOT）、PYTHONIOENCODING=utf-8:replace、
+        PLUGIN_ROOT/src を先頭に置いた PYTHONPATH を含む環境変数の辞書。
     """
     env = os.environ.copy()
-    env.setdefault("CLAUDE_PLUGIN_ROOT", str(REPO_ROOT))
+    env.setdefault("CLAUDE_PLUGIN_ROOT", str(PLUGIN_ROOT))
     # detach した子は `-m <module>` で起動するため `main()` を通らず、
     # `force_utf8_streams()` が効かない。子の警告は日本語を含み bg ログへ
     # リダイレクトされるため、非 UTF-8 ロケールでは UnicodeEncodeError が bg ログの
@@ -53,7 +53,7 @@ def build_env() -> dict[str, str]:
     env["PYTHONIOENCODING"] = "utf-8:replace"
 
     pythonpath = env.get("PYTHONPATH")
-    paths = [str(REPO_ROOT / "src")]
+    paths = [str(PLUGIN_ROOT / "src")]
     if pythonpath:
         paths.append(pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(paths)
@@ -164,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     if unsupported is not None:
         return unsupported
 
-    src_dir = str(REPO_ROOT / "src")
+    src_dir = str(PLUGIN_ROOT / "src")
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
 
@@ -173,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     # md（agents/commands/skills）がベンダ固有パスを書かずに plugin root を
     # 解決できるよう、全 hook 起動のたびに ~/.claq/env.sh ポインタを更新する。
     # 失敗しても hook 本来の処理は妨げない。
-    write_env_pointer(REPO_ROOT)
+    write_env_pointer(PLUGIN_ROOT)
 
     args = list(sys.argv[1:] if argv is None else argv)
     background = bool(args) and args[0] == "--bg"

@@ -85,7 +85,7 @@ def write_env_pointer(plugin_root: Path) -> None:
     失敗はプロセスごと 1 回だけ stderr へ記録する。
 
     Args:
-        plugin_root: このプラグインのソースルート（``launcher.REPO_ROOT``）。
+        plugin_root: このプラグインのソースルート（``launcher.PLUGIN_ROOT``）。
     """
     try:
         _write_env_pointer_unsafe(plugin_root)

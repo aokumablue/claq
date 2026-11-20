@@ -87,7 +87,7 @@ def test_build_env(
     venv_python = tmp_path / ".venv" / "bin" / "python3"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-    monkeypatch.setattr(launcher, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(launcher, "PLUGIN_ROOT", tmp_path)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     for name, value in (("PATH", path), ("PYTHONPATH", pythonpath), ("CLAUDE_PLUGIN_ROOT", plugin_root)):
         if value is None:
@@ -256,7 +256,7 @@ class TestMain:
 
     def test_inserts_src_dir_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """src ディレクトリが sys.path に無ければ挿入する。"""
-        src = str(launcher.REPO_ROOT / "src")
+        src = str(launcher.PLUGIN_ROOT / "src")
         monkeypatch.setattr(sys, "path", [p for p in sys.path if p != src])
         _stub_run_in_process(monkeypatch)
 
@@ -385,7 +385,7 @@ def test_background_child_writes_non_ascii_log_under_non_utf8_locale(tmp_path: P
 
 def test_protection_hooks_match_hooks_json_pre_tool_use_entries() -> None:
     """`_PROTECTION_HOOKS` が hooks.json の PreToolUse エントリが起動するモジュールと一致すること。"""
-    hooks = json.loads((launcher.REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+    hooks = json.loads((launcher.PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
     modules = {hook["command"].split()[-1] for entry in hooks["PreToolUse"] for hook in entry["hooks"]}
 
     assert modules == launcher._PROTECTION_HOOKS
