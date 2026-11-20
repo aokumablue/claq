@@ -60,8 +60,17 @@ claq は、Claude Code の作業を「最初の計画からレビューまで」
 
 ### 対応環境
 
-- OS: macOS / Linux / Windows（PowerShell 経由）
+- OS: macOS / Linux / Windows
 - `python3` 3.12 以上（PATH 上で解決できること。ランタイムは venv を作らない）。3.12 未満では保護フックが警告付きで無効化される
+- Windows の Claude Code では Git Bash（Git for Windows）が要る。Claude Code はフックの `command` を Git Bash で実行し、Git Bash が無い環境では保護フックが動かない
+
+### 他のホスト
+
+第一対象は Claude Code。同じプラグインを GitHub Copilot CLI・Grok Build TUI・Codex でも読み込める（フックの出力は各ホストが読むキーを同梱する）。Claude Code 以外での動作は、リリースごとではなく随時、人が実機で確かめる。
+
+- Copilot CLI: Windows では `hooks.json` の `powershell`（`runtime/claq-hook.cmd` を起動する）を使う
+- Grok: インストール後と `grok plugin update` のたびに、プラグイン同梱の `scripts/grok.sh` を実行する。Grok は `${CLAUDE_PLUGIN_ROOT}` を `~/.grok/plugins/claq` に展開するため、インストールの実体へ symlink を張る必要がある
+- Codex: フック出力の契約は実機で確かめていない
 
 ### プラグインマーケットプレイス
 
