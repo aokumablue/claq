@@ -21,6 +21,7 @@ command: /review
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
   - 既存カードと同じ違反が再発していれば「繰り返し違反」と注記する（深刻度は上げない。繰り返しは severity の根拠にならない）
 - 記録: ステップ5 の基準で `claq_mem_learn` を使う
+  - reviewer の報告にある学びの候補も同じ基準で取捨する（子は自分では書かない）
 - 相対パスの md: このファイルは `commands/` にある
   - プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 

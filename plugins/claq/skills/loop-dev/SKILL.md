@@ -82,6 +82,13 @@ user-invocable: false
    | 未使用コード削除 | `claq:code-refiner`（依頼文へ `mode: clean` を明示） |
    | 性能改善 | `claq:code-refiner`（依頼文へ `mode: perf` を明示） |
 
+   子へ届くのは依頼文だけなので、generate の依頼文に次を載せる。
+
+   - `task` と `task_type`（tdd-writer は `task_type: test` のとき characterization の経路を採る）
+   - plan で確定したブループリント、または `approved_plan`
+   - 変更してよいファイルの一覧（`approved_plan` にあれば、スコープガードと同じもの）
+   - baseline step で検出したテストコマンドと linter
+
    計画が複数フェーズなら、フェーズごとに generate とテストを回す。
    evaluate は全フェーズの後に 1 回だけ行う。
 
@@ -244,4 +251,5 @@ Proposals:   {提案（採否は利用者。既定では実施しない） or "-
   - クエリ例: `loop-dev iteration blocker converge {task キーワード}`
   - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要る key だけ `claq_run claq.mem.cli show <key>` に渡す
 - record: 実装中に踏んだ罠・判明した事実は `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
+  - 子の報告にある学びの候補も、収束判定の後に同じ基準で取捨して登録する（子は自分では書かず、Loop-Dev Result にも候補の欄が無いため、ここで拾わないと失われる）
   - 反復の収束状況そのもの（生ログ）は知識カードに混ぜない。記録先は checkpoint の `## 反復履歴`（`../checkpoint/SKILL.md`）

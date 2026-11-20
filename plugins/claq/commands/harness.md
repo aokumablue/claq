@@ -20,6 +20,7 @@ command: /harness
     - クエリ例: `harness audit score` / `harness config optimization audit`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../skills/learn/SKILL.md` の「記録する / しない」
+  - harness-tuner の報告にある学びの候補も同じ基準で取捨する（子は自分では書かない）
 - 相対パスの md: このファイルは `commands/` にある
   - プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 

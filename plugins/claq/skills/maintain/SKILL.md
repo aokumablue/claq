@@ -176,6 +176,7 @@ claq_mem_learn --key <slug> --kind pitfall --scope repo --domain harness \
 ```
 
 記録基準は `../learn/SKILL.md` の「記録する / しない」。同じ違反の 2 回目の扱いも `../learn/SKILL.md` に従う。
+起動した子（reviewer・tdd-writer・code-refiner）の報告にある学びの候補も、同じ基準で取捨する（子は自分では書かない）。
 
 要約は結論から書き、修正コミット・final gate の結果・残タスク（`/plan` 提示分）を示す。
 
