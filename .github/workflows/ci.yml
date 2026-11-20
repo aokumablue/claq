@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # install-dev.sh は PATH 上で最も新しい Python を選ぶため、matrix の版で venv を直接作る
+      - name: Install dev environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --quiet -e "plugins/claq[dev]"
+      - name: Lint
+        run: .venv/bin/ruff check plugins/claq
+      - name: Test with coverage
+        working-directory: plugins/claq
+        run: ../../.venv/bin/python -m pytest -q --cov
