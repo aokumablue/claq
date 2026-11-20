@@ -145,6 +145,9 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     ``keep_allowed_chars_for_injection`` で許可した文字だけを残す。行区切りは LF に揃って
     改行として残るので、``_neutralize_handoff_structure`` は全ての論理行を見られる。
 
+    見出しの時刻は、UTC で保存した ``ended_at`` を利用者のローカル時刻へ直して出す
+    （タイムゾーンを書かない時刻は、読む側がローカル時刻として読むため）。
+
     Args:
         db: 参照する mem データベース。
         repo_id: 対象リポジトリの ``repos.id``。
@@ -158,7 +161,7 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     handoff = _neutralize_handoff_structure(strip_tags(keep_allowed_chars_for_injection(session.handoff).strip()))
     if not handoff:
         return ""
-    stamp = datetime.fromisoformat(session.ended_at).strftime("%Y-%m-%d %H:%M")
+    stamp = datetime.fromisoformat(session.ended_at).astimezone().strftime("%Y-%m-%d %H:%M")
     return f"## 前回の続き ({stamp})\n{truncate_handoff(handoff)}"
 
 

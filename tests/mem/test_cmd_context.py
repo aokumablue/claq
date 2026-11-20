@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -24,6 +27,28 @@ _KEY_SPLIT_BY_FILLERS = (
     f"{_KEY[:8]}\u034f{_KEY[8:10]}\ufe0f{_KEY[10:12]}\U000e0100{_KEY[12:14]}\u3164{_KEY[14:16]}\u2800{_KEY[16:]}"
 )
 _LINE_SEPARATORS = ["\n", "\r\n", "\r", "\x85", "\u2028", "\u2029", "\x0b", "\x0c", "\n\n\n", "\n\u200b\n"]
+
+
+@pytest.fixture(autouse=True)
+def local_timezone() -> Iterator[Callable[[str], None]]:
+    """ローカルのタイムゾーンを UTC に固定し、切り替える関数を返す。
+
+    「前回の続き」の時刻はローカル時刻で出すため、固定しないと期待値が実行環境のタイムゾーンで変わる。
+    """
+    original = os.environ.get("TZ")
+
+    def _set(name: str) -> None:
+        """TZ を差し替えて time.tzset で反映する。"""
+        os.environ["TZ"] = name
+        time.tzset()
+
+    _set("UTC")
+    yield _set
+    if original is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = original
+    time.tzset()
 
 
 def _envelope(*sections: str) -> str:
@@ -249,6 +274,19 @@ class TestContext:
         self._seed_session(tmp_path, _repo_id(tmp_path), handoff=handoff)
 
         assert _inject(monkeypatch, tmp_path) == _envelope(f"## 前回の続き (2026-08-09 14:03)\n{expected}")
+
+    def test_handoff_heading_shows_local_time(
+        self, local_timezone: Callable[[str], None], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """「前回の続き」の時刻は、UTC で保存した ended_at をローカル時刻へ直して出すこと。
+
+        タイムゾーンを書かない時刻は読む側がローカル時刻として読む。UTC のまま出すと JST の利用者には
+        9 時間ずれて見える。
+        """
+        local_timezone("Asia/Tokyo")
+        self._seed_session(tmp_path, _repo_id(tmp_path))
+
+        assert _inject(monkeypatch, tmp_path) == _envelope("## 前回の続き (2026-08-09 23:03)\n前回の作業内容")
 
     def test_shell_bootstrap_section_names_the_wrapper_where_env_sh_cannot_resolve(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
