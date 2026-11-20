@@ -224,8 +224,8 @@ def _shell_bootstrap_section() -> str:
 def handle_context(settings: Settings, args: CommandArgs) -> str:
     """context コマンド: SessionStart へ注入する ``<claq-memory>`` ブロックを組み立てる。
 
-    共通知識・リポジトリ知識・前回の引き継ぎを、いずれも ``status='active'`` に
-    限って集める（``pending`` は昇格レビュー前の下書きでノイズになる）。加えて
+    共通知識とリポジトリ知識（いずれも ``status='active'`` に限る。``pending`` は
+    昇格レビュー前の下書きでノイズになる）と、前回の引き継ぎを集める。加えて
     detach 起動の失敗通知と、Windows 向けの呼び出し方を節として足す。失敗はそのまま
     `cli.main` へ伝え、exit 1 と stderr で利用者に通知させる。
 
