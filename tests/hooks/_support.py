@@ -609,12 +609,12 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
 #
 # `_SECRET_PATTERNS` は 14 本の正規表現リテラルで、期待値へ複製すると同じ綴りを
 # 2 か所で保守することになる。この集合には外部の突き合わせ先（`claq.lib.redaction`）
-# があり、`tests/mem/test_redaction.py::TestVendorPatternSync` が「同じ検体に両者が
+# があり、`tests/lib/test_redaction.py::TestVendorPatternSync` が「同じ検体に両者が
 # 反応するか」という振る舞いで全ベンダ形式を固定している。「外部に抽出元が
 # ある場合はそちらを使う」方針どおり、そちらを単一の関門にする。
 _EXTERNALLY_PINNED_VOCABULARIES: dict[str, str] = {
     "commit_quality_scanner._SECRET_PATTERNS": (
-        "tests/mem/test_redaction.py::TestVendorPatternSync が redaction 側との"
+        "tests/lib/test_redaction.py::TestVendorPatternSync が redaction 側との"
         "振る舞い一致で固定する（正規表現リテラルの二重保守を避ける）"
     ),
 }
