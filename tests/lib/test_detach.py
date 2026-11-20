@@ -253,8 +253,8 @@ def test_watchdog_kills_process_group(
 ) -> None:
     """timeout・SIGTERM を無視する子孫・watchdog 自身への SIGTERM のいずれでも、孫が仕事を終える前に殺すこと。
 
-    Popen.terminate()/kill() は直接の子にしか届かず、孫（desktop_notify の osascript 等）が残留する退行が
-    あったため、argv の一致ではなく watchdog → 子 → 孫の実プロセスを起動して確かめる。
+    Popen.terminate()/kill() は直接の子にしか届かず、孫（子が起動する `git` 等）が残るため、argv の一致では
+    なく watchdog → 子 → 孫の実プロセスを起動して確かめる。
     """
     marker = tmp_path / "grandchild-marker"
     pid_file = tmp_path / "grandchild-pid"
