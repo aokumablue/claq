@@ -89,13 +89,14 @@ baseline を取る（リポジトリ直下の `.venv` を有効化する）。
 - 例: 不信テキストをプロンプトへ注入する hook・恒久メモリの読み書き
 - 定義文書の文言だけの回では加えない
 
-子へ届くのは依頼文だけなので、起動した全員の依頼文に対象パスを書く（security-auditor は Bash を持たず diff を取れないため、対象ファイルの全体を監査させる）。
+子へ届くのは依頼文だけなので、依頼文に次を書く。
 
-結果のまとめ方:
+- 起動した全員: 対象パス（security-auditor は Bash を持たず diff を取れないため、対象ファイルの全体を監査させる）
+- reviewer: `scope: path`（差分の無い定期メンテでも、パスの余剰を報告させるため）
+- reviewer: ステップ3 の表の種別（バグ・余剰・指示文書の不備）と、ステップ1 の web の動向に照らした廃止 API・仕様の版ずれを観点として書く（reviewer は依頼文が名指しした観点だけを未変更の行でも見る）
+- reviewer: security-auditor を並列に起動したときは「`security-auditor` との並列起動」
 
-- 結果を、深刻度（CRITICAL/HIGH/MEDIUM/LOW）・ファイル位置・行番号・推奨修正で統合する
-- security-auditor を並列に起動したときは、reviewer の依頼文に「`security-auditor` との並列起動」と書く
-- reviewer の依頼文には、ステップ1 の web の動向に照らした廃止 API・仕様の版ずれという観点も書く
+結果は、深刻度（CRITICAL/HIGH/MEDIUM/LOW）・ファイル位置・行番号・推奨修正で統合する。
 
 hooks / `src/claq/hooks/` を含む回は、両ハーネス互換（原則4）を必須の観点にする。
 
