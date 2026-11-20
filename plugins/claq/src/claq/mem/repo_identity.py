@@ -220,6 +220,27 @@ def find_repo_root(cwd: str | Path | None) -> str:
     return resolved
 
 
+def find_work_tree_root(cwd: str | Path | None) -> str:
+    """*cwd* が属する作業ツリーのルート絶対パスを返す。
+
+    ``find_repo_root`` と違い、``git worktree`` 配下では本体ではなくその worktree 自身へ
+    解決する（その worktree で編集したファイルは本体の外に置かれることがあるため）。
+    git が使えない・リポジトリ外の場合は *cwd* 自身を返す。
+
+    Args:
+        cwd: 起点ディレクトリ。None なら現在の作業ディレクトリ。
+
+    Returns:
+        シンボリックリンク解決済みの絶対パス。
+
+    Raises:
+        subprocess.TimeoutExpired: git が時間内に終わらない場合（``_run_git`` を参照）。
+    """
+    start = os.path.realpath(Path.cwd() if cwd is None else cwd)
+    top_level = _run_git(start, "rev-parse", "--show-toplevel")
+    return start if top_level is None else os.path.realpath(top_level)
+
+
 def read_remote_url(root_path: str) -> str | None:
     """*root_path* の ``origin`` remote URL を取得する。
 

@@ -203,18 +203,6 @@ class TestTranscriptSummary:
             ),
             (
                 [
-                    _user("依頼"),
-                    {
-                        "type": "tool_use",
-                        "tool_name": "Edit",
-                        "tool_input": {"file_path": "/Users/me/dev/claq-dev/plugins/claq/src/claq/mem/handoff.py"},
-                    },
-                    {"type": "tool_use", "tool_name": "Write", "tool_input": {"file_path": "docs/mem.md"}},
-                ],
-                "直近の依頼:\n- 依頼\n変更ファイル: …/claq/mem/handoff.py, docs/mem.md\n使用ツール: Edit, Write",
-            ),
-            (
-                [
                     _user("codex 経路"),
                     {
                         "type": "tool_use",
@@ -236,6 +224,7 @@ class TestTranscriptSummary:
                 "直近の依頼:\n- 残る依頼",
             ),
             ([{"role": "user", "content": "依頼"}], "直近の依頼:\n- 依頼"),
+            ([{"role": "assistant", "content": "応答"}], ""),
             ([_user_blocks({"type": "text", "text": "依頼"})], "直近の依頼:\n- 依頼"),
             ([{"type": "user", "content": "依頼"}], "直近の依頼:\n- 依頼"),
             ([{"type": "assistant", "message": {"role": "assistant", "content": "応答"}}], ""),
@@ -259,7 +248,6 @@ class TestTranscriptSummary:
             "collects-tools-and-modified-files",
             "camel-case-and-tool-args-containers",
             "file-changes-without-requests",
-            "long-path-shortened-not-redacted",
             "apply-patch-normalized-to-edit",
             "tools-alone-are-not-handed-off",
             "unnamed-tool-ignored",
@@ -270,6 +258,7 @@ class TestTranscriptSummary:
             "non-object-skipped",
             "overlong-line-skipped",
             "role-field-entry",
+            "untyped-assistant-role-not-collected",
             "content-blocks-entry",
             "top-level-content-entry",
             "assistant-text-not-collected",
@@ -455,6 +444,17 @@ class TestTranscriptSummary:
         """
         assert _from_transcript(tmp_path, entries) == expected
 
+    @pytest.mark.parametrize("flag", ["isMeta", "isCompactSummary"])
+    def test_host_meta_entries_are_not_requests(self, tmp_path: Path, flag: str) -> None:
+        """host が非依頼の印を付けたユーザー形エントリ（スキル展開・他エージェントの報告・圧縮サマリー）は依頼にしないこと。"""
+        entries = [_user("実依頼"), {**_user("This session is being continued from a previous conversation."), flag: True}]
+        assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- 実依頼"
+
+    def test_api_request_blob_is_not_a_request(self, tmp_path: Path) -> None:
+        """API 送信内容の控え（type が api-request-blob）は message.role が user でも依頼にしないこと。"""
+        blob = {"type": "api-request-blob", "message": {"role": "user", "content": "古い依頼の再送"}}
+        assert _from_transcript(tmp_path, [_user("実依頼"), blob]) == "直近の依頼:\n- 実依頼"
+
     def test_reads_only_the_tail_of_a_huge_transcript(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """上限バイトを超えるトランスクリプトは末尾だけ読む。"""
         monkeypatch.setattr(handoff_mod, "TRANSCRIPT_MAX_BYTES", 120)
@@ -526,6 +526,49 @@ class TestSpeechBlockAllowlist:
         messages = [r.getMessage() for r in caplog.records]
         assert any("function_result" in m for m in messages)
         assert not any("tool_result" in m for m in messages)
+
+
+class TestWorkTreeScope:
+    """変更ファイルはフックの ``cwd`` が属する作業ツリーの中だけを集める。"""
+
+    @staticmethod
+    def _edits(*paths: str) -> list[dict]:
+        """依頼 1 件と、paths を順に Edit する tool_use エントリを組み立てる。"""
+        return [_user("依頼"), *({"type": "tool_use", "tool_name": "Edit", "tool_input": {"file_path": p}} for p in paths)]
+
+    def _handoff(self, tmp_path: Path, work_tree: Path, paths: list[str]) -> str:
+        """work_tree を cwd として paths の編集を含む transcript を要約する。"""
+        transcript = _write_transcript(tmp_path, self._edits(*paths))
+        return build_handoff({"transcript_path": transcript, "cwd": str(work_tree)})
+
+    def test_long_path_inside_is_shortened_not_redacted(self, tmp_path: Path) -> None:
+        """作業ツリー内の長い絶対パスは redact の base64 検出で潰さず末尾 3 セグメントへ縮めること。
+
+        無害化の文字数上限を超える深いパスでも、末尾のファイル名を残して縮める。
+        """
+        work_tree = tmp_path / ("d" * 120)
+        inside = str(work_tree / "plugins" / "claq" / "src" / "claq" / "mem" / "handoff.py")
+        assert self._handoff(tmp_path, work_tree, [inside, "docs/mem.md"]) == (
+            "直近の依頼:\n- 依頼\n変更ファイル: docs/mem.md, …/claq/mem/handoff.py\n使用ツール: Edit"
+        )
+
+    def test_paths_outside_the_work_tree_are_dropped(self, tmp_path: Path) -> None:
+        """scratchpad など作業ツリー外の絶対パス・NUL を含む絶対パスは変更ファイルに載せないこと。"""
+        work_tree = tmp_path / "repo"
+        outside = str(tmp_path / "scratchpad" / "render_cmp.py")
+        assert self._handoff(tmp_path, work_tree, [outside, "/repo\x00/a.py", "src/a.py"]) == (
+            "直近の依頼:\n- 依頼\n変更ファイル: src/a.py\n使用ツール: Edit"
+        )
+
+    def test_symlinked_spelling_of_the_work_tree_counts_as_inside(self, tmp_path: Path) -> None:
+        """作業ツリーをシンボリックリンク経由の綴りで編集しても中として数えること。"""
+        work_tree = tmp_path / "repo"
+        work_tree.mkdir()
+        alias = tmp_path / "alias"
+        alias.symlink_to(work_tree)
+        assert self._handoff(tmp_path, work_tree, [str(alias / "a.py")]) == (
+            f"直近の依頼:\n- 依頼\n変更ファイル: …/{tmp_path.name}/alias/a.py\n使用ツール: Edit"
+        )
 
 
 class TestTrustedTranscript:

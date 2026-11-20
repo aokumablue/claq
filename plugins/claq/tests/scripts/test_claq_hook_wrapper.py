@@ -205,7 +205,7 @@ def test_wrapper_reports_python_not_found(tmp_path: Path, stubs: dict[str, str])
     """使えるインタプリタが無ければ起動せず exit 0 + 構造化診断（stdout は汚さない）。
 
     fail-closed（非 0）にすると保護 hook が全 Bash/Edit を拒否し、PATH を直す手段ごとセッション内から
-    塞がれる。launcher.py の未対応 Python 時と同じ fail-open ポリシーに揃える（CLAUDE.md「ランタイム前提」）。
+    塞がれる。launcher.py の未対応 Python 時と同じ fail-open ポリシーに揃える（CLAUDE.md「ランタイム」）。
     """
     result = _run_wrapper(_env(tmp_path, str(_stub_dir(tmp_path, "bin", **stubs))))
 

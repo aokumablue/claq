@@ -32,8 +32,10 @@ from claq.lib.harness import (
     normalize_user_message,
 )
 from claq.lib.slim_text import compact_line
+from claq.mem.knowledge_input import optional_str
 from claq.mem.logger import get as _get_logger
 from claq.mem.redaction import PLACEHOLDER, redact
+from claq.mem.repo_identity import find_work_tree_root
 from claq.mem.settings import CONTEXT_HANDOFF_CHAR_BUDGET
 from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
 
@@ -65,6 +67,19 @@ _TOOL_LIST_LIMIT = 8
 
 _EDIT_TOOLS: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
 """ファイルパスを収集する対象となる正規化済みツール名。"""
+
+_NON_SPEECH_ENTRY_TYPES: frozenset[str] = frozenset({"api-request-blob"})
+"""``message.role`` が ``user`` でも発話ではないエントリの ``type``（Claude Code の transcript）。
+
+``api-request-blob`` は API へ送った過去の内容の控えで、圧縮サマリーや古い依頼を再び運んでくる。
+"""
+
+_HOST_META_FLAGS: tuple[str, ...] = ("isMeta", "isCompactSummary")
+"""host がユーザー発話の形で記録する非依頼エントリの印（Claude Code の transcript）。
+
+スキル本文の展開・他エージェントからの報告・圧縮サマリーはタグを持たず、足場タグの
+除去では落とせない。印の付いたエントリは依頼として引き継がない。
+"""
 
 _PATH_SEPARATOR_RE = re.compile(r"[/\\]")
 """パス区切り（POSIX の ``/`` と Windows の ``\\``）。"""
@@ -184,8 +199,10 @@ def build_handoff(payload: dict[str, Any]) -> str:
         末尾を省略記号にする）。組み立てる材料が無ければ空文字列。
     """
     explicit = str(payload.get("handoff") or "").strip()
-    text = _sanitize_freeform(explicit) if explicit else _summarize_transcript(str(payload.get("transcript_path") or ""))
-    return truncate_handoff(text)
+    if explicit:
+        return truncate_handoff(_sanitize_freeform(explicit))
+    transcript_path = str(payload.get("transcript_path") or "")
+    return truncate_handoff(_summarize_transcript(transcript_path, optional_str(payload.get("cwd"))))
 
 
 def truncate_handoff(text: str) -> str:
@@ -206,7 +223,7 @@ def truncate_handoff(text: str) -> str:
     return text[: CONTEXT_HANDOFF_CHAR_BUDGET - 1] + "…"
 
 
-def _summarize_transcript(transcript_path: str) -> str:
+def _summarize_transcript(transcript_path: str, cwd: str | None) -> str:
     """トランスクリプトを走査して引き継ぎ要約を組み立てる。
 
     ``transcript_path`` は host 供給値なので ``is_trusted_transcript`` で検査し、
@@ -215,6 +232,8 @@ def _summarize_transcript(transcript_path: str) -> str:
 
     Args:
         transcript_path: フックが渡した JSONL トランスクリプトのパス。
+        cwd: フックが渡したセッションの作業ディレクトリ。変更ファイルはこの作業ツリーの
+            中だけを集める。None なら現在の作業ディレクトリ。
 
     Returns:
         要約の散文。信頼できないパス・材料が無い場合は空文字列。
@@ -223,7 +242,8 @@ def _summarize_transcript(transcript_path: str) -> str:
     if not is_trusted_transcript(path):
         return ""
     tail = read_tail_text(path, TRANSCRIPT_MAX_BYTES)
-    messages, files, tools = _scan(tail, time.monotonic() + TRANSCRIPT_TIMEOUT_SEC)
+    work_tree = find_work_tree_root(cwd)
+    messages, files, tools = _scan(tail, time.monotonic() + TRANSCRIPT_TIMEOUT_SEC, work_tree)
     return _compose(messages, files, tools)
 
 
@@ -283,12 +303,13 @@ def is_trusted_transcript(path: Path) -> bool:
     return any(resolved.is_relative_to(root.resolve()) for root in trusted_transcript_roots())
 
 
-def _scan(text: str, deadline: float) -> tuple[list[str], list[str], list[str]]:
+def _scan(text: str, deadline: float, work_tree: str) -> tuple[list[str], list[str], list[str]]:
     """トランスクリプト各行からユーザー依頼・変更ファイル・使用ツールを集める。
 
     Args:
         text: JSONL 形式のトランスクリプト本文。
         deadline: 走査を打ち切る ``time.monotonic()`` 基準の時刻。
+        work_tree: 変更ファイルを集める作業ツリーのルート絶対パス。
 
     Returns:
         （直近のユーザー依頼、変更ファイル、使用ツール）の 3 つ組。
@@ -311,7 +332,7 @@ def _scan(text: str, deadline: float) -> tuple[list[str], list[str], list[str]]:
         message = _user_message(entry)
         if message:
             messages.append(message)
-        _collect_tools(entry, tools, files)
+        _collect_tools(entry, tools, files, work_tree)
 
     return (
         _dedupe_keeping_latest(messages)[-_USER_MESSAGE_COUNT:],
@@ -456,8 +477,9 @@ def user_entry_content(entry: dict[str, Any]) -> object:
     """ユーザー発話のエントリから ``content`` を取り出す。
 
     host ごとに role の置き場所が違う（``type`` / ``role`` / ``message.role``）ため、どれかが
-    ``user`` ならユーザー発話とみなす。この知識の唯一の置き場所で、足場診断
-    （`scan_scaffold_drift`）も同じ判定を使う。
+    ``user`` ならユーザー発話とみなす。ただし ``_NON_SPEECH_ENTRY_TYPES`` の ``type`` を持つ
+    エントリは、``message.role`` が ``user`` でも発話ではない。この知識の唯一の置き場所で、
+    足場診断（`scan_scaffold_drift`）も同じ判定を使う。
 
     Args:
         entry: トランスクリプトの 1 エントリ。
@@ -465,8 +487,11 @@ def user_entry_content(entry: dict[str, Any]) -> object:
     Returns:
         ``content``（文字列・ブロック列など生の値）。ユーザー発話でない、または content が無ければ None。
     """
+    entry_type = entry.get("type")
+    if entry_type in _NON_SPEECH_ENTRY_TYPES:
+        return None
     message = _message_of(entry)
-    if "user" not in (entry.get("type"), entry.get("role"), message.get("role")):
+    if "user" not in (entry_type, entry.get("role"), message.get("role")):
         return None
     return message.get("content") or entry.get("content")
 
@@ -496,9 +521,12 @@ def _user_message(entry: dict[str, Any]) -> str:
         entry: トランスクリプトの 1 エントリ。
 
     Returns:
-        圧縮済みのユーザー発話。ユーザー発話でない、中身が空、または
-        ハーネス足場しか含まれていなければ空文字列。
+        圧縮済みのユーザー発話。ユーザー発話でない、host が非依頼の印
+        （``_HOST_META_FLAGS``）を付けた、中身が空、またはハーネス足場しか
+        含まれていなければ空文字列。
     """
+    if any(entry.get(flag) for flag in _HOST_META_FLAGS):
+        return ""
     content = user_entry_content(entry)
     if content is None:
         return ""
@@ -507,7 +535,7 @@ def _user_message(entry: dict[str, Any]) -> str:
     return compact_line(_sanitize_freeform(raw), _USER_MESSAGE_CHAR_LIMIT)
 
 
-def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str]) -> None:
+def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str], work_tree: str) -> None:
     """エントリから使用ツール名と編集対象ファイルを収集する。
 
     単独の ``tool_use`` エントリと、assistant メッセージ内の ``tool_use``
@@ -527,27 +555,29 @@ def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str]) -> N
         entry: トランスクリプトの 1 エントリ。
         tools: 使用ツール名の収集先。
         files: 変更ファイルパスの収集先。
+        work_tree: 変更ファイルを集める作業ツリーのルート絶対パス。
     """
     raw_name = extract_raw_tool_name(entry) or str(entry.get("name") or "")
     if raw_name:
-        _record_tool(raw_name, extract_tool_input(entry) or entry.get("input"), tools, files)
+        _record_tool(raw_name, extract_tool_input(entry) or entry.get("input"), tools, files, work_tree)
 
     content = _message_of(entry).get("content")
     if not isinstance(content, list):
         return
     for block in content:
         if isinstance(block, dict) and block.get("type") == "tool_use":
-            _record_tool(str(block.get("name") or ""), block.get("input"), tools, files)
+            _record_tool(str(block.get("name") or ""), block.get("input"), tools, files, work_tree)
 
 
-def _record_tool(tool_name: str, tool_input: object, tools: set[str], files: set[str]) -> None:
-    """ツール名を正規化して記録し、編集系なら対象ファイルも集める。
+def _record_tool(tool_name: str, tool_input: object, tools: set[str], files: set[str], work_tree: str) -> None:
+    """ツール名を正規化して記録し、編集系なら作業ツリー内の対象ファイルも集める。
 
     Args:
         tool_name: トランスクリプト上のツール名（正規化前）。
         tool_input: ツール入力。dict / パッチ文字列以外は入力なしとして扱う。
         tools: 使用ツール名の収集先。
         files: 変更ファイルパスの収集先。
+        work_tree: 変更ファイルを集める作業ツリーのルート絶対パス。
     """
     if not tool_name:
         return
@@ -557,7 +587,32 @@ def _record_tool(tool_name: str, tool_input: object, tools: set[str], files: set
         return
     usable_input = tool_input if isinstance(tool_input, dict | str) else None
     for path in extract_file_paths(tool_name, usable_input) or ():
-        _add_sanitized(files, path)
+        if _is_in_work_tree(path, work_tree):
+            _add_sanitized(files, _shorten_path(path))
+
+
+def _is_in_work_tree(path: str, work_tree: str) -> bool:
+    """編集対象のパスが作業ツリーの中かを判定する。
+
+    引き継ぎはリポジトリ単位で注入されるため、scratchpad など作業ツリー外の編集を
+    載せると枠を消費するうえ、次セッションが開けないパスを渡すことになる。相対パスは
+    作業ツリーからの相対として中に数える。NUL を含む絶対パスは ``realpath`` が
+    ``ValueError`` を送出するため、実在しないパスとして外に数える。
+
+    Args:
+        path: transcript から拾った生のパス。
+        work_tree: 作業ツリーのルート絶対パス（シンボリックリンク解決済み）。
+
+    Returns:
+        相対パス、または解決後に作業ツリー配下になる絶対パスなら True。
+    """
+    if not os.path.isabs(path):
+        return True
+    try:
+        resolved = os.path.realpath(path)
+    except ValueError:
+        return False
+    return Path(resolved).is_relative_to(work_tree)
 
 
 def _add_sanitized(collected: set[str], value: str) -> None:
@@ -577,7 +632,9 @@ def _shorten_path(path: str) -> str:
 
     絶対パスを丸ごと載せると数本で予算を食い潰すうえ、次セッションが
     知りたいのは「どのファイルを触っていたか」だけで先頭のディレクトリ
-    階層は不要なため。
+    階層は不要なため。無害化（``_STRUCTURED_VALUE_LIMIT`` 文字で切る）より
+    前に掛ける。後に掛けると、上限を超える深いパスは末尾のファイル名が
+    切り落とされた先頭部分から縮めることになる。
 
     区切りは ``/`` と ``\\`` の両方を見る。``/`` だけで分割すると
     ``C:\\Users\\<name>\\proj\\src\\app.py`` が 1 セグメント扱いになり、
@@ -606,7 +663,7 @@ def _compose(messages: list[str], files: list[str], tools: list[str]) -> str:
 
     Args:
         messages: 直近のユーザー依頼。
-        files: 変更ファイルパス。
+        files: 末尾セグメントへ縮めた変更ファイルパス。
         tools: 使用ツール名。
 
     Returns:
@@ -620,7 +677,7 @@ def _compose(messages: list[str], files: list[str], tools: list[str]) -> str:
         lines.append("直近の依頼:")
         lines.extend(f"- {message}" for message in messages)
     if files:
-        lines.append(f"変更ファイル: {', '.join(_shorten_path(path) for path in files)}")
+        lines.append(f"変更ファイル: {', '.join(files)}")
     if tools:
         lines.append(f"使用ツール: {', '.join(tools)}")
     return "\n".join(lines)
