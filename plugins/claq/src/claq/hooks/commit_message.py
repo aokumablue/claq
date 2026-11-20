@@ -9,17 +9,13 @@ from __future__ import annotations
 
 import re
 
-from claq.hooks.commit_risk import parse_git_commit_command
+from claq.hooks.commit_risk import parse_git_commit_command, short_option_flags
 
 # Conventional Commits 1.0.0: type・任意の scope・破壊的変更を表す任意の `!`・コロン。
 _CONVENTIONAL_COMMIT = re.compile(
     r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?!?:\s*.+"
 )
 _MAX_SUBJECT_CHARS = 72
-
-# `-m` 以外で値を取る git commit の短形式。結合短形式の中でこれらが先に現れたら、残りの文字は
-# その値であってメッセージの指定ではない（`-Cmain` の `m` を `-m` と読まない）。
-_OTHER_SHORT_OPTIONS_WITH_VALUE = frozenset("CcFStu")
 
 
 def _message_issue(kind: str, message: str, suggestion: str) -> dict:
@@ -89,15 +85,13 @@ def _short_cluster_message(token: str) -> str | None:
         token: ``-`` 1 つで始まる引数トークン。
 
     Returns:
-        ``m`` より後ろの文字列（``-m`` 単独や ``-am`` は空文字）。``m`` が無い、または値を取る
-        別の短形式が ``m`` より先に現れた場合は None。
+        ``m`` より後ろの文字列（``-m`` 単独や ``-am`` は空文字）。フラグ（`short_option_flags`）が
+        ``m`` で終わらない（``m`` が無い、または値を取る別の短形式が先に現れた）場合は None。
     """
-    for position, flag in enumerate(token[1:], start=2):
-        if flag == "m":
-            return token[position:]
-        if flag in _OTHER_SHORT_OPTIONS_WITH_VALUE:
-            return None
-    return None
+    flags = short_option_flags(token)
+    if not flags.endswith("m"):
+        return None
+    return token[1 + len(flags) :]
 
 
 def _message_from_args(commit_args: list[str]) -> str | None:

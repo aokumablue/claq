@@ -233,11 +233,34 @@ def compound_commit_risk(command: str) -> str | None:
     return None
 
 
+# 値を取る git commit の短形式（`-m <msg>`・`-F <file>`・`-C` / `-c <commit>`・`-t <file>`・`-S[<keyid>]`・
+# `-u[<mode>]`）。結合短形式の中でこれらが現れたら、残りの文字はその値であってフラグではない
+# （`-m"add x"` や `-Cmain` の `a` を `-a` と読まない）。
+_SHORT_OPTIONS_WITH_VALUE = frozenset("CcFmStu")
+
+
+def short_option_flags(token: str) -> str:
+    """短形式のトークン（``-am`` / ``-mmsg``）のうち、フラグとして読む文字列を返します。
+
+    値を取る短形式（`_SHORT_OPTIONS_WITH_VALUE`）が現れたらその文字までで止める（残りはその値）。
+
+    Args:
+        token: ``-`` 1 つで始まる引数トークンです。
+
+    Returns:
+        フラグの文字列（``-am`` は ``am``、``-mAdd`` は ``m``、``-v`` は ``v``）。
+    """
+    for position, flag in enumerate(token[1:], start=2):
+        if flag in _SHORT_OPTIONS_WITH_VALUE:
+            return token[1:position]
+    return token[1:]
+
+
 def is_commit_all_flag(commit_args: list[str]) -> bool:
     """commit 引数トークンに `-a`/`--all`（結合短形式含む）が含まれるかを判定します。
 
     `-am` のような結合短形式は、`-` 始まり・`--` ではない・`=` を含まない短形式
-    トークンの中に `a` があるかで見る。
+    トークンのフラグ（`short_option_flags`）に `a` があるかで見る。
 
     Args:
         commit_args: `git commit` 呼び出しの引数トークン列です。
@@ -247,6 +270,11 @@ def is_commit_all_flag(commit_args: list[str]) -> bool:
     """
     return any(
         token == "--all"
-        or (token.startswith("-") and not token.startswith("--") and "=" not in token and "a" in token[1:])
+        or (
+            token.startswith("-")
+            and not token.startswith("--")
+            and "=" not in token
+            and "a" in short_option_flags(token)
+        )
         for token in commit_args
     )
