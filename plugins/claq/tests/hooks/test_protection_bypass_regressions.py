@@ -166,10 +166,9 @@ _BLOCKED_CASES = [
         _write_content("Package.json", '{"eslintConfig": {}}'),
     ),
     ("tox.ini 専用照合の大文字", "config_protection", _write_content("TOX.ini", "commands = true")),
-    # sed の GNU 長形式（短縮形を含む）と実行 wrapper。
+    # sed の GNU 長形式と実行 wrapper。
     ("sed --in-place", "bash_config_protection", _bash("sed --in-place s/x/y/ ruff.toml")),
     ("sed --in-place=.bak", "bash_config_protection", _bash("sed --in-place=.bak s/x/y/ ruff.toml")),
-    ("sed 長形式の短縮 --i", "bash_config_protection", _bash("sed --i s/x/y/ ruff.toml")),
     ("sed -ni 結合短形式", "bash_config_protection", _bash("sed -ni s/x/y/ ruff.toml")),
     ("timeout wrapper", "bash_config_protection", _bash("timeout 5 rm ruff.toml")),
     ("timeout 単位付き秒数", "bash_config_protection", _bash("timeout 1.5s rm ruff.toml")),

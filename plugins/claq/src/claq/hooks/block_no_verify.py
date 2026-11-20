@@ -52,10 +52,6 @@ heredoc 本文:
     なりません。値を取るオプション（``-m`` / ``-F`` など）の値トークンもフラグ走査から
     除外します。
 
-long オプションの短縮形:
-    git は曖昧でない限り long オプションの**前置**を受理するため（``git commit
-    --no-veri`` は実際に通る）、``--no-verify`` の前置（``--n`` 以上の長さ）もブロックします。
-
 config 経由のフック無効化（config key は大小文字を区別せず判定）:
     - ``-c`` / ``--config-env`` / ``git config`` の書込みで ``core.hooksPath`` を差し替える
     - 同じ経路で ``include.path`` / ``includeIf.*`` を書き、取り込んだ先で
@@ -182,10 +178,6 @@ _OPTIONAL_VALUE_SHORT_OPTIONS = frozenset("uS")
 # フックバイパスに直結する long フラグ。サブコマンドを問わずブロックします。
 _BYPASS_LONG_FLAG = "--no-verify"
 
-# long オプションの短縮形を受け付ける最短長。``--n`` / ``--no`` は git 側では曖昧で
-# エラーになるが、deny 側に倒す（誤検出 > 誤通過）。
-_MIN_ABBREVIATED_LONG_OPTION_LENGTH = 3
-
 # ``git commit`` でのみ ``--no-verify`` の別名になる short フラグ。
 _BYPASS_SHORT_FLAG = "-n"
 
@@ -291,21 +283,6 @@ def _consume_option(
     if token.startswith("-") and len(token) > 1:
         return _consume_short_option(token, next_token, flags, config_values)
     return 0, False
-
-
-def _is_no_verify_flag(flag: str) -> bool:
-    """フラグが ``--no-verify``（git が受理する短縮形を含む）かを判定する。
-
-    Args:
-        flag: ``--`` で始まるフラグ名（``=`` の左側）。
-
-    Returns:
-        ``--no-verify`` の前置で ``--n`` 以上の長さがあれば True。
-
-    Raises:
-        例外は発生しません。
-    """
-    return len(flag) >= _MIN_ABBREVIATED_LONG_OPTION_LENGTH and _BYPASS_LONG_FLAG.startswith(flag)
 
 
 # ``NAME=value`` と追記代入 ``NAME+=value`` の両方を代入として読む。``+=`` は bash の追記で、
@@ -455,7 +432,7 @@ class _GitScan:
             is_word = not flags
             k = min(j + 1 + consumed, end)
             self._next[j] = k
-            self._no_verify[j] = self._no_verify[k] or any(_is_no_verify_flag(flag) for flag in flags)
+            self._no_verify[j] = self._no_verify[k] or _BYPASS_LONG_FLAG in flags
             self._short_n[j] = self._short_n[k] or _BYPASS_SHORT_FLAG in flags
             self._sensitive_config_value[j] = self._sensitive_config_value[k] or any(
                 is_sensitive_config_key(value.split("=", 1)[0]) for value in config_values

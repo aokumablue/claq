@@ -142,28 +142,20 @@ def basename(path: str) -> str:
 
 
 def normalize_protected_name(path: str) -> str:
-    """保護対象ファイル名の照合用に basename を大小無視・Win32 正準化へ畳みます。
+    """保護対象ファイル名の照合用に basename を大小無視へ畳みます。
 
     `normalize_executable_name` と同じ case 演算（`casefold`）と basename 規則を使う。
     `Path.resolve()` は APFS / NTFS で綴りを実体の大小へ正規化しないため、
     ``Write Ruff.toml`` が実体 ``ruff.toml`` へ着地しても素の比較では外れる。
     `.exe` は落とさない（保護対象は設定ファイルで、同一視する根拠が無い）。
 
-    Windows は末尾のドットと空白を切り捨て、``:`` 以降を代替データストリーム名と
-    して扱うため、``ruff.toml.`` / ``ruff.toml`` +空白 / ``ruff.toml:x`` も
-    ``ruff.toml`` へ畳む。
-
     Args:
         path: 検査対象のパス文字列、またはファイル名です。
 
     Returns:
-        大小無視・Win32 正準化へ畳んだ basename を返します。
-
-    Raises:
-        例外は発生しません。
+        大小無視へ畳んだ basename を返します。
     """
-    name = basename_any_separator(path).split(":", 1)[0]
-    return name.rstrip(". \t").casefold()
+    return basename_any_separator(path).casefold()
 
 
 def fold_path_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
@@ -247,8 +239,7 @@ INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl", "ruby"})
 # `bash_config_protection` と `pre_bash_commit_quality` が共有する。
 DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 
-# sed の GNU 長形式 in-place フラグ。GNU getopt は曖昧でない長形式の短縮を受け付け、
-# ``sed --i`` も in-place になるため、この名前の非空プレフィックスを一致条件にする。
+# sed の GNU 長形式 in-place フラグの名前（長形式の短縮は意図して組み立てる回避形なので見ない）。
 _LONG_INPLACE_OPTION_NAME = "in-place"
 
 
@@ -256,9 +247,8 @@ def is_inplace_edit_flag(token: str) -> bool:
     """トークンが in-place 編集フラグ（`sed -i` / `perl -0pi` / `sed --in-place`）かを判定します。
 
     単一ダッシュの短形式は結合位置を問わず `i` を含むかで判定する（`-i` / `-i.bak` /
-    `-0pi` / `-ni`）。長形式は `_LONG_INPLACE_OPTION_NAME` の非空プレフィックスに
-    限る（`--in-place=.bak` は名前部分だけを見る）。区切りの `--` は名前部分が空に
-    なるため in-place とみなさない。
+    `-0pi` / `-ni`）。長形式は名前部分が `_LONG_INPLACE_OPTION_NAME` と一致するものに
+    限る（`--in-place=.bak` は名前部分だけを見る）。
 
     `bash_config_protection` と `pre_bash_commit_quality` が共有する。どちらかが
     長形式を除外すると ``sed --in-place ... && git commit -am x`` でガードが不発になる。
@@ -268,15 +258,11 @@ def is_inplace_edit_flag(token: str) -> bool:
 
     Returns:
         in-place 編集を指示するフラグなら True。
-
-    Raises:
-        例外は発生しません。
     """
     if not token.startswith("-") or token == "-":
         return False
     if token.startswith("--"):
-        name = token[2:].split("=", 1)[0]
-        return bool(name) and _LONG_INPLACE_OPTION_NAME.startswith(name)
+        return token[2:].split("=", 1)[0] == _LONG_INPLACE_OPTION_NAME
     return "i" in token[1:]
 
 

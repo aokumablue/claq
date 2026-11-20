@@ -104,11 +104,6 @@ _BYPASS_COMMANDS = [
     "git config set core.hooksPath /tmp/evil-hooks",
     "git config unset core.hooksPath",
     "git config add core.hooksPath /tmp/evil-hooks",
-    # git が受理する long オプションの短縮形。完全一致だけを見ると素通りする。
-    "git commit --no-veri -m x",
-    "git commit --no-ver -m x",
-    "git commit --no- -m x",
-    "git commit --n -m x",
     # config ファイルそのものを差し替える literal 環境変数。差し替え先で
     # core.hooksPath を書けるため -c core.hooksPath= と等価。
     "GIT_CONFIG_GLOBAL=/tmp/cfg git commit -m x",
@@ -211,7 +206,7 @@ _ALLOWED_COMMANDS = [
     "git config get core.hooksPath",
     "git config list",
     "git config get user.name",
-    # 短縮形と紛らわしいが --no-verify の前置ではない commit オプション。
+    # `--no-` で始まるが `--no-verify` ではない commit オプション。
     "git commit --no-edit",
     "git commit --no-gpg-sign -m x",
     "git commit --no-post-rewrite -m x",

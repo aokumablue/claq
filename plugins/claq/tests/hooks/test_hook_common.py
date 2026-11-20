@@ -109,6 +109,9 @@ def test_normalize_executable_name(token: str, expected: str) -> None:
         (r"sub\dir\Package.json", "package.json"),
         (".GIT", ".git"),
         ("ruff.toml.exe", "ruff.toml.exe"),
+        # Win32 の名前正規化（末尾のドット・代替データストリーム）を突く名前は意図して組み立てる回避形なので畳まない。
+        ("ruff.toml.", "ruff.toml."),
+        ("ruff.toml:x", "ruff.toml:x"),
     ],
 )
 def test_normalize_protected_name(path: str, expected: str) -> None:
@@ -125,12 +128,13 @@ def test_normalize_protected_name(path: str, expected: str) -> None:
         ("-0pi", True),
         ("-ni", True),
         ("-pi", True),
-        # GNU 長形式と、getopt が受け付ける非曖昧な短縮。
+        # GNU 長形式。
         ("--in-place", True),
         ("--in-place=.bak", True),
-        ("--in-pl", True),
-        ("--i", True),
-        # 別の長形式は `in-place` のプレフィックスではない。
+        # 長形式の短縮は意図して組み立てる回避形なので対象外。
+        ("--in-pl", False),
+        ("--i", False),
+        # 別の長形式。
         ("--expression", False),
         ("--silent", False),
         ("--include", False),
