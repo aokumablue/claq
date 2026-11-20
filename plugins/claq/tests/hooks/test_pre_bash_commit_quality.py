@@ -13,8 +13,9 @@ from collections.abc import Callable
 
 import pytest
 
-from claq.hooks import block_no_verify, commit_risk, stdin_io
+from claq.hooks import block_no_verify, commit_risk
 from claq.hooks import pre_bash_commit_quality as pbcq
+from claq.lib import stdin_io
 
 from ._support import _bash
 

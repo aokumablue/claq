@@ -82,7 +82,7 @@ _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "Pipfile.lock",
 }
 _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
-    # ベンダ prefix の集合は `claq.mem.redaction._PATTERNS` と揃える（記録時はマスクするが
+    # ベンダ prefix の集合は `claq.lib.redaction._PATTERNS` と揃える（記録時はマスクするが
     # commit 時は検出しない秘密を作らないため）。
     #
     # `sk-` の文字クラスに `-` を含めるのは、OpenAI の現行形式がハイフンを含むため。
@@ -383,7 +383,7 @@ def _neutralize_one_line(text: str) -> str:
     行区切りを残すと、抜粋やパスに続けて `[Hook] PASS` のような行を偽装できる。この順序（許可リスト
     →タグ→改行畳み）は抜粋と表示パスで共通なので、1 箇所に閉じる。
 
-    `claq.mem.tag_stripping` は commit の検査結果を整形するときだけ要る。全 Bash 起動で読み込むと
+    `claq.lib.tag_stripping` は commit の検査結果を整形するときだけ要る。全 Bash 起動で読み込むと
     import 時間に効くため、ここで遅延 import する。
 
     Args:
@@ -392,7 +392,7 @@ def _neutralize_one_line(text: str) -> str:
     Returns:
         改行を含まない無害化済みの文字列。
     """
-    from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
+    from claq.lib.tag_stripping import keep_allowed_chars, strip_tags
 
     return _LINE_BREAKS.sub(" ", strip_tags(keep_allowed_chars(text)))
 

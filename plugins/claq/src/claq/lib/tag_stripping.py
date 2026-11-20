@@ -75,7 +75,7 @@ import re
 import unicodedata
 
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, TAG_NAME_END, tag_block_pattern
-from claq.mem.redaction import PLACEHOLDER, redact
+from claq.lib.redaction import PLACEHOLDER, redact
 
 # 無害化対象タグ（大文字小文字区別なし）。正規表現へ literal として埋めるため、
 # 正規表現メタ文字を含まない名前だけを置く。

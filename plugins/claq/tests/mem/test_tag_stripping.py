@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from claq.mem.tag_stripping import _MAX_NESTING_PASSES, _erase_known_tags, strip_tags
+from claq.lib.tag_stripping import _MAX_NESTING_PASSES, _erase_known_tags, strip_tags
 
 _CLOSE_SWALLOW_PROSE_LINES = "注入テキストは <private> で開き、</private で閉じ忘れると危険。\n参考: docs/notes -> 対策済み。"
 _CLOSE_SWALLOW_PROSE_SAME_LINE = "<private> を開いたまま </private と書くと危険 -> 直せ"

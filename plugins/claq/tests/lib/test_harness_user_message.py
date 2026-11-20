@@ -12,7 +12,7 @@ import time
 import pytest
 
 from claq.lib import harness
-from claq.mem.tag_stripping import strip_tags
+from claq.lib.tag_stripping import strip_tags
 
 _SCAFFOLD_TAGS = (
     "local-command-caveat",

@@ -608,7 +608,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
 # 完全一致で固定**しない**語彙と、その代わりに何が固定しているか。
 #
 # `_SECRET_PATTERNS` は 14 本の正規表現リテラルで、期待値へ複製すると同じ綴りを
-# 2 か所で保守することになる。この集合には外部の突き合わせ先（`claq.mem.redaction`）
+# 2 か所で保守することになる。この集合には外部の突き合わせ先（`claq.lib.redaction`）
 # があり、`tests/mem/test_redaction.py::TestVendorPatternSync` が「同じ検体に両者が
 # 反応するか」という振る舞いで全ベンダ形式を固定している。「外部に抽出元が
 # ある場合はそちらを使う」方針どおり、そちらを単一の関門にする。

@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 import pytest
 
-from claq.hooks import stdin_io
+from claq.lib import stdin_io
 
 _FAKE_FDS: dict[int, _FakeStdin] = {}
 

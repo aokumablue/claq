@@ -32,10 +32,10 @@ import re
 from dataclasses import dataclass, fields
 from typing import Any
 
+from claq.lib.redaction import redact_knowledge_text
+from claq.lib.tag_stripping import keep_allowed_chars
 from claq.mem.models import Knowledge, utc_now_iso
-from claq.mem.redaction import redact_knowledge_text
 from claq.mem.repo_identity import slugify
-from claq.mem.tag_stripping import keep_allowed_chars
 
 KINDS: frozenset[str] = frozenset({"convention", "decision", "pitfall", "howto", "fact", "preference"})
 """``knowledge.kind`` の許容値。スキーマの CHECK 制約と 1 対 1 で対応する。"""

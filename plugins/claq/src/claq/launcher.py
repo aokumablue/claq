@@ -190,15 +190,14 @@ def main(argv: list[str] | None = None) -> int:
     # --bg は host に関わらず常に detach し、呼び出し側フックを同期ブロックしない。
     # hooks.json / claq-helpers.sh のターゲットはすべて dotted module name なので `-m` で起動する。
     # detach（tempfile を引き込む）は --bg の経路でだけ import し、同期 hook の起動を軽くする。
-    from claq.hooks.detach import detach_process
-    from claq.hooks.hook_common import write_stderr
-    from claq.hooks.stdin_io import read_raw_stdin
+    from claq.lib.detach import detach_process
+    from claq.lib.stdin_io import read_raw_stdin
 
     try:
         detach_process([sys.executable, "-m", target, *target_args], read_raw_stdin(), env=build_env())
     except OSError as err:
         # docs/adr/hook-failure-direction.md: 親の exit code は「子の起動を受け付けたか」を表す。
-        write_stderr(f"[Hook] Error detaching {target}: {err}\n")
+        sys.stderr.write(f"[Hook] Error detaching {target}: {err}\n")
         return 1
     return 0
 

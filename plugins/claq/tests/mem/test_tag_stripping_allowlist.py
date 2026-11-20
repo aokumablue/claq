@@ -9,8 +9,8 @@ import unicodedata
 
 import pytest
 
-from claq.mem import tag_stripping
-from claq.mem.tag_stripping import (
+from claq.lib import tag_stripping
+from claq.lib.tag_stripping import (
     _AllowlistTable,
     _compat_open_positions,
     keep_allowed_chars,

@@ -69,15 +69,15 @@ from claq.hooks.shell_tokens import (
     split_segments,
     tokenize,
 )
-from claq.hooks.stdin_io import (
+from claq.lib.core_utils import log
+from claq.lib.harness import iter_bash_command_groups
+from claq.lib.stdin_io import (
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
     truncated_input_message,
 )
-from claq.lib.core_utils import log
-from claq.lib.harness import iter_bash_command_groups
 from claq.lib.subprocess_utils import run_text
 
 # raw stdin が JSON として壊れているが、生文字列上に git commit が見える場合の

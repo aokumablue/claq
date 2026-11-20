@@ -15,9 +15,9 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from claq.hooks.output_adapter import adapt_context_output, adapt_deny_output
 from claq.hooks.shell_tokens import basename_any_separator, normalize_executable_name
 from claq.lib.core_utils import get_home_dir
+from claq.lib.output_adapter import adapt_deny_output
 
 # `scan_memo` の with の中でだけ使う、引数ごとの結果の置き場。with の外では None（毎回計算する）。
 _scan_memo: dict[tuple[object, ...], object] | None = None
@@ -335,15 +335,3 @@ def emit_block_output(reason: str) -> int:
         write_stderr(reason + "\n")
     return 2
 
-
-def print_session_start_output(additional_context: str) -> None:
-    """SessionStart 用のフック出力を stdout に書き出す。
-
-    Args:
-        additional_context: コンテキストに注入する追加文字列。
-
-    Raises:
-        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
-        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
-    """
-    print(adapt_context_output("SessionStart", additional_context))

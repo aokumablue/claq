@@ -50,6 +50,7 @@ from typing import Any
 
 from claq.lib.core_utils import read_tail_text
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, normalize_user_message
+from claq.lib.tag_stripping import STRIPPED_TAGS, drop_known_tag_blocks
 from claq.mem.handoff import (
     TRANSCRIPT_MAX_BYTES,
     is_trusted_transcript,
@@ -57,7 +58,6 @@ from claq.mem.handoff import (
     trusted_transcript_roots,
     user_entry_content,
 )
-from claq.mem.tag_stripping import STRIPPED_TAGS, drop_known_tag_blocks
 
 # 依頼本文に現れても足場ではないタグ。ここが古びると「誤検知 1 件」として
 # 現れ、語を 1 つ足せば解消する。denylist の陳腐化（無言の素通り）と保守量は

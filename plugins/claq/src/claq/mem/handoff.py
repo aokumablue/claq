@@ -31,13 +31,13 @@ from claq.lib.harness import (
     normalize_tool_name,
     normalize_user_message,
 )
+from claq.lib.redaction import PLACEHOLDER, redact
 from claq.lib.slim_text import compact_line
+from claq.lib.tag_stripping import keep_allowed_chars, strip_tags
 from claq.mem.knowledge_input import optional_str
 from claq.mem.logger import get as _get_logger
-from claq.mem.redaction import PLACEHOLDER, redact
 from claq.mem.repo_identity import find_work_tree_root
 from claq.mem.settings import CONTEXT_HANDOFF_CHAR_BUDGET
-from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
 
 log = _get_logger("HANDOFF")
 
@@ -135,7 +135,7 @@ def _sanitize_freeform(text: str) -> str:
       除いて 1 本へ戻して初めて ``redact`` のパターンに一致する。
 
     シークレットがタグで分断されている場合は ``strip_tags`` が本文ごと
-    ``[REDACTED]`` へ倒す（判定の詳細は ``mem/tag_stripping``）。引き継ぎでは
+    ``[REDACTED]`` へ倒す（判定の詳細は ``lib/tag_stripping``）。引き継ぎでは
     そこから更に一歩進めて**本文ごと捨てる**。断片も「秘密を隠す細工があった」
     という痕跡も次セッションへ渡す価値が無く、細工した側に第 2 の経路を与えない
     ためである。ペアブロックで分断された秘密は ``strip_tags`` が今も 1 本へ

@@ -29,19 +29,19 @@ from claq.hooks.hook_common import (
     resolve_repo_root,
     scan_memo,
 )
-from claq.hooks.stdin_io import (
-    MAX_STDIN_BYTES,
-    StdinUnavailableError,
-    parse_json_object,
-    read_raw_stdin_with_truncation,
-    stdin_unreadable_message,
-)
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.harness import (
     extract_file_paths,
     extract_raw_tool_name,
     is_known_tool_outside,
     iter_tool_input_containers,
+)
+from claq.lib.stdin_io import (
+    MAX_STDIN_BYTES,
+    StdinUnavailableError,
+    parse_json_object,
+    read_raw_stdin_with_truncation,
+    stdin_unreadable_message,
 )
 
 # matcher（hooks.json）は書込み系ツールに限定されているが、matcher の綴りがズレても

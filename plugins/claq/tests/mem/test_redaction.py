@@ -7,7 +7,7 @@ from collections.abc import Callable
 import pytest
 
 from claq.hooks import commit_quality_scanner
-from claq.mem.redaction import _PATTERNS, redact, redact_knowledge_text
+from claq.lib.redaction import _PATTERNS, redact, redact_knowledge_text
 
 _PLACEHOLDER = "[REDACTED]"
 
@@ -384,7 +384,7 @@ class TestVendorPatternSync:
     """`redaction` と `commit_quality_scanner` のベンダ prefix 集合が揃っていること。
 
     `commit_quality_scanner._SECRET_PATTERNS` は「ベンダ prefix の集合は
-    `claq.mem.redaction._PATTERNS` と揃える」と宣言している。同じリポジトリで
+    `claq.lib.redaction._PATTERNS` と揃える」と宣言している。同じリポジトリで
     「記録時はマスクするが commit 時は検出しない」秘密（またはその逆）が生まれない
     ようにするための宣言だが、**現に片方だけが直っている状態が起きた**ため機械検査
     する（JWT の二次オーダー修正がスキャナ側にしか入っていなかった）。

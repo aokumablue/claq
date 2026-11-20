@@ -331,7 +331,7 @@ def test_module_entrypoint_runs_main(monkeypatch: pytest.MonkeyPatch) -> None:
     """`python -m` 起動で main の終了コードが SystemExit になる。"""
     # runpy が bash_config_protection を fresh に再実行するため、
     # stdin_io（sys.modules にキャッシュされ再利用される側）を patch する。
-    monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin_with_truncation", lambda: ("", False))
+    monkeypatch.setattr("claq.lib.stdin_io.read_raw_stdin_with_truncation", lambda: ("", False))
     with pytest.raises(SystemExit) as excinfo:
         runpy.run_module("claq.hooks.bash_config_protection", run_name="__main__")
     assert excinfo.value.code == 0

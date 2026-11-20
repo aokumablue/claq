@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from claq.hooks import detach
-from claq.hooks.detach import detach_process
+from claq.lib import detach
+from claq.lib.detach import detach_process
 
 
 @pytest.fixture(autouse=True)

@@ -26,7 +26,7 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks.stdin_io import StdinUnavailableError, stdin_unreadable_message
+from claq.lib.stdin_io import StdinUnavailableError, stdin_unreadable_message
 
 from ._support import LAUNCHER, _launcher_env
 

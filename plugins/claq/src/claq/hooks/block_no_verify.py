@@ -101,14 +101,14 @@ from claq.hooks.shell_tokens import (
     split_segments,
     tokenize_with_status,
 )
-from claq.hooks.stdin_io import (
+from claq.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
+from claq.lib.stdin_io import (
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
     truncated_input_message,
 )
-from claq.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
 
 # 値を別トークンとして必ず取る long オプション（git グローバル + commit/push）。
 # 値が ``=`` で結合されている場合は次トークンを消費しません。

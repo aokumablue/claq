@@ -10,7 +10,7 @@ from unittest import mock
 import pytest
 
 from claq.hooks import hook_common, shell_tokens
-from claq.hooks.hook_common import print_session_start_output
+from claq.lib.output_adapter import print_session_start_output
 
 
 @pytest.mark.parametrize(

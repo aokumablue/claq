@@ -15,7 +15,6 @@ import threading
 import time
 from typing import Any
 
-from claq.hooks.hook_common import write_stderr
 from claq.lib.harness import JSON_PARSE_FAILURES
 
 MAX_STDIN_BYTES = 1024 * 1024
@@ -147,7 +146,7 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
                 raise StdinUnavailableError(
                     f"stdin の最初のバイトが {STDIN_FIRST_BYTE_TIMEOUT} 秒以内に届きませんでした"
                 ) from None
-            write_stderr(
+            sys.stderr.write(
                 "WARNING: stdin 読み取りが上限時間に達したため、"
                 "受信済みの部分データで打ち切ります（stdin の書き手が"
                 "応答しない可能性）\n"

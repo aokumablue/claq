@@ -34,8 +34,8 @@ import sys
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from claq.hooks.hook_common import print_session_start_output
-from claq.hooks.stdin_io import read_raw_stdin
+from claq.lib.output_adapter import print_session_start_output
+from claq.lib.stdin_io import read_raw_stdin
 from claq.mem import logger as mem_logger
 from claq.mem.cmd_context import handle_context, handle_handoff
 from claq.mem.cmd_knowledge import (

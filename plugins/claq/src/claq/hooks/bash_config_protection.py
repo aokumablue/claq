@@ -97,17 +97,17 @@ from claq.hooks.shell_tokens import (
     split_segments,
     tokenize,
 )
-from claq.hooks.stdin_io import (
+from claq.lib.harness import (
+    extract_raw_tool_name,
+    is_known_tool_outside,
+    iter_bash_commands,
+)
+from claq.lib.stdin_io import (
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
     truncated_input_message,
-)
-from claq.lib.harness import (
-    extract_raw_tool_name,
-    is_known_tool_outside,
-    iter_bash_commands,
 )
 
 # matcher（hooks.json）の綴りがズレても、本体側で対象外ツールを早期 return する多重防御。

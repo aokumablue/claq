@@ -105,7 +105,7 @@ hooks / `src/claq/hooks/` を含む回は、両ハーネス互換（原則4）�
 - Copilot CLI が対応しないイベント・機能に代替（または安全側のスキップ）があるか
 - Claude Code の経路に影響が無いか
 
-ハーネスごとの判定と出力アダプタの実態は、`src/claq/lib/harness.py` と `src/claq/hooks/output_adapter.py` で確かめる。
+ハーネスごとの判定と出力アダプタの実態は、`src/claq/lib/harness.py` と `src/claq/lib/output_adapter.py` で確かめる。
 
 ## ステップ3: 種別分類
 

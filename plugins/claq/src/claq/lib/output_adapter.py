@@ -53,3 +53,16 @@ def adapt_deny_output(reason: str) -> str:
         {"permissionDecision": "deny", "permissionDecisionReason": reason},
         ensure_ascii=False,
     )
+
+
+def print_session_start_output(additional_context: str) -> None:
+    """SessionStart 用のフック出力を stdout に書き出す。
+
+    Args:
+        additional_context: コンテキストに注入する追加文字列。
+
+    Raises:
+        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
+        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
+    """
+    print(adapt_context_output("SessionStart", additional_context))

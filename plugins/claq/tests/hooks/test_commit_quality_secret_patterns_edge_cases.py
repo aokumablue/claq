@@ -53,7 +53,7 @@ def _scan_line(line: str) -> list[tuple[str, int, str, str]]:
         (f"{_SSH_COM_DELIMITER} BEGIN SSH2 ENCRYPTED PRIVATE KEY {_SSH_COM_DELIMITER}", ["SSH2 private key"]),
         (f"{_PPK_HEADER_PREFIX}-2: ssh-rsa", ["PuTTY private key"]),
         (f"{_PPK_HEADER_PREFIX}-3: ssh-ed25519", ["PuTTY private key"]),
-        # `claq.mem.redaction` が既にマスクする形式。記録時はマスクするのに commit 時は素通りする
+        # `claq.lib.redaction` が既にマスクする形式。記録時はマスクするのに commit 時は素通りする
         # 秘密が生まれないよう、ベンダ prefix の集合を両者で揃えている。
         ("sk-" + "proj-" + "A" * 40, ["OpenAI API key"]),
         # `sk-ant-` は OpenAI 形と二重計上しない。

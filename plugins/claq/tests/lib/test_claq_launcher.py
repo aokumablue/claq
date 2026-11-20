@@ -209,8 +209,8 @@ class TestMain:
             if not accepted:
                 raise OSError("no log dir")
 
-        monkeypatch.setattr("claq.hooks.stdin_io.read_raw_stdin", lambda: "{}")
-        monkeypatch.setattr("claq.hooks.detach.detach_process", fake_detach)
+        monkeypatch.setattr("claq.lib.stdin_io.read_raw_stdin", lambda: "{}")
+        monkeypatch.setattr("claq.lib.detach.detach_process", fake_detach)
         monkeypatch.setattr(launcher, "build_env", lambda: {})
         return captured
 

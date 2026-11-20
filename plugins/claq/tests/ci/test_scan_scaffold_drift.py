@@ -12,7 +12,7 @@ import pytest
 
 from claq.ci import scan_scaffold_drift as scanner
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS
-from claq.mem.tag_stripping import STRIPPED_TAGS
+from claq.lib.tag_stripping import STRIPPED_TAGS
 
 from ._support import _exit_code_as_main
 

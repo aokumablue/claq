@@ -19,8 +19,8 @@ from typing import Any, NoReturn
 from claq.hooks.edit_text import read_current_text, text_after_edit
 from claq.hooks.git_config_text import GitConfigParseError, adds_sensitive_entries
 from claq.hooks.hook_common import memoized_in_scan, normalize_protected_name
-from claq.hooks.stdin_io import MAX_STDIN_BYTES
 from claq.lib.harness import normalize_tool_name
+from claq.lib.stdin_io import MAX_STDIN_BYTES
 
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
 # サブセクションも拾うため prefix 一致にする。`[testenv` は tox.ini の
