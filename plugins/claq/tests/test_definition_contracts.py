@@ -25,6 +25,7 @@ _IMPLEMENTATION_HEADING_RE = re.compile(r"^#{2,3} 実装の手順$", re.M)
 _PLANNER_MODE_RE = re.compile(r"mode: (?:evaluate|decide)")
 _CANDIDATE_REPORT = "候補を呼び出し元へ報告する"
 _CANDIDATE_CONSUME = "学びの候補"
+_AUDITOR_HANDOVER = "security-auditor は Bash を持たず diff を取れない"
 _RELATIVE_MD_HINT ='`. "$HOME/.claq/env.sh" && claq_plugin_root`'
 _DELEGATORS_LINE_RE = re.compile(r"^- `loop-dev` ← (.+)$", re.M)
 _DESCRIPTION_DELEGATORS_RE = re.compile(r"^description: .*?。([a-z/-]+) からの委譲専用。$", re.M)
@@ -151,6 +152,18 @@ def test_tdd_writer_receives_task_type_from_loop_dev() -> None:
     assert "`task_type: test`" in tdd_writer
     forwarding = [line for line in loop_dev.splitlines() if "`task_type`" in line and "tdd-writer" in line]
     assert forwarding, "loop-dev が tdd-writer へ task_type を渡す行が無い"
+
+
+def test_security_auditor_callers_hand_over_diff() -> None:
+    """claq:security-auditor を起動する定義は、Bash を持たない子へ監査対象を依頼文で渡す手順を持つ。"""
+    tools = extract_frontmatter((_ROOT / "agents" / "security-auditor.md").read_text(encoding="utf-8")) or {}
+    assert "Bash" not in str(tools.get("tools", ""))
+    missing = [
+        str(path)
+        for path, text in _corpus()
+        if path.parts[0] != "agents" and "`claq:security-auditor`" in text and _AUDITOR_HANDOVER not in text
+    ]
+    assert not missing, "security-auditor へ監査対象を渡す手順が無い:\n" + "\n".join(missing)
 
 
 def test_commands_with_relative_md_reference_state_base() -> None:
