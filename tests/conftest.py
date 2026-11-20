@@ -68,7 +68,8 @@ def _isolate_git_config(monkeypatch: pytest.MonkeyPatch) -> None:
 def _clear_host_marker_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """各テスト前後で host マーカー環境変数をクリアし、テスト間の漏れ込みを防ぐ。
 
-    実行環境の CLAUDECODE / CODEX_* / COPILOT_* / PLUGIN_DATA が漏れ込むと
-    env 依存のテスト（cli_runner の CLI バイナリ判定等）の結果が変わる。
+    `CLAUDE_PLUGIN_ROOT` は launcher が detach する子の環境と Grok の symlink 先の解決が読むため、
+    実行環境の値が漏れ込むと結果が変わる。その他（CLAUDECODE / CODEX_* / COPILOT_* / PLUGIN_DATA 等）は、
+    Claude Code などのホストの中でテストを走らせても、ホストの外と同じ環境で結果を出すために消す。
     """
     _delete_env(monkeypatch, _HOST_MARKER_ENV_NAMES, _HOST_MARKER_ENV_PREFIXES)

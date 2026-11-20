@@ -329,7 +329,7 @@ def _settings_blocked_message(file_name: str) -> str:
     """
     return (
         f"BLOCKED: The change to {file_name} changes a setting that can disable the protection hooks "
-        "(hooks, enabledPlugins/disabledPlugins, env CLAQ_PYTHON/PATH/PYTHONPATH/PYTHONHOME). "
+        "(hooks, enabledPlugins/disabledPlugins, disableAllHooks, env CLAQ_PYTHON/PATH/PYTHONPATH/PYTHONHOME). "
         "Other settings (model, permissions, other env entries) can be changed freely. "
         "If this change is genuinely necessary, ask the user to make it — "
         "do not disable the protection hook yourself."

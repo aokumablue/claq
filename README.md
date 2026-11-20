@@ -752,7 +752,7 @@ flowchart LR
 
 **実行例**: 通常の git 操作のみ。意識的に呼ぶ必要なし
 
-**他の保護フック**: `config_protection`（Edit/Write 系）と `bash_config_protection`（Bash のリダイレクト・`tee`・`sed -i` 等）は、linter/formatter の設定ファイル、`.git/hooks/`、git config のフック無効化キー、claq 自身の `hooks.json` とホスト設定（`settings.json` の `hooks` / `enabledPlugins` 等）の書き換えを deny し、設定を弱めずコードを直す方向へ導く。コミット品質検査は、同じ呼び出しで作業ツリーや index を変更してから `git commit` するとブロックする（変更と `git add` を別の呼び出しに分ける）。`PreCompact` はコンテキスト圧縮の発生を `~/.claq/session-data/compaction-log.txt` に追記するだけで、ブロックしない
+**他の保護フック**: `config_protection`（Edit/Write 系）と `bash_config_protection`（Bash のリダイレクト・`tee`・`sed -i` 等）は、linter/formatter の設定ファイル、`.git/hooks/`、git config のフック無効化キー、claq 自身の `hooks.json`・実行中のランタイム（`runtime/`・`src/claq/`）とホスト設定（`settings.json` の `hooks` / `enabledPlugins` 等）の書き換えを deny し、設定を弱めずコードを直す方向へ導く。Bash からの `~/.claq/logs/` への書込みも deny する（ログの末尾が次回 SessionStart に注入されるため）。コミット品質検査は、同じ呼び出しで作業ツリーや index を変更してから `git commit` するとブロックする（変更と `git add` を別の呼び出しに分ける）。`PreCompact` はコンテキスト圧縮の発生を `~/.claq/session-data/compaction-log.txt` に追記するだけで、ブロックしない
 
 ---
 
