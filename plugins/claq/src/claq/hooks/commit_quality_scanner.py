@@ -75,6 +75,11 @@ _LINTABLE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
 # この 2 つは JavaScript / TypeScript の構文で、Python・Go・Rust ではコメント・docstring・識別子に
 # 現れた語にすぎない。拾うとデバッガ文（error）が正当な commit を止める。
 _JAVASCRIPT_SUFFIXES = {".js", ".jsx", ".ts", ".tsx"}
+# JS / TS のコメント行の先頭（`//`・JSDoc の `*`・`/*`）。この行のログ出力呼び出しとデバッガ文は実行されない。
+_JS_COMMENT_LINE_PREFIXES = ("//", "*", "/*")
+# デバッガ文だけを拾う。プロパティ（`chrome.` の後・オブジェクトのキー）と引用符の中の語（ESLint のルール名・
+# バンドラの除去指定）は文ではなく、拾うと設定ファイルの commit を止める。
+_DEBUGGER_STATEMENT_RE = re.compile(r"(?<![\w.$'\"`-])debugger(?![\w$'\"`-]|\s*:)")  # nosec
 _MINIFIED_SUFFIXES = (".min.js", ".min.css")
 _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "package-lock.json",
@@ -467,7 +472,8 @@ def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) ->
 
     `# nosec` を含む行は検出器自身のテストフィクスチャ等、意図的にパターンを含む行と
     みなして抑制します。secret scan と同じ 1 本の実時間予算に載せます。ログ出力呼び出しと
-    デバッガ文は JavaScript / TypeScript のファイルでだけ検出します（`_JAVASCRIPT_SUFFIXES`）。
+    デバッガ文は JavaScript / TypeScript のファイルでだけ検出し、コメント行（`_JS_COMMENT_LINE_PREFIXES`）
+    と、デバッガ文でない語（`_DEBUGGER_STATEMENT_RE` が外すプロパティ・引用符の中）は除きます。
 
     Args:
         lines: 検査対象のデコード済みファイル内容を改行で分割した行リストです。
@@ -490,11 +496,12 @@ def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) ->
         if "# nosec" in line:
             continue
 
-        if javascript and "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
+        comment_line = line.strip().startswith(_JS_COMMENT_LINE_PREFIXES)
+        if javascript and "console.log" in line and not comment_line:  # nosec
             message = f"console.log found at line {line_num}"  # nosec
             issues.append(_issue("console.log", message, line=line_num, severity="warning"))  # nosec
 
-        if javascript and re.search(r"\bdebugger\b", line) and not line.strip().startswith("//"):
+        if javascript and _DEBUGGER_STATEMENT_RE.search(line) and not comment_line:
             message = f"debugger statement at line {line_num}"  # nosec
             issues.append(_issue("debugger", message, line=line_num, severity="error"))  # nosec
 

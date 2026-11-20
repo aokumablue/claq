@@ -483,6 +483,18 @@ def test_every_javascript_suffix_gets_the_statement_checks(suffix: str, monkeypa
     assert commit_quality_scanner.find_file_issues("src/app.py", deadline=deadline) == []
 
 
+@pytest.mark.parametrize("prefix", _EXPECTED_VOCABULARIES["commit_quality_scanner._JS_COMMENT_LINE_PREFIXES"])
+def test_every_js_comment_prefix_hides_the_statement_checks(prefix: str) -> None:
+    """`_JS_COMMENT_LINE_PREFIXES` の全要素で始まる行ではデバッガ文を検出しないこと（層1・単体）。"""
+    deadline = commit_quality_scanner.new_secret_scan_deadline()
+
+    commented = commit_quality_scanner._scan_lint_issues([f"  {prefix} debugger;"], deadline=deadline, javascript=True)  # nosec
+    statement = commit_quality_scanner._scan_lint_issues(["  debugger;"], deadline=deadline, javascript=True)  # nosec
+
+    assert commented == []
+    assert [issue["type"] for issue in statement] == ["debugger"]  # nosec
+
+
 @pytest.mark.parametrize(
     "name", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES"])
 )
@@ -520,6 +532,7 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
         "heredoc._HEREDOC_CONTINUATION_SUFFIXES",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
         "commit_quality_scanner._JAVASCRIPT_SUFFIXES",
+        "commit_quality_scanner._JS_COMMENT_LINE_PREFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",
         "commit_risk._SHORT_OPTIONS_WITH_VALUE",

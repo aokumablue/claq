@@ -64,6 +64,24 @@ def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch
             [("todo", 4, "info")],
         ),
         ("src/main.rs", "let debugger = 1; /* console.log */", []),  # nosec
+        # JS でもデバッガ文だけを拾う。ESLint のルール名・バンドラの除去指定（引用符の中の語）・Chrome 拡張の
+        # API とオブジェクトのキー（プロパティ）・コメント行の語は文ではなく、拾うと設定ファイルの commit を止める。
+        (
+            "eslint.config.js",
+            "\n".join(
+                [
+                    "  'no-debugger': process.env.NODE_ENV === 'production' ? 'warn' : 'off',",  # nosec
+                    "  esbuild: { drop: ['console', 'debugger'] },",  # nosec
+                    "await chrome.debugger.attach({ tabId }, '1.3');",  # nosec
+                    "const flags = { debugger: true };",  # nosec
+                    " * Attach the debugger before running the tests.",  # nosec
+                    "/* debugger */",  # nosec
+                    "/* console.log('x') */",  # nosec
+                    "if (ready) debugger;",  # nosec
+                ]
+            ),
+            [("debugger", 8, "error")],  # nosec
+        ),
         # `sk-ant-...`（`sk-` 直後にハイフン）は OpenAI 形のパターンに一致しないため専用パターンで検出する。
         ("src/app.py", "sk-" + "ant-" + "abcdefghijklmnopqrstuvwxyz0123456789", [("secret", 1, "error")]),
         # lint 対象外の拡張子でも secret は検出し、lint だけを行わない。
@@ -93,6 +111,7 @@ def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch
         "nosec-hides-console-log",
         "python-words-are-not-js-statements",
         "rust-words-are-not-js-statements",
+        "js-non-statement-words",
         "anthropic-key",
         "non-lint-extension-secret",
         "non-lint-extension-skips-lint",
