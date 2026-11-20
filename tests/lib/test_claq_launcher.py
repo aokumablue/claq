@@ -118,15 +118,20 @@ class TestUnsupportedPythonExitCode:
     def test_returns_zero_on_old_python_and_writes_stderr(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], version: tuple[int, int, int]
     ) -> None:
-        """3.12 未満なら stderr に実バージョンと構造化 JSON を書いて 0 を返す。"""
+        """3.12 未満なら stderr に実際に動いたインタプリタとその版、構造化 JSON を書いて 0 を返す。
+
+        wrapper は CLAQ_PYTHON も採るため、`python3` と決め打ちで書くと CLAQ_PYTHON が古いときに
+        直す対象を取り違える。
+        """
         monkeypatch.setattr(launcher.sys, "version_info", version)
         displayed = ".".join(str(part) for part in version)
 
         assert launcher._unsupported_python_exit_code() == 0
         lines = capsys.readouterr().err.splitlines()
         assert lines[0] == (
-            f"ERROR: claq requires Python 3.12+; `python3` is {displayed}. "
-            "Point `python3` on PATH at 3.12+ (claq does not create a venv)."
+            f"ERROR: claq requires Python 3.12+; {launcher.sys.executable} is {displayed}. "
+            "Put Python 3.12+ on PATH as `python3`, or set CLAQ_PYTHON to its absolute path "
+            "(claq does not create a venv)."
         )
         assert json.loads(lines[1]) == {
             "claqProtectionDisabled": True,
@@ -218,7 +223,7 @@ class TestMain:
     def test_missing_target_prints_usage(self, capsys: pytest.CaptureFixture[str], argv: list[str]) -> None:
         """ターゲットが無ければ usage を出して 1。"""
         assert launcher.main(argv) == 1
-        assert "Usage: python3" in capsys.readouterr().err
+        assert "Usage: runtime/claq-hook" in capsys.readouterr().err
 
     def test_normal_invocation_runs_in_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """通常起動はターゲットと引数をインプロセス実行する。"""
