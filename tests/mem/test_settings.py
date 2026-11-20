@@ -4,7 +4,6 @@ Settings はハードコード既定値のみを持つランタイム設定で�
 永続化するランタイム状態を持たないことを検証する。
 """
 
-import importlib
 from pathlib import Path
 
 import pytest
@@ -23,6 +22,10 @@ _REMOVED_ATTRIBUTES = (
     *("auto_compact_enabled", "auto_compact_interval_days", "last_compacted_at", "embedding_model"),
     *("save", "load", "state_path"),  # state ファイルの読み書き
 )
+
+
+#: autouse フィクスチャが差し替える前の実装。環境変数を読む本物の経路を検査するテストで戻す。
+_REAL_DEFAULT_DATA_DIR = settings_mod._default_data_dir
 
 
 @pytest.fixture(autouse=True)
@@ -51,15 +54,16 @@ def test_removed_settings_and_state_api_stay_absent() -> None:
         assert not hasattr(s, name), name
 
 
-def test_default_data_dir_uses_claq_data_path_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """CLAQ_DATA_PATH があればモジュール再読込時にそれをデータディレクトリにする。"""
+def test_default_data_dir_reads_env_at_call_time(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """呼び出しのたびに、CLAQ_DATA_PATH があればそれを、無ければ CLAQ_HOME 配下の .claq をデータディレクトリにする。
+
+    利用者の環境の CLAQ_HOME / CLAQ_DATA_PATH に結果が左右されないよう、両方をテストの中で決める。
+    """
+    monkeypatch.setattr(settings_mod, "_default_data_dir", _REAL_DEFAULT_DATA_DIR)
     custom = tmp_path / "custom-data"
     monkeypatch.setenv("CLAQ_DATA_PATH", str(custom))
-    importlib.reload(settings_mod)
-    try:
-        assert settings_mod._default_data_dir() == custom
-        assert settings_mod.Settings().data_path == custom
-    finally:
-        monkeypatch.delenv("CLAQ_DATA_PATH", raising=False)
-        importlib.reload(settings_mod)
-        assert settings_mod._default_data_dir() == Path.home() / BASE_DIR_NAME
+    assert settings_mod.Settings().data_path == custom
+
+    monkeypatch.delenv("CLAQ_DATA_PATH")
+    monkeypatch.setenv("CLAQ_HOME", str(tmp_path))
+    assert settings_mod.Settings().data_path == tmp_path / BASE_DIR_NAME
