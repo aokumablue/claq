@@ -46,10 +46,9 @@ RUBRIC_VERSION = "2026-11-18"
 """採点ルーブリックの版。
 
 スコアはこの版の中でのみ比較可能で、版が上がった時点で過去のベースラインとは
-比較不能になる。同じ文字列を ``commands/harness.md`` の散文と
-``agents/harness-tuner.md`` のサンプル JSON が書いており、片方だけ更新すると
-「比較不能なスコア比較」が静かに通る。そのため 3 箇所すべての一致を
-tests/test_md_references.py が機械照合する。
+比較不能になる。同じ文字列を ``agents/harness-tuner.md`` のサンプル JSON が書いており、
+片方だけ更新すると「比較不能なスコア比較」が静かに通る。そのため両者の一致と、
+md の他の箇所に食い違う版表記が無いことを tests/test_md_references.py が機械照合する。
 """
 
 

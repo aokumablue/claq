@@ -415,7 +415,7 @@ def test_pre_compact_main_appends_to_compaction_log(monkeypatch: pytest.MonkeyPa
     assert (tmp_path / "compaction-log.txt").read_text(encoding="utf-8") == (
         "[2026-01-01 00:00:00] Context compaction triggered\n"
     )
-    assert logs == ["[PreCompact] State saved before compaction"]
+    assert logs == ["[PreCompact] Context compaction logged"]
 
 
 def test_pre_compact_main_propagates_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

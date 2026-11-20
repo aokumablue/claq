@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """claq フックのインプロセスランチャー。
 
-Claude Code 等のハーネスから `python3 launcher.py [--bg] <module> [args...]`
-の形で起動される。PATH 上の `python3` をそのまま使い、対象モジュールを
+`runtime/claq-hook`（Windows の PowerShell ホストでは `runtime/claq-hook.cmd`）が選んだ
+インタプリタで `<python> launcher.py [--bg] <module> [args...]` の形で起動される。
+インタプリタの選択は wrapper の責務で、本ファイルは選ばない。対象モジュールを
 サブプロセスを spawn せず runpy でインプロセス実行する。Python 3.12 未満
 では hook を実行せず stderr に理由を書いて 0 で終了する（fail-open）。
 venv への自己置換は行わない。stdin はターゲット自身が
@@ -20,7 +21,7 @@ import sys
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-_USAGE = "Usage: python3 src/claq/launcher.py [--bg] <module> [args...]"
+_USAGE = "Usage: runtime/claq-hook [--bg] <module> [args...]"
 # 落ちると保護が外れる PreToolUse の保護フック（hooks.json の matcher 付きエントリ）。
 _PROTECTION_HOOKS = frozenset(
     {
@@ -95,13 +96,14 @@ def _unsupported_python_exit_code() -> int | None:
     Returns:
         3.12 以上なら None。未満なら stderr に理由を書いて 0。
     """
-    # PATH 上の python3 はパッケージ requires-python より古いことがある。
+    # wrapper が選んだインタプリタ（PATH 上の python3 か CLAQ_PYTHON）は requires-python より古いことがある。
     if sys.version_info >= (3, 12):  # noqa: UP036
         return None
     version = ".".join(str(part) for part in sys.version_info[:3])
     sys.stderr.write(
-        f"ERROR: claq requires Python 3.12+; `python3` is {version}. "
-        "Point `python3` on PATH at 3.12+ (claq does not create a venv).\n"
+        f"ERROR: claq requires Python 3.12+; {sys.executable} is {version}. "
+        "Put Python 3.12+ on PATH as `python3`, or set CLAQ_PYTHON to its absolute path "
+        "(claq does not create a venv).\n"
     )
     sys.stderr.write(
         json.dumps(

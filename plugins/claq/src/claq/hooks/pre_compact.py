@@ -1,7 +1,7 @@
 """セッション追跡のためコンテキスト圧縮イベントをログに記録
 
 トリガー: pre:compact
-入力: なし（圧縮イベントメタデータ）
+入力: 読まない（host が stdin へ渡す圧縮イベントの JSON は使わない）
 出力: 圧縮ログにエントリを追加
 終了: 0。失敗は例外のまま launcher へ伝わり exit 1（PreCompact をブロックしない非ブロッキングのエラー）
 """
@@ -24,7 +24,7 @@ def main() -> int:
     """
     sessions_dir = get_sessions_dir()
     append_file(sessions_dir / "compaction-log.txt", f"[{get_datetime_string()}] Context compaction triggered\n")
-    log("[PreCompact] State saved before compaction")
+    log("[PreCompact] Context compaction logged")
     return 0
 
 

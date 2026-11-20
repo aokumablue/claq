@@ -33,7 +33,7 @@ def _hook_command_argv(command: str) -> tuple[str, ...] | None:
 
     hooks.json の全エントリは ``runtime/claq-hook`` （cmd.exe ホストでは PATHEXT
     が同名の ``claq-hook.cmd`` へ解決する）を起動する。裸の ``python3`` 起動は
-    受け付けない。先頭の ``--bg``（非 Claude ハーネス向け detach フラグ）は
+    受け付けない。先頭の ``--bg``（launcher に子を detach させるフラグ）は
     コマンドの実体ではないため取り除く。
 
     同じエントリの ``powershell`` は call 演算子 ``&`` で始まり wrapper が先頭に

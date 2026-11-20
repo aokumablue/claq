@@ -111,8 +111,8 @@ PATH=$_claq_path
 export PATH
 
 # CLAQ_PYTHON は絶対パスのみ受け付ける。相対名（`CLAQ_PYTHON=./python3`）は cwd の
-# 偽インタプリタへ落ちる。PATH 探索へ**落とさ
-# ない**のも意図的で、明示的な override が黙って別のインタプリタに化けるのは
+# 偽インタプリタへ落ちる。PATH 探索へ**落とさない**のも意図的で、明示的な
+# override が黙って別のインタプリタに化けるのは
 # 「指定した物が動いた」という利用者の前提を破るため。Windows 側（.cmd）も
 # 同じ検査を持つ（cmd.exe は常に cwd を先に見るため、あちらは相対名でも成立する）。
 if [ -n "${CLAQ_PYTHON:-}" ]; then

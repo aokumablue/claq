@@ -89,6 +89,26 @@ def test_messages_are_written_to_file_with_secrets_redacted(tmp_path: Path) -> N
     assert "sk-ant-api03-" not in content
 
 
+def test_file_only_records_skip_stderr_but_reach_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """``FILE_ONLY`` を付けた記録はファイルにだけ書かれ、付けない WARNING 以上は stderr にも出る。
+
+    呼び出し側が利用者向けの 1 行を自分で stderr へ出す経路で、同じ失敗が 2 行にならないこと。
+    """
+    logger.setup(tmp_path, level="info")
+    log = logger.get("TEST")
+    log.error("file only failure", extra=logger.FILE_ONLY)
+    log.error("shared failure")
+    for handler in _mem_root().handlers:
+        handler.flush()
+
+    stderr = capsys.readouterr().err
+    content = next(tmp_path.glob("mem-*.log")).read_text()
+    assert "file only failure" in content
+    assert "shared failure" in content
+    assert "file only failure" not in stderr
+    assert "shared failure" in stderr
+
+
 def test_setup_can_retry_after_handler_construction_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """ハンドラ構築が失敗しても初期化済みフラグが立たず、次の setup で復帰できる。
 

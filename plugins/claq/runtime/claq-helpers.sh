@@ -150,7 +150,7 @@ collect_skill_create_inputs() {
   fi
 
   printf '%s\n' "# 最近のコミットとファイル変更"
-  git log --oneline -n "${commits}" --name-only --pretty=format:"%H|%s|%ad" --date=short
+  git log -n "${commits}" --name-only --pretty=format:"%H|%s|%ad" --date=short
 
   printf '\n%s\n' "# ファイルごとのコミット頻度"
   # 空の `--pretty=format:` でコミット見出しを最初から出力しない。

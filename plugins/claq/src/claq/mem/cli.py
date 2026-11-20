@@ -313,7 +313,8 @@ def main() -> int:
         print(str(e), file=sys.stderr)
         return 1
     except Exception as e:
-        log.error("コマンド %s 失敗: %s", command, e)
+        # 利用者向けの 1 行は print が出すので、記録はファイルにだけ残す。
+        log.error("コマンド %s 失敗: %s", command, e, extra=mem_logger.FILE_ONLY)
         print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
         return 1
 
