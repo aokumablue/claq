@@ -451,7 +451,7 @@ class TestTranscriptSummary:
         assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- 実依頼"
 
     def test_api_request_blob_is_not_a_request(self, tmp_path: Path) -> None:
-        """top-level の type が user 以外のエントリは message.role が user でも依頼にしないこと（API 送信内容の控え）。"""
+        """API 送信内容の控え（type が api-request-blob）は message.role が user でも依頼にしないこと。"""
         blob = {"type": "api-request-blob", "message": {"role": "user", "content": "古い依頼の再送"}}
         assert _from_transcript(tmp_path, [_user("実依頼"), blob]) == "直近の依頼:\n- 実依頼"
 

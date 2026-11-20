@@ -68,6 +68,12 @@ _TOOL_LIST_LIMIT = 8
 _EDIT_TOOLS: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit"})
 """ファイルパスを収集する対象となる正規化済みツール名。"""
 
+_NON_SPEECH_ENTRY_TYPES: frozenset[str] = frozenset({"api-request-blob"})
+"""``message.role`` が ``user`` でも発話ではないエントリの ``type``（Claude Code の transcript）。
+
+``api-request-blob`` は API へ送った過去の内容の控えで、圧縮サマリーや古い依頼を再び運んでくる。
+"""
+
 _HOST_META_FLAGS: tuple[str, ...] = ("isMeta", "isCompactSummary")
 """host がユーザー発話の形で記録する非依頼エントリの印（Claude Code の transcript）。
 
@@ -471,11 +477,9 @@ def user_entry_content(entry: dict[str, Any]) -> object:
     """ユーザー発話のエントリから ``content`` を取り出す。
 
     host ごとに role の置き場所が違う（``type`` / ``role`` / ``message.role``）ため、どれかが
-    ``user`` ならユーザー発話とみなす。ただし top-level の ``type`` が ``user`` 以外の
-    エントリは、``message.role`` が ``user`` でも発話ではない（Claude Code の
-    ``api-request-blob`` は API へ送った過去の内容の控えで、圧縮サマリーや古い依頼を
-    再び運んでくる）。この知識の唯一の置き場所で、足場診断（`scan_scaffold_drift`）も
-    同じ判定を使う。
+    ``user`` ならユーザー発話とみなす。ただし ``_NON_SPEECH_ENTRY_TYPES`` の ``type`` を持つ
+    エントリは、``message.role`` が ``user`` でも発話ではない。この知識の唯一の置き場所で、
+    足場診断（`scan_scaffold_drift`）も同じ判定を使う。
 
     Args:
         entry: トランスクリプトの 1 エントリ。
@@ -484,7 +488,7 @@ def user_entry_content(entry: dict[str, Any]) -> object:
         ``content``（文字列・ブロック列など生の値）。ユーザー発話でない、または content が無ければ None。
     """
     entry_type = entry.get("type")
-    if entry_type is not None and entry_type != "user":
+    if entry_type in _NON_SPEECH_ENTRY_TYPES:
         return None
     message = _message_of(entry)
     if "user" not in (entry_type, entry.get("role"), message.get("role")):
