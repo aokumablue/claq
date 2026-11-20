@@ -424,6 +424,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
         (".claude", "settings.json"),
         (".claude", "settings.local.json"),
     ),
+    # 派生: 上の表示名（`bash_config_protection._blocked_message` が文言を選ぶ鍵）。
+    "host_guard_targets.HOST_SETTINGS_DISPLAY_NAMES": frozenset({".claude/settings.json", ".claude/settings.local.json"}),
     # 派生: 保護 basename の和集合。
     "bash_config_protection._ALL_PROTECTED_BASENAMES": (
         _folded(_EXPECTED_PROTECTED_FILES) | _folded(_EXPECTED_CONDITIONALLY_PROTECTED_FILES)
@@ -538,6 +540,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     ),
     "host_guard_targets._RUNTIME_ENTRYPOINT_NAMES": ("claq-hook", "claq-hook.cmd"),
     "config_protection._PROTECTED_PATH_SEGMENTS": _EXPECTED_PROTECTED_PATH_SEGMENTS,
+    # 派生: 上の表示名（ディレクトリだけ末尾に `/`。`blocked_message_for_file` が文言を選ぶ鍵）。
+    "config_protection.HOOK_CONTROL_DISPLAY_NAMES": frozenset({".git/hooks/", "hooks/hooks.json"}),
     "config_protection._GIT_CONFIG_REPO_SEGMENTS": _EXPECTED_GIT_CONFIG_REPO_SEGMENTS,
     "config_protection.GIT_CONFIG_DISPLAY_NAMES": frozenset("/".join(segments) for segments in _EXPECTED_GIT_CONFIG_REPO_SEGMENTS)
     | _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,

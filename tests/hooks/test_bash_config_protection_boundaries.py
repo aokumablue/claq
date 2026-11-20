@@ -59,10 +59,10 @@ class TestHostGuardFilesOutsideRepo:
         ("command", "expected"),
         [
             # `~` を介さない絶対パス。
-            ("printf x > {home}/.claude/plugins/cache/m/claq/0/hooks/hooks.json", "hooks/hooks.json/"),
+            ("printf x > {home}/.claude/plugins/cache/m/claq/0/hooks/hooks.json", "hooks/hooks.json"),
             ("printf x > {home}/.claude/settings.json", ".claude/settings.json"),
             # `cd` で解決基準がずれるコマンドでは、basename ``hooks.json`` だけでも deny する。
-            ("cd ~/.claude/plugins/cache/m/claq/0/hooks && printf x > hooks.json", "hooks/hooks.json/"),
+            ("cd ~/.claude/plugins/cache/m/claq/0/hooks && printf x > hooks.json", "hooks/hooks.json"),
             # ホスト設定をディレクトリごと退避・削除する形。
             ("mv ~/.claude ~/.claude.bak", ".claude/settings.json"),
             ("rm -rf ~/.claude", ".claude/settings.json"),
@@ -86,11 +86,12 @@ class TestHostGuardFilesOutsideRepo:
     def test_main_blocks_host_settings_write(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """exit 2 と「フックを自分で無効化するな」の文言を返し、home ログ用の文言（``~/`` 始まり）へ流れない。"""
+        """exit 2 とフック制御の文言を返し、home ログ用の文言（``~/`` 始まり）にも linter 設定用の文言にも流れない。"""
         assert _run("bash_config_protection", _bash("printf x > ~/.claude/settings.json"), monkeypatch) == 2
         err = capsys.readouterr().err
+        assert "BLOCKED: Modifying .claude/settings.json is not allowed. It decides whether git hooks" in err
         assert "do not disable the protection hook yourself" in err
-        assert "linter" in err
+        assert "linter" not in err
 
     @pytest.mark.parametrize(
         "command",
@@ -107,7 +108,7 @@ class TestHostGuardFilesOutsideRepo:
             lambda: _home_outside_repo / ".claude" / "plugins" / "cache" / "m" / "claq" / "0",
         )
 
-        assert bash_config_protection.find_protected_write(command) == "hooks/hooks.json/"
+        assert bash_config_protection.find_protected_write(command) == "hooks/hooks.json"
 
     def test_writing_real_path_of_symlinked_config_dir_is_blocked(self, _home_outside_repo: Path) -> None:
         """``~/.claude`` が dotfiles への symlink のとき、実体パスへ直接書く形も deny する。"""
@@ -135,7 +136,7 @@ class TestHostGuardFilesOutsideRepo:
 
         monkeypatch.setattr(host_guard_targets, "get_home_dir", _no_home)
 
-        assert [display for _path, display in host_guard_targets._guarded_locations()] == ["hooks/hooks.json/"]
+        assert [display for _path, display in host_guard_targets._guarded_locations()] == ["hooks/hooks.json"]
 
     def test_guarded_locations_skip_unresolvable_config_dir(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """未知ユーザーの ``~user`` を指す ``CLAUDE_CONFIG_DIR`` は省き、例外で判定ごと落とさない。"""
@@ -143,7 +144,7 @@ class TestHostGuardFilesOutsideRepo:
 
         displays = [display for _path, display in host_guard_targets._guarded_locations()]
 
-        assert displays == ["hooks/hooks.json/", ".claude/settings.json", ".claude/settings.local.json"]
+        assert displays == ["hooks/hooks.json", ".claude/settings.json", ".claude/settings.local.json"]
 
     @pytest.mark.parametrize(
         "command",
@@ -199,7 +200,7 @@ def test_directory_change_behind_shell_keywords_is_not_trusted(keyword: str) -> 
     """予約語・グループ化・`builtin` の後ろの ``cd`` も移動として扱い、相対の ``hooks.json`` を塞ぐ。"""
     command = f"{keyword} cd X/hooks; printf x > hooks.json"
 
-    assert bash_config_protection.find_protected_write(command) == "hooks/hooks.json/"
+    assert bash_config_protection.find_protected_write(command) == "hooks/hooks.json"
 
 
 def test_bundled_write_targets_are_judged_within_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -248,7 +249,7 @@ def test_argv_array_over_budget_is_blocked_before_scanning_elements(
 def test_deleting_any_spelling_of_a_guarded_ancestor_is_denied(name: str) -> None:
     """保護対象の祖先は綴りの大小によらず当たる（APFS / NTFS では ``HOOKS`` が実体の ``hooks`` に着地する）。"""
     token = str(get_plugin_root() / name)
-    assert host_guard_targets.find_host_guard_match(token, scope_certain=True) == "hooks/hooks.json/"
+    assert host_guard_targets.find_host_guard_match(token, scope_certain=True) == "hooks/hooks.json"
 
 
 @pytest.mark.parametrize("relative", ["HOOKSX", "HOOKS/other.txt"])

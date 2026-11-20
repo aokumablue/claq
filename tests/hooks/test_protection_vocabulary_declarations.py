@@ -324,6 +324,14 @@ _VOCABULARY_LAYER1_ABSENT = {
         "派生値（`_RUNNING_PLUGIN_GUARDED_DIRS` の表示名）で、`blocked_message_for_file` がブロック文言を選ぶ鍵にすぎない。"
         "保護対象かどうかの判定は変えない"
     ),
+    "config_protection.HOOK_CONTROL_DISPLAY_NAMES": (
+        "派生値（`_PROTECTED_PATH_SEGMENTS` の表示名）で、`blocked_message_for_file` がブロック文言を選ぶ鍵にすぎない。"
+        "保護対象かどうかの判定は変えない"
+    ),
+    "host_guard_targets.HOST_SETTINGS_DISPLAY_NAMES": (
+        "派生値（`_HOST_SETTINGS_PATH_SEGMENTS` の表示名）で、`bash_config_protection._blocked_message` がブロック文言を"
+        "選ぶ鍵にすぎない。保護対象かどうかの判定は変えない"
+    ),
     "bash_config_protection._RAW_TEXT_RISK_INDICATORS": (
         "派生値（`_REMOVE_COMMANDS` 等の連結）であり、構成元の各集合が層1 を持つ。"
         "この tuple 自体は malformed JSON 専用の部分一致指標で、要素単位で判定が"

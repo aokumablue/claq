@@ -61,6 +61,8 @@ from claq.hooks.config_protection import (
     GIT_CONFIG_DISPLAY_NAMES,
     PROTECTED_FILES_FOLDED,
     blocked_message_for_file,
+    hook_control_blocked_message,
+    protected_path_display_name,
     protected_path_segment,
     repo_git_config_path,
 )
@@ -86,7 +88,7 @@ from claq.hooks.hook_common import (
     resolve_repo_root,
     scan_memo,
 )
-from claq.hooks.host_guard_targets import find_host_guard_match
+from claq.hooks.host_guard_targets import HOST_SETTINGS_DISPLAY_NAMES, find_host_guard_match
 from claq.hooks.shell_tokens import (
     WRITE_REDIRECT_OPERATORS,
     command_dialect_variants,
@@ -325,8 +327,8 @@ def _protected_target(token: str) -> str | None:
         token: 検査対象のトークン（パスの可能性がある）。
 
     Returns:
-        保護対象の表示名。basename 一致ならそのファイル名、ディレクトリの path 一致なら
-        末尾に ``/`` を付けた保護 path（例 ``.git/hooks/``）、内容次第で保護するファイルの
+        保護対象の表示名。basename 一致ならそのファイル名、保護 path 一致なら
+        `protected_path_display_name` の表示名（例 ``.git/hooks/``）、内容次第で保護するファイルの
         path 一致なら ``.git/config``。該当しなければ None。
     """
     name = effective_basename(token)
@@ -336,7 +338,7 @@ def _protected_target(token: str) -> str | None:
         return name
     segment = protected_path_segment(token)
     if segment is not None:
-        return f"{segment}/"
+        return protected_path_display_name(segment)
     # ``.git/config`` は Edit/Write なら内容の兆候で判定するが、Bash の書込みは内容を解釈
     # できない（``printf … >> .git/config`` の本文は別のトークンで、素通りの余地が残る）ため、
     # 書込み先位置に現れた時点で deny する。
@@ -687,6 +689,8 @@ def _blocked_message(found: str) -> str:
         return _blocked_git_config_message(found)
     if found.startswith("~/"):
         return _blocked_home_log_message(found)
+    if found in HOST_SETTINGS_DISPLAY_NAMES:
+        return hook_control_blocked_message(found)
     return blocked_message_for_file(found)
 
 
