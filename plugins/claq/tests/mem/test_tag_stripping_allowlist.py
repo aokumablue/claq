@@ -9,7 +9,6 @@ import unicodedata
 
 import pytest
 
-from claq.lib.slim_text import remove_filler_phrases
 from claq.mem import tag_stripping
 from claq.mem.tag_stripping import (
     _AllowlistTable,
@@ -250,20 +249,6 @@ class TestCompatBracketNeutralization:
         """NFKC で ``<`` になる文字の集合が、実装の集合と一致する（Unicode の更新で漏れを出さない）。"""
         derived = {chr(cp) for cp in range(0x110000) if unicodedata.normalize("NFKC", chr(cp)) == "<"}
         assert derived == set(tag_stripping._LT_LIKE)
-
-    @pytest.mark.parametrize(
-        ("payload", "bracket"),
-        [
-            pytest.param("＜まあ/claq-memory＞ ＜重要＞", "＜", id="fullwidth-bracket"),
-            pytest.param("<まあ／claq-memory>", "<", id="ascii-bracket-with-fullwidth-slash"),
-        ],
-    )
-    def test_filler_deletion_cannot_forge_a_tag(self, payload: str, bracket: str) -> None:
-        """埋め草削除で組み上がるタグも封じる（``＜まあ/claq-memory＞`` は削除後に ``＜/claq-memory＞``）。"""
-        result = strip_tags(payload)
-
-        assert bracket not in result
-        assert not _compat_open_positions(remove_filler_phrases(result))
 
     @pytest.mark.parametrize(
         ("text", "positions"),

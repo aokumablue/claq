@@ -37,29 +37,16 @@
     名前の終わりを要求せず、境界マーカーの偽装に使えそうな ``<`` を広く倒す。
     最後の防壁は広く、破壊的な処理は狭く、という非対称は意図的である。
 
-パイプライン単位で不変条件を守る 2 つの検査
-    「エスケープを最後に置く」は本モジュールの中でしか成立しない。呼び出し側の
-    後段に別の変換が控えていると、同じ穴がモジュールの外側で開く。単体では
-    見えないため、``strip_tags`` は返す直前に 2 つの検査を通す。
+シークレットのタグ分断の検査
+    escape は文字を消さないため、``sk-ant-<private>api03-…`` は 1 本の鍵へ戻らず
+    ``redact`` のパターンに一致しない（``&`` が文字クラスの外にある）。そこで
+    ``strip_tags`` は返す直前に、判定専用の複製（``_erase_known_tags``。出力へは
+    決して回さない）を使って**マスクとタグ除去が可換か**を調べる。可換でなければ
+    タグが秘密を隠しているので本文ごと ``[REDACTED]`` へ倒す。マスクの個数では
+    比べない（出力側が別のパターンで 1 個マスクされると個数が釣り合う）。
 
-    1. **シークレットのタグ分断**（``_hides_secret_behind_tags``）: escape は
-       文字を消さないため、``sk-ant-<private>api03-…`` は 1 本の鍵へ戻らず
-       ``redact`` のパターンに一致しない（``&`` が文字クラスの外にある）。
-       「鍵を書くとき ``sk-ant-`` の直後へ ``<private>`` を 1 個入れろ」と
-       指示するだけで redaction を回避できてしまう。判定専用の複製
-       （``_erase_known_tags``。出力へは決して回さない）を使い、**マスクと
-       タグ除去が可換か**を調べる。可換でなければタグが秘密を隠しているので
-       本文ごと ``[REDACTED]`` へ倒す。マスク個数の比較では足りない —
-       出力側が別のパターンで 1 個マスクされていると個数が釣り合い、鍵が
-       分断されたまま素通りする（属性 512 文字超のペアタグで実測）。
-    2. **削除変換によるタグの再鍛造**（``_forges_tag_after_deletion``）:
-       後段の ``slim_text.remove_filler_phrases`` は ``まあ`` ``ちなみに`` 等を
-       位置に関わらず削除するため、escape 済みの本文からタグを組み上げ直せる。
-       実測: ``<system-まあreminder>`` は本モジュールのどの語彙にも一致せず
-       素通りし、圧縮後に生きた ``<system-reminder>`` になる。削除後の複製で
-       無害化対象が**増える**なら、``&`` と ``<`` を 1 つ残らず倒して返す。
-       倒した後は削除で ``<`` も ``&lt;`` も作れないため、この 1 手で閉じる
-       （反復は要らない = fail open の余地が無い）。
+    「エスケープを最後に置く」は呼び出し側にも課す。escape の後段に、行の途中から
+    文字を消す変換を置かない（消した前後が接着して生きたタグに戻る）。
 
 なお ``<system-reminder>`` 等のハーネス足場タグを**中身ごと除去する**規則は今も
 本モジュールの管轄外である（``lib/harness.normalize_user_message`` が担う。
@@ -88,7 +75,6 @@ import re
 import unicodedata
 
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, TAG_NAME_END, tag_block_pattern
-from claq.lib.slim_text import remove_filler_phrases
 from claq.mem.redaction import PLACEHOLDER, redact
 
 # 無害化対象タグ（大文字小文字区別なし）。正規表現へ literal として埋めるため、
@@ -390,24 +376,6 @@ def _neutralize(text: str) -> str:
     return _escape_compat_brackets(escaped)
 
 
-def _neutralization_targets(text: str) -> int:
-    """無害化対象（倒すべき ``&`` と ``<``、互換文字の開き山括弧）の個数を数える。
-
-    削除変換がタグを組み上げ直していないかの判定に使う。埋め草表現は
-    非 ASCII なのでタグ名や実体参照の一部にはならず、削除は対象を**増やす**
-    ことしかできない。したがって個数の増加は「削除で新しい無害化対象が
-    生まれた」ことと同値になる。
-
-    Args:
-        text: 判定対象のテキスト。
-
-    Returns:
-        実体参照・ASCII の ``<``・互換文字の開き山括弧の位置の数の合計。
-    """
-    ascii_targets = {match.start() for match in _NEUTRALIZE_PATTERN.finditer(text)}
-    return len(_ENTITY_LT_PATTERN.findall(text)) + len(ascii_targets | set(_compat_open_positions(text)))
-
-
 def _erase_known_tags(text: str) -> str:
     """既知タグの表記を**除去**した判定専用の複製を返す。
 
@@ -452,51 +420,6 @@ def _hides_secret_behind_tags(text: str) -> bool:
     if erased == text:
         return False
     return _erase_known_tags(redact(text)) != redact(erased)
-
-
-def _forges_tag_after_deletion(text: str) -> bool:
-    """後段の削除変換がタグ・実体参照を組み上げ直せるかを判定する。
-
-    ``slim_text.remove_filler_phrases`` は本パイプラインで唯一「行の途中から
-    文字を消す」変換であり、escape の後段に置かれる（``mem/handoff`` の
-    ``compact_line``）。削除で無害化対象が増えるなら、出力はそのままでは
-    渡せない。
-
-    削除するものが無ければ両辺が同じ文字列になるため、数える前に False を
-    返す（``_hides_secret_behind_tags`` と同じ早期脱出）。こちらの節約は
-    ミリ秒未満で、``strip_tags`` の実測コストを支配しているのは判定用複製の
-    ``_ERASE_PATTERN`` である。それでも置くのは、脱出条件が同じ形だと
-    「検査は入力に対象が在るときだけ走る」と 1 つの規則で読めるため。
-
-    Args:
-        text: ``strip_tags`` が返そうとしている無害化済みテキスト。
-
-    Returns:
-        埋め草削除で無害化対象が増えるなら True。
-    """
-    deleted = remove_filler_phrases(text)
-    if deleted == text:
-        return False
-    return _neutralization_targets(deleted) > _neutralization_targets(text)
-
-
-def _escape_every_bracket(text: str) -> str:
-    """``&`` と、``<`` と見なせる文字（ASCII・全角・小書き）を 1 つ残らず倒す。
-
-    削除変換がタグを組み上げ直せると分かった本文に使う。倒した後は削除で ``<`` も
-    ``&lt;`` も作れない。互換文字の山括弧も全て倒すのは、``＜まあ/claq-memory＞`` の
-    ように削除で初めて ``claq-memory`` タグになる並びを、先に壊しておくため。文字は消さない。
-
-    Args:
-        text: 無害化前のテキスト。
-
-    Returns:
-        ``&`` と全ての ``<`` 相当の文字を実体参照にしたテキスト。
-    """
-    escaped = text.replace("&", _NEUTRALIZED_AMP)
-    for bracket in _LT_LIKE:
-        escaped = escaped.replace(bracket, _NEUTRALIZED_LT)
-    return escaped
 
 
 def keep_allowed_chars(text: str) -> str:
@@ -574,34 +497,26 @@ def strip_tags(text: str) -> str:
     しまう経路（``'<<private>/claq-memory>'`` → ``'</claq-memory>'``）を
     構造的に塞ぐ。理由の詳細はモジュール docstring を参照。
 
-    返す直前に 2 つの検査を通し、いずれかが立てば fail closed に倒す。
-
-    - 秘密がタグで分断されている: 本文ごと ``[REDACTED]`` にする。断片を救う
-      利得より、未マスクの鍵が ``sessions.handoff`` へ永続化され、あるいは
-      知識カードとして以後の全 SessionStart へ注入される損失のほうが大きい
-      （``mem/cmd_context._format_injected_item`` は ``strip_tags`` の後に ``redact``
-      を掛けない。書き込み時の ``redact_knowledge_text`` も分断された鍵は
-      見えないため、ここが最後の関門になる）。
-    - 後段の削除変換でタグを組み上げ直せる: ``&`` と ``<`` を 1 つ残らず倒す。
-      文字は消えないので本文は失われない。
+    返す直前に、秘密がタグで分断されていないかを検査し、分断されていれば本文ごと
+    ``[REDACTED]`` に倒す（fail closed）。断片を救う利得より、未マスクの鍵が
+    ``sessions.handoff`` へ永続化され、あるいは知識カードとして以後の全 SessionStart へ
+    注入される損失のほうが大きい（``mem/cmd_context._format_injected_item`` は
+    ``strip_tags`` の後に ``redact`` を掛けない。書き込み時の ``redact_knowledge_text`` も
+    分断された鍵は見えないため、ここが最後の関門になる）。
 
     Args:
         text: 無害化前のテキスト。
 
     Returns:
         既知タグ名の直前に生の ``<`` を含まないテキスト。前後の空白と
-        3 つ以上連続する改行は詰める。細工を検出した場合は ``[REDACTED]``、または
-        ``&`` と ``<`` を全て倒した本文。
+        3 つ以上連続する改行は詰める。秘密の分断を検出した場合は ``[REDACTED]``。
     """
     if not text:
         return text
 
-    dropped = drop_known_tag_blocks(text)
-    neutralized = _collapse_blank_lines(_neutralize(dropped))
+    neutralized = _collapse_blank_lines(_neutralize(drop_known_tag_blocks(text)))
     if _hides_secret_behind_tags(neutralized):
         # 空文字列にはしない — 呼び出し側の `redact` を通しても `[REDACTED]` が残ることが、
         # 「秘密が入っていたが倒した」という事実を下流へ伝える唯一の手段になる。
         return PLACEHOLDER
-    if _forges_tag_after_deletion(neutralized):
-        return _collapse_blank_lines(_escape_every_bracket(dropped))
     return neutralized
