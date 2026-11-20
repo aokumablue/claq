@@ -19,6 +19,7 @@ from claq.mem.repo_identity import (
     base_slug,
     detect_repo_identity,
     find_repo_root,
+    find_work_tree_root,
     normalize_remote_url,
     read_remote_url,
     resolve_repo,
@@ -250,6 +251,29 @@ class TestFindRepoRoot:
         monkeypatch.setattr(repo_identity, "run_text", _raising(timeout))
         with pytest.raises(subprocess.TimeoutExpired):
             find_repo_root(git_dir)
+
+
+class TestFindWorkTreeRoot:
+    """find_work_tree_root: worktree は本体ではなく自身へ、リポジトリ外は cwd 自身へ解決する。"""
+
+    def test_subdirectory_worktree_default_cwd_and_plain_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """サブディレクトリは作業ツリーのルート、worktree は自身、cwd 省略はプロセスの作業ディレクトリ、git 外は自身になること。"""
+        root = _make_repo(tmp_path / "main")
+        nested = root / "pkg"
+        nested.mkdir()
+        worktree = tmp_path / "wt"
+        _git("worktree", "add", "-b", "feature", str(worktree), cwd=root)
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        monkeypatch.chdir(nested)
+        assert [find_work_tree_root(nested), find_work_tree_root(worktree), find_work_tree_root(None)] == [
+            os.path.realpath(root),
+            os.path.realpath(worktree),
+            os.path.realpath(root),
+        ]
+        assert find_work_tree_root(plain) == os.path.realpath(plain)
 
 
 class TestDetectRepoIdentity:
