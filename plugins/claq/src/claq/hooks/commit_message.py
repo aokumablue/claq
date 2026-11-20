@@ -82,10 +82,15 @@ def validate_commit_message(command: str) -> dict | None:
         command: `git commit` コマンド文字列です。
 
     Returns:
-        メッセージと問題一覧を含む辞書、またはメッセージがない場合は None を返します。
+        メッセージと問題一覧を含む辞書、またはメッセージがない・本文が実行時にしか決まらない場合は
+        None を返します。
     """
     message_match = re.search(r"(?:-m|--message)[=\s]+[\"']?([^\"']+)[\"']?", command)
     if not message_match:
         return None
     message = message_match.group(1)
+    # `-m "$(cat <<'EOF' ...)"` のようなコマンド置換は、本文が実行時にしか決まらない。字面を本文として
+    # 検査すると置換の書き出し（`$(cat <<`）を本文と取り違え、毎回の commit で形式違反を警告する。
+    if message.startswith(("$(", "`")):
+        return None
     return {"message": message, "issues": _commit_message_issues(message)}

@@ -420,9 +420,10 @@ def print_text(report: dict[str, Any]) -> None:
 
 
 _USAGE = """
-Usage: python3 "${CLAUDE_PLUGIN_ROOT}/src/claq/launcher.py" claq.ci.harness_audit [scope] [--scope <repo|hooks|skills|commands|agents>] [--format <text|json>]
+Usage: claq_run claq.ci.harness_audit [scope] [--scope <repo|hooks|skills|commands|agents>] [--format <text|json>]
        [--root <path>]
 
+`claq_run` is defined by `. "$HOME/.claq/env.sh"`.
 Deterministic harness audit of a project that uses claq (consumer mode), based on explicit file/rule checks.
 Audits the current working directory by default.
 """

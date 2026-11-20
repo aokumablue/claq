@@ -386,7 +386,7 @@ Usage:
 
 Commands:
   init                                  Recreate the local mem database from scratch
-  context                             Emit the SessionStart knowledge injection (hook JSON on stdin)
+  context                               Emit the SessionStart knowledge injection (hook JSON on stdin)
   handoff                               Record the SessionEnd handoff (hook JSON on stdin; "handoff" key wins)
   learn                                 Store one knowledge card read as JSON from stdin
   list [--global|--repo]                List knowledge titles (default: repo + global, active, 20)
