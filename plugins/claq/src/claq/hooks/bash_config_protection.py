@@ -534,6 +534,9 @@ def _protected_write_hit(token: str, *, scope_certain: bool) -> str | None:
     Returns:
         保護対象の表示名。該当しなければ None。
     """
+    # 空の引数はパスとして開けない（BSD sed の ``-i ''``）。cwd に解決すると保護位置の祖先一致で誤 deny する。
+    if not token:
+        return None
     home_log_hit = _find_home_log_directory_match(token)
     if home_log_hit is not None:
         return home_log_hit

@@ -164,6 +164,35 @@ class TestHostGuardFilesOutsideRepo:
         """保護位置に当たらない repo 外の書込みは allow のまま。"""
         assert bash_config_protection.find_protected_write(command) is None
 
+    @pytest.mark.parametrize(
+        "command",
+        ["sed -i '' 's/a/b/' notes.txt", "sed -i '' -e 's/a/b/' notes.txt", "printf x > ''", "cp notes.txt ''"],
+        ids=["bsd-sed-inplace", "bsd-sed-inplace-script-flag", "redirect-to-empty", "cp-to-empty"],
+    )
+    def test_empty_argument_is_not_the_current_directory(
+        self, command: str, _home_outside_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """空の引数はパスとして開けないので、cwd がホスト設定の祖先（ホーム）でも書込み先に数えない。"""
+        monkeypatch.chdir(_home_outside_repo)
+
+        assert bash_config_protection.find_protected_write(command) is None
+
+    def test_current_directory_operand_still_matches_guarded_ancestor(
+        self, _home_outside_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``.`` は cwd 自身を指すので、cwd がホスト設定の祖先なら従来どおり deny する。"""
+        monkeypatch.chdir(_home_outside_repo)
+
+        assert bash_config_protection.find_protected_write("rm -rf .") == ".claude/settings.json"
+
+    def test_empty_argument_does_not_replace_the_protected_name(
+        self, _repo_scope: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """cwd がプラグインの hooks.json の祖先でも、BSD sed の空の拡張子は実際の書込み先の表示名を奪わない。"""
+        monkeypatch.setattr(host_guard_targets, "get_plugin_root", lambda: _repo_scope / "plugins" / "claq")
+
+        assert bash_config_protection.find_protected_write("sed -i '' 's/a/b/' pyproject.toml") == "pyproject.toml"
+
 
 @pytest.mark.parametrize(
     ("command", "denied"),
