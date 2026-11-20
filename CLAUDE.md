@@ -19,7 +19,7 @@
 - カバレッジ確認は `cd plugins/claq && python3 -m pytest -q --cov`（`fail_under=100` はこのディレクトリでのみ効く）
 - pytest をパイプするときは `set -o pipefail`
 
-## ランタイム
+## ランタイム前提
 
 - ランタイムは venv を作らない。開発用 venv はリポジトリ直下 `.venv`（`python3 -m venv .venv && .venv/bin/python -m pip install -e "plugins/claq[dev]"`）
 - 対応 Python は 3.12 以上。未満は保護フックを fail-open（exit 0）する
