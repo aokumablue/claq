@@ -59,6 +59,7 @@ command: /review
 子へ届くのは依頼文だけなので、依頼文に次を書く。
 
 - 起動した全員: ステップ1 のスコープ
+- security-auditor: スコープを差分で決めたときは diff 本文も載せる（security-auditor は Bash を持たず diff を取れない）
 - reviewer: security-auditor を並列に起動したときは「`security-auditor` との並列起動」
 - reviewer: スコープを引数パスで決めたときは `scope: path`
 

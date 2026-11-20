@@ -84,6 +84,7 @@ simplify の全グループが終わってから始める。
 子へ届くのは依頼文だけなので、依頼文に次を書く。
 
 - 起動した全員: `effective_scope`
+- security-auditor: ステップ3〜5 で入れた変更の diff 本文（security-auditor は Bash を持たず diff を取れない）
 - reviewer: security-auditor を並列に加えたときは「`security-auditor` との並列起動」（reviewer がセキュリティ観点を省き、二重報告を防ぐ）
 
 ## ステップ7: final gate
