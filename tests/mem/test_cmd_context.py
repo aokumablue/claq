@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from claq.lib.core_utils import get_plugin_root
-from claq.mem import cmd_context
+from claq.mem import cmd_context, handoff
 from claq.mem.database import Database
 from claq.mem.models import Repo, Session
 from claq.mem.settings import (
@@ -460,6 +460,23 @@ class TestHandoff:
         assert rows[0]["session_uid"] == "orphan"
         assert rows[0]["started_at"] == rows[0]["ended_at"]
         assert rows[0]["repo_id"] == _repo_id(tmp_path)
+
+    def test_skipping_an_overlong_transcript_line_is_not_reported_as_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """画像などで 1 行が上限を超えても stderr（bg ログ）へ書かず、次の SessionStart に失敗として出さない。"""
+        monkeypatch.setenv("CLAQ_TRANSCRIPT_ROOTS", str(tmp_path))
+        image = {"type": "image", "source": {"data": "A" * (handoff._MAX_TRANSCRIPT_LINE_CHARS + 1)}}
+        entries = [
+            {"type": "user", "message": {"role": "user", "content": [image]}},
+            {"type": "user", "message": {"role": "user", "content": "続きの依頼"}},
+        ]
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+
+        self._run(monkeypatch, tmp_path, {"session_id": "s1", "transcript_path": str(transcript), "cwd": str(tmp_path)})
+
+        assert self._sessions(tmp_path)[0]["handoff"] == "直近の依頼:\n- 続きの依頼"
 
     def test_resolves_repo_from_hook_cwd(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """行を新設するとき repos は stdin の cwd から解決する。"""
