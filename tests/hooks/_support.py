@@ -603,6 +603,9 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "unlink",
         }
     ),
+    # --- commit_message ---
+    # 結合短形式の中で `-m` より先に現れたら、残りの文字をその値として読む短形式。
+    "commit_message._OTHER_SHORT_OPTIONS_WITH_VALUE": frozenset("CcFStu"),
 }
 
 # 完全一致で固定**しない**語彙と、その代わりに何が固定しているか。

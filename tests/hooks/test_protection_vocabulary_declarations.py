@@ -20,7 +20,14 @@ from typing import Any
 import pytest
 
 import claq.hooks
-from claq.hooks import bash_config_protection, commit_quality_scanner, commit_risk, heredoc, shell_tokens
+from claq.hooks import (
+    bash_config_protection,
+    commit_message,
+    commit_quality_scanner,
+    commit_risk,
+    heredoc,
+    shell_tokens,
+)
 
 from ._support import (
     _EXPECTED_VOCABULARIES,
@@ -474,6 +481,13 @@ def test_every_minified_suffix_skips_secret_scan(suffix: str) -> None:
     assert commit_quality_scanner.should_scan_secrets("dist/bundle.js")
 
 
+@pytest.mark.parametrize("flag", sorted(_EXPECTED_VOCABULARIES["commit_message._OTHER_SHORT_OPTIONS_WITH_VALUE"]))
+def test_short_options_with_value_take_the_rest_of_the_cluster(flag: str) -> None:
+    """値を取る短形式の後ろの `m` を `-m` と読まないこと（層1・単体）。値を取らない `-q` に替えると `-m` になる。"""
+    assert commit_message.validate_commit_message(f"git commit -{flag}m'feat: x'") is None
+    assert commit_message.validate_commit_message("git commit -qm'feat: x'") == {"message": "feat: x", "issues": []}
+
+
 def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     """層2 で固定した全語彙が、層1 の担い手か不在理由のどちらかを宣言していること。
 
@@ -489,6 +503,7 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
         "commit_quality_scanner._LINTABLE_SUFFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",
+        "commit_message._OTHER_SHORT_OPTIONS_WITH_VALUE",
     }
     declared = (
         {case[0] for case in _VOCABULARY_DENY_ALLOW_CASES}
