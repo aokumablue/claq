@@ -26,7 +26,7 @@ claq は、Claude Code の作業を「最初の計画からレビューまで」
 | Agents | 計画、レビュー、TDD、セキュリティ、コード整理（可読性・性能）、スキル評価、ハーネス調整などの専門サブエージェント |
 | Skills | ワークフローや運用知識を段階的に案内 |
 | Commands | 定番作業をすぐ呼び出し |
-| Hooks | ツール実行の前後に自動チェックや記録を実行 |
+| Hooks | ツール実行の前・コンテキスト圧縮の前・セッションの開始と終了に、自動チェックや記録を実行 |
 | Memory | 知識カードと引き継ぎを SQLite（`~/.claq/mem.db`）に保持 |
 
 ---
@@ -41,7 +41,7 @@ claq は、Claude Code の作業を「最初の計画からレビューまで」
 | **Agent** | 内部から委譲される専門家 | コマンド / skill から Agent ツール経由で `subagent_type` 指定起動 | `reviewer`, `planner`, `tdd-writer` |
 | **Skill** | 条件発火 or 委譲先の知識モジュール | description マッチで Claude Code が自動起動 / inline 展開 or fork 委譲（`context` で決まる） | `grillme`, `learn`, `skill-make` |
 | **Knowledge** | 蓄積された知識カード（罠・規約・手順・事実） | SessionStart で `<claq-memory>` として自動注入（`status='active'` のみ） | `/instinct` で棚卸し・昇格 |
-| **Hook** | ツール実行時に自動発火するスクリプト | `hooks.json` 登録 → Claude Code が呼ぶ | PreToolUse, PreCompact, SessionStart, SessionEnd |
+| **Hook** | ツール実行の前などに自動発火するスクリプト | `hooks.json` 登録 → Claude Code が呼ぶ | PreToolUse, PreCompact, SessionStart, SessionEnd |
 
 **ざっくりまとめると**: ユーザーは Command だけを覚えれば OK。Command が内部で必要な Agent / Skill を自動で連れてきます。Knowledge と Hook はバックグラウンドで動く仕組みです。
 
