@@ -137,8 +137,7 @@ def test_security_prompt_hook_requires_real_guard_module(
 
 
 _FULL_LIFECYCLE = {
-    "SessionStart": [_entry(f"{_WRAPPER} claq.mem.cli context"), _entry(f"{_WRAPPER} claq.hooks.session_start")],
-    "Stop": [_entry(f"{_WRAPPER} --bg claq.hooks.session_end")],
+    "SessionStart": [_entry(f"{_WRAPPER} claq.mem.cli context")],
     "SessionEnd": [_entry(f"{_WRAPPER} --bg claq.mem.cli handoff")],
 }
 
@@ -165,7 +164,7 @@ def test_memory_hooks_lifecycle_requires_real_commands(tmp_path: Path, hooks_jso
 
     ディレクトリの存在だけで合格させると、hooks.json が欠落・空・不正でも満点になる回帰があった。
     そのため hooks.json を置く行ではフックディレクトリ相当（memory-persistence）も残しておく。
-    合格行は実際の hooks.json と同じく Stop / SessionEnd を --bg 付きで登録する。
+    合格行は実際の hooks.json と同じく、SessionStart と --bg 付きの SessionEnd を登録する。
     """
     if hooks_json is not None:
         (tmp_path / "hooks" / "memory-persistence").mkdir(parents=True)
