@@ -37,6 +37,12 @@ component inventory 取得は別途リリースゲートにする（後述）。
 CLI / Grok 固有の実行環境差は静的 validator では検出できず、実機再検証の頻度は人間の判断に
 委ねる。
 
+**Windows の起動経路は Windows の CI ジョブで実際に起動して確かめる。** ホストの登録機構は
+再現せず、ホストが文字列を渡すシェルだけを使う。Claude Code が `command` を渡す Git Bash と、
+`powershell` を読むホストが使う PowerShell から、`hooks.json` の文字列そのものでフックを起動し、
+allow と deny の結果を確かめる。開発機で実行できない wrapper（`claq-hook.cmd`）の振る舞いも
+ここで実測する。
+
 ## 配布 artifact にテストを同梱せず、検証は source tree で行う
 
 インストール処理は配布対象サブセット（`agents/` / `commands/` / `hooks/` / `runtime/` /

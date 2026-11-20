@@ -1,9 +1,10 @@
 """Windows 版 .cmd と両 wrapper の静的テキスト契約テスト。
 
-Windows 実機では .cmd を実行できないため、POSIX 版 runtime/claq-hook と
+開発機では .cmd を実行できないため、POSIX 版 runtime/claq-hook と
 同じ解決順・同じ fail-open・同じ診断理由を宣言していることを、wrapper の
-テキストを読んで固定する。実際に wrapper を起動して挙動を見る POSIX 側の
-テストは test_claq_hook_wrapper.py の担当。
+テキストを読んで固定する。実際に wrapper を起動して挙動を見るテストは、
+POSIX 側が test_claq_hook_wrapper.py、Windows 側が test_hook_windows_routes.py
+（Windows の CI ジョブ）の担当。
 """
 
 from __future__ import annotations
@@ -84,7 +85,6 @@ def test_both_wrappers_use_the_same_diagnostic_reasons() -> None:
     assert "path_not_absolute" in _POSIX_TEXT
     assert "path_has_empty_entry" in _CMD_TEXT
     assert "KNOWN RESIDUAL" in _CMD_TEXT
-    assert "UNVERIFIED FROM THIS HOST" in _CMD_TEXT
 
 
 def test_windows_wrapper_checks_the_launcher_before_choosing_an_interpreter() -> None:

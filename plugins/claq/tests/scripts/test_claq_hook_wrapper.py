@@ -196,6 +196,36 @@ def test_wrapper_falls_back_to_python_when_recent_enough(tmp_path: Path) -> None
     assert result.stdout.startswith("python:")
 
 
+@pytest.mark.parametrize("dirname", ["WindowsApps", "windowsapps"])
+def test_wrapper_drops_store_alias_directory_from_path(tmp_path: Path, dirname: str) -> None:
+    """`WindowsApps` の PATH 要素を落とし、その後ろにある実体の python を使うこと。
+
+    Git Bash では Store の App execution alias（python3 / python）が PATH に並ぶ。スタブは
+    Python を動かさず exit 9009 で終わるので、採ると保護が診断無しで外れる。
+    """
+    stub = 'printf "STORE-STUB\\n"\nexit 9009'
+    store = _stub_dir(tmp_path / "AppData" / "Local" / "Microsoft", dirname, python3=stub, python=stub)
+    real = _stub_dir(tmp_path, "bin", python='if [ "$1" = "-c" ]; then exit 0; fi\nprintf "python:%s\\n" "$1"')
+
+    result = _run_wrapper(_env(tmp_path, f"{store}:{real}"))
+
+    assert result.returncode == 0
+    assert "STORE-STUB" not in result.stdout
+    assert result.stdout.startswith("python:")
+
+
+def test_wrapper_reports_python_not_found_when_only_store_stubs_exist(tmp_path: Path) -> None:
+    """Store のスタブしか無ければ、9009 で黙って落ちずに診断付きで fail-open すること。"""
+    stub = 'printf "STORE-STUB\\n"\nexit 9009'
+    store = _stub_dir(tmp_path / "AppData" / "Local" / "Microsoft", "WindowsApps", python3=stub, python=stub)
+
+    result = _run_wrapper(_env(tmp_path, f"{store}:{_stub_dir(tmp_path, 'empty-bin')}"))
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert _diagnostic(result)["reason"] == "python_not_found"
+
+
 @pytest.mark.parametrize(
     "stubs",
     [{"python": 'if [ "$1" = "-c" ]; then exit 1; fi\nprintf "python:%s\\n" "$1"'}, {}],
