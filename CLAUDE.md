@@ -21,7 +21,7 @@
 
 ## ランタイム
 
-- ランタイムは venv を作らない。開発用 venv はリポジトリ直下 `.venv`（`scripts/install-dev.sh`）
+- ランタイムは venv を作らない。開発用 venv はリポジトリ直下 `.venv`（`python3 -m venv .venv && .venv/bin/python -m pip install -e "plugins/claq[dev]"`）
 - 対応 Python は 3.12 以上。未満は保護フックを fail-open（exit 0）する
 - `hooks.json` は裸の `python3` を呼ばない。全エントリが `runtime/claq-hook`。Windows は `command` と `powershell` を同一モジュール・同一引数で両方宣言する
 - hook と hook が起動する外部プロセスは非ブロッキング + ハードタイムアウト

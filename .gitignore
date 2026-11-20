@@ -4,20 +4,15 @@ __pycache__/
 .venv*/
 node_modules/
 *.orig
-uv.lock
 .coverage
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
 dist/
 build/
-skill.skill
 tmp/
 .env
 .env.*
-Dockerfile.postgres*
-compose.yaml
-compose.*.yaml
 .DS_Store
 
 # ローカル実行で生成される mem ランタイム成果物
@@ -25,4 +20,3 @@ mem.db
 mem.db-wal
 mem.db-shm
 logs/
-repos/

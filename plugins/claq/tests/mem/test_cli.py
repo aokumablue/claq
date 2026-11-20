@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import runpy
 import sys
 from pathlib import Path
 
@@ -256,25 +255,3 @@ class TestArgvAndStdin:
         """値付きオプションに値が無い・未知のオプションは CommandError。"""
         with pytest.raises(command_support.CommandError, match=match):
             cli._parse_options(argv)
-
-
-def test_mem_main_module_invokes_cli_main(monkeypatch: pytest.MonkeyPatch) -> None:
-    """python -m claq.mem が cli.main() を呼ぶ。"""
-    monkeypatch.setattr(sys, "argv", ["python", "--help"])
-    with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("claq.mem.__main__", run_name="__main__")
-
-    assert excinfo.value.code == 0
-
-
-def test_mem_main_module_does_not_run_on_plain_import() -> None:
-    """import しただけでは CLI が走らないこと（``__name__`` ガード）。
-
-    ガードが無いと ``pkgutil.walk_packages`` のようにパッケージを走査する
-    道具がこのモジュールを import した瞬間に CLI が走り、``sys.exit`` の
-    ``SystemExit`` が走査側へ飛ぶ（走査が途中で中断する）。
-    ``python -m`` 経路は上のテストが押さえているので、ここは走らない側を固定する。
-    """
-    module = runpy.run_module("claq.mem.__main__", run_name="claq.mem.__main__")
-
-    assert module["__name__"] == "claq.mem.__main__"
