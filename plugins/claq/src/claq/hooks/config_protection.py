@@ -29,19 +29,19 @@ from claq.hooks.hook_common import (
     resolve_repo_root,
     scan_memo,
 )
-from claq.hooks.stdin_io import (
-    MAX_STDIN_BYTES,
-    StdinUnavailableError,
-    parse_json_object,
-    read_raw_stdin_with_truncation,
-    stdin_unreadable_message,
-)
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.harness import (
     extract_file_paths,
     extract_raw_tool_name,
     is_known_tool_outside,
     iter_tool_input_containers,
+)
+from claq.lib.stdin_io import (
+    MAX_STDIN_BYTES,
+    StdinUnavailableError,
+    parse_json_object,
+    read_raw_stdin_with_truncation,
+    stdin_unreadable_message,
 )
 
 # matcher（hooks.json）は書込み系ツールに限定されているが、matcher の綴りがズレても
@@ -170,9 +170,6 @@ def _match_path_segments(file_path: str, candidates: tuple[tuple[str, ...], ...]
 
     Returns:
         一致した候補の表示名（``/`` 区切り）。一致しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     resolved = resolve_effective_target(file_path)
     parts = resolved.parts if resolved is not None else Path(file_path).parts
@@ -192,9 +189,6 @@ def protected_path_segment(file_path: str) -> str | None:
 
     Returns:
         該当した保護 path の表示名（``.git/hooks``）。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     return _match_path_segments(file_path, _PROTECTED_PATH_SEGMENTS)
 
@@ -210,9 +204,6 @@ def repo_git_config_path(file_path: str) -> str | None:
 
     Returns:
         該当した保護 path の表示名（``.git/config`` 等）。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     return _match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS)
 
@@ -228,9 +219,6 @@ def blocked_message_for_file(file_name: str) -> str:
 
     Returns:
         ブロックメッセージ文字列
-
-    Raises:
-        例外は発生しません。
     """
     if file_name in RUNNING_PLUGIN_DISPLAY_NAMES:
         return _running_plugin_blocked_message(file_name)
@@ -264,9 +252,6 @@ def running_plugin_root_is_guarded() -> bool:
 
     Returns:
         保護するなら True。
-
-    Raises:
-        例外は発生しません。
     """
     repo_root = resolve_repo_root()
     if repo_root is None:
@@ -289,9 +274,6 @@ def _plugin_runtime_is_tracked(repo_root: Path, plugin_root: Path) -> bool:
 
     Returns:
         index に載っていれば True。git が無い・タイムアウト・追跡外なら False（保護を外さない）。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         result = subprocess.run(
@@ -317,9 +299,6 @@ def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> st
     Returns:
         当たった保護ディレクトリの表示名（``runtime/`` / ``src/claq/``）。当たらない、または
         開発用 checkout で保護しない場合は None。
-
-    Raises:
-        例外は発生しません。
     """
     target = fold_path_parts(resolved.parts)
     for segments in _RUNNING_PLUGIN_GUARDED_DIRS:
@@ -337,9 +316,6 @@ def _running_plugin_blocked_message(display_name: str) -> str:
 
     Returns:
         ブロック理由文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"BLOCKED: Modifying {display_name} of the running claq plugin is not allowed. "
@@ -362,9 +338,6 @@ def _block_reason_for_file(tool_name: str, container: Any, file_path: str) -> st
 
     Returns:
         ブロック理由。保護対象でなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     # 実体パスを解決できない file_path は位置で照合できないので、下の名前の判定に任せる。
     resolved = resolve_effective_target(file_path)
@@ -401,9 +374,6 @@ def _block_reason_for_container(tool_name: str, container: Any) -> str | None:
     Returns:
         ブロック理由。保護対象でなければ None。対象ファイルを確定できない
         場合は fail-closed メッセージ。
-
-    Raises:
-        例外は発生しません。
     """
     # 旧 ``file`` キーの補完・list 形状・生文字列形状の展開は共有層が担う。ここで dict
     # 限定の補完を持つと、list 形状だけ補完が効かず保護を素通りする。
@@ -425,9 +395,6 @@ def _block_reason(payload: dict[str, Any]) -> str | None:
 
     Returns:
         ブロック理由。対象外・保護対象なしなら None。
-
-    Raises:
-        例外は発生しません。
     """
     tool_name = extract_raw_tool_name(payload)
     # 既知の「書き込みではないツール」だけを skip する。ツール名を特定
@@ -463,9 +430,6 @@ def main() -> int:
 
     Returns:
         終了コード（0: 許可、2: ブロック）
-
-    Raises:
-        例外は発生しません。
     """
     try:
         raw, truncated = read_raw_stdin_with_truncation()

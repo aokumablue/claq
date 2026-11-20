@@ -37,23 +37,24 @@ component inventory 取得は別途リリースゲートにする（後述）。
 CLI / Grok 固有の実行環境差は静的 validator では検出できず、実機再検証の頻度は人間の判断に
 委ねる。
 
+**Windows の起動経路は Windows の CI ジョブで実際に起動して確かめる。** ホストの登録機構は
+再現せず、ホストが文字列を渡すシェルだけを使う。Claude Code が `command` を渡す Git Bash と、
+`powershell` を読むホストが使う PowerShell から、`hooks.json` の文字列そのものでフックを起動し、
+allow と deny の結果を確かめる。開発機で実行できない wrapper（`claq-hook.cmd`）の振る舞いも
+ここで実測する。
+
 ## 配布 artifact にテストを同梱せず、検証は source tree で行う
 
-インストール処理は配布対象サブセット（`agents/` / `commands/` / `hooks/` / `runtime/` /
-`skills/` / `src/`）だけを配置し、開発用アーティファクトを持ち出さない。配布物を最小化する
-ことでインストールサイズと攻撃面を絞り、テスト・開発ツールという「ランタイムに不要な依存」を
-利用者の環境へ持ち込まない。
+ホストのマーケットプレイスはプラグインディレクトリ（`plugins/claq`）をそのまま複製してインストール
+する。配布物を最小化してインストールサイズと攻撃面を絞り、テスト・開発ツールという「ランタイムに
+不要な依存」を利用者の環境へ持ち込まないため、**テスト（`tests/`）・開発ツール（`tools/claq_dev`）・
+開発用の `pyproject.toml` はリポジトリ直下に置き、プラグインディレクトリには置かない。** 除外リストの
+ような散文や設定では守らず、ディレクトリ構成で配布物に入らないようにする。
 
-配布ツリーへ開発用の `pyproject.toml` をそのまま持ち出すと、テスト設定が除去済みの `tests/` を
-指したまま残り、配布ツリーで `pytest` を叩くと回帰そっくりの派手な失敗が出る。ランタイム依存は
-ゼロで、`launcher.py` が `sys.path` へ `src/` を挿すだけであり、ホストが読むのは
-`.claude-plugin/plugin.json` である。配布スクリプトの除外リストへ開発用 `pyproject.toml` を含め、
-この出力が構造的に発生しないようにする。除外リストの定義はテストが機械的に固定する。
-
-**配布 artifact（各ホストへインストールされる plugin tree）に `tests/` を同梱しない。回帰検知・
-カバレッジ検証は、常に開発用 source tree（このリポジトリ自身）で実施する。** `pyproject.toml`
-も配布しない。回帰検知の実測は常に source tree で取る。件数と statements 数は書かない——書けば
-陳腐化し、次の監査が「数値と合わない」を欠陥として報告する材料になる。
+ランタイム依存はゼロで、`launcher.py` が `sys.path` へ `src/` を挿すだけであり、ホストが読むのは
+`.claude-plugin/plugin.json` である。したがってプラグインディレクトリに `pyproject.toml` は要らない。
+回帰検知・カバレッジ検証は、常に開発用 source tree（このリポジトリ自身）で実施する。件数と
+statements 数は書かない——書けば陳腐化し、次の監査が「数値と合わない」を欠陥として報告する材料になる。
 
 配布 artifact にも `tests/` を同梱する案は、配布サイズが増え利用者の環境に開発専用ファイルを
 持ち込み、ランタイムが venv も install.sh も持たないという設計原則とも整合しないため採らない。
@@ -78,7 +79,10 @@ installed tree だけを見て pytest を実行すると「テストが無い」
 1. ホストの strict validate がプラグインに対して PASS する
 2. ホストへ plugin detail を問い合わせた出力に、実ディレクトリと一致する Skills / Agents 数が
    現れる
-3. debug log にプラグインコンポーネント読み取り失敗のエラーが 0 件である
+3. debug log にプラグインコンポーネント読み取り失敗のエラーが 0 件である。hooks.json の
+   `version` に対する未知キーの記録（`unknown key "version" ignored`）は数えない。`version` は
+   Copilot CLI が hooks ファイルの形式として求めるキーで、Claude Code はこのキーを無視して読み込みを
+   続ける
 
 **CLI に依存しない静的ゲートも併置する。** ホストの CLI が PATH に無い環境ではホスト確認は実行
 できず、skip されるゲートはゲートとして機能しない。そのため、manifest が `agents` を宣言して

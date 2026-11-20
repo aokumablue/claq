@@ -18,7 +18,7 @@ class _RedactingFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """整形済みログメッセージから PII / シークレットを除去して返す。"""
-        from claq.mem.redaction import redact
+        from claq.lib.redaction import redact
 
         return redact(super().format(record))
 

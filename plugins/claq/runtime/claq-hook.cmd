@@ -1,13 +1,12 @@
 @echo off
 rem claq hook launcher -- Windows side.
 rem
-rem This file is reached by two distinct routes on Windows, and both are live.
-rem hooks.json's `command` names the extension-less sibling "claq-hook"; cmd.exe
-rem appends PATHEXT to an explicitly pathed command, so this .cmd is what runs
-rem on a cmd.exe host while POSIX hosts exec the sh script of the same base name.
-rem Hosts that prefer PowerShell get no PATHEXT treatment, so the same hooks.json
-rem entry also declares a `powershell` field that names this .cmd explicitly via
-rem the call operator: & "...\runtime\claq-hook.cmd" <module> <args...>.
+rem Claude Code runs hooks.json's `command` through Git Bash on Windows, so the
+rem POSIX sibling "claq-hook" runs there, not this file. This .cmd is reached by
+rem hosts that read the `powershell` field, which names it via the call operator:
+rem & "...\runtime\claq-hook.cmd" <module> <args...>, and by a host that runs
+rem `command` with cmd.exe (cmd.exe appends PATHEXT to the extension-less path).
+rem The Windows CI job launches it through the `powershell` field.
 rem
 rem Resolution order: %CLAQ_PYTHON% -> py -3 -> python -> python3.
 rem Candidates found under ...\WindowsApps\ are skipped: those are Microsoft
@@ -87,26 +86,21 @@ rem    On detection the wrapper fails open with a diagnostic and requires an
 rem    absolute CLAQ_PYTHON, mirroring what the POSIX side does when PATH holds
 rem    no absolute entry at all.
 rem
-rem    KNOWN RESIDUAL: `if defined CLAQ_PYTHON goto :claq_override` runs BEFORE
-rem    this PATH check, so an absolute CLAQ_PYTHON skips it entirely. The POSIX
-rem    side is the opposite (PATH first), and refuses even with an absolute
-rem    CLAQ_PYTHON — because the launcher and every subprocess it spawns (git
-rem    included) still resolve through the poisoned PATH, which CLAQ_PYTHON does
-rem    not fix. Reordering here is the right change, but cmd.exe cannot be run
-rem    from the development host, and a broken reorder silently disables
-rem    protection on Windows. Left as a documented residual rather than an
-rem    unverified edit. See docs/adr/01-hook-failure-direction.md.
+rem    An absolute CLAQ_PYTHON is honoured BEFORE this check on purpose. The
+rem    check only guards the interpreter lookup, which an absolute CLAQ_PYTHON
+rem    already bypasses. Child processes started by bare name (git) are found by
+rem    CreateProcess, which searches the current directory before PATH whatever
+rem    PATH holds, so refusing here would not close that route and would only
+rem    take away the CLAQ_PYTHON recovery (docs/adr/hook-failure-direction.md).
 rem
 rem    KNOWN RESIDUAL: a NON-EMPTY relative entry (`PATH=foo;C:\Windows`) is
 rem    still not caught. That case does need the per-entry loop, so it stays
 rem    open; the POSIX side strips it because a POSIX shell can iterate PATH
 rem    without the `!` hazard.
 rem
-rem    UNVERIFIED FROM THIS HOST: cmd.exe cannot run on darwin, so the positive
-rem    path (that the check actually fires) has never been observed. The check
-rem    is written so a malformed test leaves CLAQ_PATH_RISK unset and resolution
-rem    proceeds exactly as before -- a broken check degrades to the previous
-rem    behaviour, never to "protection off on Windows".
+rem    The check is written so a malformed test leaves CLAQ_PATH_RISK unset and
+rem    resolution proceeds as if PATH were clean -- a broken check degrades to
+rem    no check, never to "protection off on Windows".
 rem
 rem When nothing usable is found this exits 0 after writing a diagnostic to
 rem stderr, matching launcher.py's documented fail-open policy (CLAUDE.md

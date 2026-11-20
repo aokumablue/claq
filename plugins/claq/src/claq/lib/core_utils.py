@@ -63,7 +63,7 @@ def get_plugin_root() -> Path:
     """このプラグインのソースルート（``<root>/src/claq/lib`` の 3 つ上）を返す。
 
     ``CLAUDE_PLUGIN_ROOT`` は Bash tool の環境変数に乗らないため md 側からは参照できないが、
-    hook プロセスの中では自分自身のファイル位置から確実に導ける。``launcher.REPO_ROOT``
+    hook プロセスの中では自分自身のファイル位置から確実に導ける。``launcher.PLUGIN_ROOT``
     と同じ値になる。
     """
     return Path(__file__).resolve().parents[3]

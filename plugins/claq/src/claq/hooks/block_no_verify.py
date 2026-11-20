@@ -52,10 +52,6 @@ heredoc 本文:
     なりません。値を取るオプション（``-m`` / ``-F`` など）の値トークンもフラグ走査から
     除外します。
 
-long オプションの短縮形:
-    git は曖昧でない限り long オプションの**前置**を受理するため（``git commit
-    --no-veri`` は実際に通る）、``--no-verify`` の前置（``--n`` 以上の長さ）もブロックします。
-
 config 経由のフック無効化（config key は大小文字を区別せず判定）:
     - ``-c`` / ``--config-env`` / ``git config`` の書込みで ``core.hooksPath`` を差し替える
     - 同じ経路で ``include.path`` / ``includeIf.*`` を書き、取り込んだ先で
@@ -105,14 +101,14 @@ from claq.hooks.shell_tokens import (
     split_segments,
     tokenize_with_status,
 )
-from claq.hooks.stdin_io import (
+from claq.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
+from claq.lib.stdin_io import (
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
     truncated_input_message,
 )
-from claq.lib.harness import INPUT_CONTAINER_KEYS, extract_tool_input, iter_bash_commands
 
 # 値を別トークンとして必ず取る long オプション（git グローバル + commit/push）。
 # 値が ``=`` で結合されている場合は次トークンを消費しません。
@@ -182,10 +178,6 @@ _OPTIONAL_VALUE_SHORT_OPTIONS = frozenset("uS")
 # フックバイパスに直結する long フラグ。サブコマンドを問わずブロックします。
 _BYPASS_LONG_FLAG = "--no-verify"
 
-# long オプションの短縮形を受け付ける最短長。``--n`` / ``--no`` は git 側では曖昧で
-# エラーになるが、deny 側に倒す（誤検出 > 誤通過）。
-_MIN_ABBREVIATED_LONG_OPTION_LENGTH = 3
-
 # ``git commit`` でのみ ``--no-verify`` の別名になる short フラグ。
 _BYPASS_SHORT_FLAG = "-n"
 
@@ -207,9 +199,6 @@ def _consume_long_option(
     Returns:
         (値として追加で消費すべき後続トークン数（0 または 1）,
         値を取るか判定できない未知の long オプションか) の 2 要素タプル。
-
-    Raises:
-        例外は発生しません。
     """
     name, has_value, inline_value = token.partition("=")
     flags.append(name)
@@ -243,9 +232,6 @@ def _consume_short_option(
     Returns:
         (値として追加で消費すべき後続トークン数（0 または 1）,
         git グローバルオプションとして未知の文字を含むか) の 2 要素タプル。
-
-    Raises:
-        例外は発生しません。
     """
     last_index = len(token) - 1
     unknown = False
@@ -282,30 +268,12 @@ def _consume_option(
     Returns:
         (値として追加で消費すべき後続トークン数（0 または 1）, 未知のオプションか) の 2 要素タプル。
         非オプション語（``-`` 単独を含む）はフラグを残さず ``(0, False)``。
-
-    Raises:
-        例外は発生しません。
     """
     if token.startswith("--"):
         return _consume_long_option(token, next_token, flags, config_values)
     if token.startswith("-") and len(token) > 1:
         return _consume_short_option(token, next_token, flags, config_values)
     return 0, False
-
-
-def _is_no_verify_flag(flag: str) -> bool:
-    """フラグが ``--no-verify``（git が受理する短縮形を含む）かを判定する。
-
-    Args:
-        flag: ``--`` で始まるフラグ名（``=`` の左側）。
-
-    Returns:
-        ``--no-verify`` の前置で ``--n`` 以上の長さがあれば True。
-
-    Raises:
-        例外は発生しません。
-    """
-    return len(flag) >= _MIN_ABBREVIATED_LONG_OPTION_LENGTH and _BYPASS_LONG_FLAG.startswith(flag)
 
 
 # ``NAME=value`` と追記代入 ``NAME+=value`` の両方を代入として読む。``+=`` は bash の追記で、
@@ -416,8 +384,8 @@ class _GitScan:
     ``git config core.hooksPath <path>`` の検出に使う。
 
     起動位置ごとに末尾まで読み直すと ``git git git ...`` でトークン数の二次になり、
-    ``sh -c`` の束と 2 方言の掛け算で hook の timeout を超える（60KB の入力で 15.8 秒を実測。
-    timeout で kill された hook は host に許可として扱われる）。値として消費するトークン数は
+    ``sh -c`` の束と 2 方言の掛け算で hook の timeout を超える（kill された hook は許可として
+    扱われる）。値として消費するトークン数は
     そのトークンと次のトークンだけで決まり読み始めの位置によらないので、位置 j から同じ歩幅で
     末尾まで読んだときの集計を右から左へ 1 回で作り、各起動はその次の位置の集計を引く。
     """
@@ -455,7 +423,7 @@ class _GitScan:
             is_word = not flags
             k = min(j + 1 + consumed, end)
             self._next[j] = k
-            self._no_verify[j] = self._no_verify[k] or any(_is_no_verify_flag(flag) for flag in flags)
+            self._no_verify[j] = self._no_verify[k] or _BYPASS_LONG_FLAG in flags
             self._short_n[j] = self._short_n[k] or _BYPASS_SHORT_FLAG in flags
             self._sensitive_config_value[j] = self._sensitive_config_value[k] or any(
                 is_sensitive_config_key(value.split("=", 1)[0]) for value in config_values
@@ -541,9 +509,6 @@ def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix:
         ``git config`` の書込み操作、または literal ``GIT_CONFIG_*`` / ``HOME`` / ``XDG_CONFIG_HOME``
         環境変数代入のいずれか経由）、``git commit`` の ``-n``、またはサブコマンドを確定できない状態での
         ``-n`` を検出したら True。
-
-    Raises:
-        例外は発生しません。
     """
     # heredoc のデータ本文はトークン化の前に落とす。入口で正規化するので `sh -c` の
     # 再帰先にも同じ規則が効く。
@@ -571,9 +536,6 @@ def _segment_has_bypass(segment: list[str], inherited_prefix: tuple[str, ...]) -
 
     Returns:
         フックを迂回する git 起動があれば True。
-
-    Raises:
-        例外は発生しません。
     """
     scan: _GitScan | None = None
     env = _EnvAssignmentScan(inherited_prefix)
@@ -597,9 +559,6 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
 
     Returns:
         バイパスフラグを検出したら True。
-
-    Raises:
-        例外は発生しません。
     """
     tokens, parsed_cleanly = tokenize_with_status(command)
     if not parsed_cleanly and _UNPARSED_RAW_BYPASS_RE.search(command):
@@ -644,9 +603,6 @@ def main() -> int:
 
     Returns:
         終了コード（0: 許可、ブロック時は 2）
-
-    Raises:
-        例外は発生しません。
     """
     try:
         raw, truncated = read_raw_stdin_with_truncation()

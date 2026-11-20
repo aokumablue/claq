@@ -15,13 +15,13 @@
 ## 検証
 
 - Python は `python3` を使う
-- 変更後はリポジトリ直下の `.venv` を有効化し、`python3 -m pytest -q` と `ruff check plugins/claq` を通す
-- カバレッジ確認は `cd plugins/claq && python3 -m pytest -q --cov`（`fail_under=100` はこのディレクトリでのみ効く）
+- 変更後はリポジトリ直下の `.venv` を有効化し、リポジトリ直下で `python3 -m pytest -q --cov`（カバレッジ 100% もここで判定）と `ruff check .` を通す
 - pytest をパイプするときは `set -o pipefail`
 
 ## ランタイム前提
 
-- ランタイムは venv を作らない。開発用 venv はリポジトリ直下 `.venv`（`python3 -m venv .venv && .venv/bin/python -m pip install -e "plugins/claq[dev]"`）
+- ランタイムは venv を作らない。開発用 venv はリポジトリ直下 `.venv`（`python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"`）
+- 配布物は `plugins/claq` をそのまま複製したもの。テスト（`tests/`）・開発ツール（`tools/claq_dev`）・開発用 `pyproject.toml` はリポジトリ直下に置き、配布物へ入れない
 - 対応 Python は 3.12 以上。未満は保護フックを fail-open（exit 0）する
 - `hooks.json` は裸の `python3` を呼ばない。全エントリが `runtime/claq-hook`。Windows は `command` と `powershell` を同一モジュール・同一引数で両方宣言する
 - hook と hook が起動する外部プロセスは非ブロッキング + ハードタイムアウト

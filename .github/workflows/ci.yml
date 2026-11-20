@@ -24,10 +24,25 @@ jobs:
       - name: Install dev environment
         run: |
           python -m venv .venv
-          .venv/bin/python -m pip install --quiet -e "plugins/claq[dev]"
+          .venv/bin/python -m pip install --quiet -e ".[dev]"
       - name: Lint
-        run: .venv/bin/ruff check plugins/claq
+        run: .venv/bin/ruff check .
       # venv の python は絶対パスで呼ぶ（相対パスだと sys.prefix の不一致を site が警告する）
       - name: Test with coverage
-        working-directory: plugins/claq
         run: "$GITHUB_WORKSPACE/.venv/bin/python -m pytest -q --cov"
+
+  # Windows のホストと同じ経路（Git Bash で command、PowerShell で powershell）からフックを起動する
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dev environment
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install --quiet -e ".[dev]"
+      - name: Hook launch routes
+        run: '& "$env:GITHUB_WORKSPACE\.venv\Scripts\python.exe" -m pytest -q tests/scripts/test_hook_windows_routes.py'

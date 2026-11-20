@@ -91,7 +91,8 @@ claq_run() {
 #   key     : defaults to a slug derived from the title, so re-recording the
 #             same title updates that card instead of piling up duplicates.
 #
-# Values are marshalled into JSON by python3, so quotes, newlines and
+# Values are marshalled into JSON by claq.mem.learn_payload (run through
+# claq_run, so the wrapper picks the interpreter), so quotes, newlines and
 # non-ASCII text in --title / --body need no shell escaping.
 claq_mem_learn() {
   local card_key="" card_kind="" card_scope="" card_title="" card_body=""

@@ -9,7 +9,7 @@ import subprocess
 def run_text(
     cmd: list[str],
     *,
-    timeout: float | None,
+    timeout: float,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """UTF-8 text モードで subprocess.run を実行する。

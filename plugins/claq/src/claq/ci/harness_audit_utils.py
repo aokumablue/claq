@@ -1,4 +1,4 @@
-"""ハーネス監査のファイル探索・検出補助とリポジトリマーカー定義。"""
+"""ハーネス監査のファイル探索・検出補助。"""
 
 from __future__ import annotations
 
@@ -10,13 +10,6 @@ from typing import Any
 
 from claq.lib.constants import PLUGIN_NAME
 from claq.lib.core_utils import get_home_dir
-
-REPO_CORE_MARKERS = [
-    ".claude-plugin/plugin.json",
-    "agents",
-    "skills",
-]
-HARNESS_MARKER = "src/claq/ci/harness_audit.py"
 
 
 def make_check(
@@ -45,11 +38,6 @@ def make_check(
         "pass": passed,
         "fix": fix,
     }
-
-
-def file_exists(root_dir: str | Path, relative_path: str) -> bool:
-    """相対パスが存在するかを確認する。"""
-    return Path(root_dir, relative_path).exists()
 
 
 def file_has_content(root_dir: str | Path, relative_path: str) -> bool:
@@ -162,18 +150,6 @@ def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions:
     """指定拡張子のファイルが 1 つでもあるかを調べる。"""
     suffixes = tuple(extensions)
     return any(entry.name.endswith(suffixes) for entry in _walk_dir(Path(root_dir, relative_dir)))
-
-
-def detect_target_mode(root_dir: str | Path) -> str:
-    """repo か consumer かを判定する。
-
-    判定材料はプラグイン提供元としての構造（``REPO_CORE_MARKERS`` と
-    ``HARNESS_MARKER``）だけに置く。``package.json`` の ``name`` のような
-    プラグイン名で判定すると、claq 自身と無関係な名前で repo 判定しうる。
-    """
-    if all(file_exists(root_dir, marker) for marker in REPO_CORE_MARKERS) and file_exists(root_dir, HARNESS_MARKER):
-        return "repo"
-    return "consumer"
 
 
 # consumer モードで「このプラグインが導入済みか」を見るときの探索先。

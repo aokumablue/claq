@@ -97,17 +97,17 @@ from claq.hooks.shell_tokens import (
     split_segments,
     tokenize,
 )
-from claq.hooks.stdin_io import (
+from claq.lib.harness import (
+    extract_raw_tool_name,
+    is_known_tool_outside,
+    iter_bash_commands,
+)
+from claq.lib.stdin_io import (
     StdinUnavailableError,
     parse_json_object,
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
     truncated_input_message,
-)
-from claq.lib.harness import (
-    extract_raw_tool_name,
-    is_known_tool_outside,
-    iter_bash_commands,
 )
 
 # matcher（hooks.json）の綴りがズレても、本体側で対象外ツールを早期 return する多重防御。
@@ -192,9 +192,6 @@ def _expand_config_home_variables(token: str) -> str:
 
     Returns:
         先頭の変数を展開したトークン。変数で始まらなければそのまま。
-
-    Raises:
-        例外は発生しません。
     """
     token = _HOME_VARIABLE_PREFIX_RE.sub("~", token)
     xdg = os.environ.get("XDG_CONFIG_HOME")
@@ -219,9 +216,6 @@ def _find_home_log_directory_match(token: str) -> str | None:
 
     Returns:
         一致すれば ``"~/.claq/logs"``。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     resolved = resolve_effective_target(token)
     parts = resolved.parts if resolved is not None else Path(token).parts
@@ -293,9 +287,6 @@ def _command_index(segment: list[str]) -> int | None:
     Returns:
         実行 executable の index。segment が空、または全トークンが代入/
         wrapper/オプションで実行対象が特定できない場合は None。
-
-    Raises:
-        例外は発生しません。
     """
     index = 0
     seen_wrapper = False
@@ -337,9 +328,6 @@ def _protected_target(token: str) -> str | None:
         保護対象の表示名。basename 一致ならそのファイル名、ディレクトリの path 一致なら
         末尾に ``/`` を付けた保護 path（例 ``.git/hooks/``）、内容次第で保護するファイルの
         path 一致なら ``.git/config``。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     name = effective_basename(token)
     # 判定は畳んだ名前で行い、表示名は観測した綴りのままにする（`Path.resolve()` は
@@ -363,9 +351,6 @@ def _non_option_args(args: list[str]) -> list[str]:
 
     Returns:
         オプションでない引数トークンのリスト。
-
-    Raises:
-        例外は発生しません。
     """
     return [token for token in args if not token.startswith("-")]
 
@@ -378,9 +363,6 @@ def _last_non_option_arg(args: list[str]) -> list[str]:
 
     Returns:
         最終の非オプション引数を高々 1 件含むリスト。
-
-    Raises:
-        例外は発生しません。
     """
     return _non_option_args(args)[-1:]
 
@@ -396,9 +378,6 @@ def _inplace_edit_args(args: list[str]) -> list[str]:
 
     Returns:
         in-place フラグがあれば全引数、無ければ空リスト。
-
-    Raises:
-        例外は発生しません。
     """
     return list(args) if any(is_inplace_edit_flag(token) for token in args) else []
 
@@ -411,9 +390,6 @@ def _dd_of_args(args: list[str]) -> list[str]:
 
     Returns:
         `of=` プレフィックスを除いた書き込み先パス文字列のリスト。
-
-    Raises:
-        例外は発生しません。
     """
     return [token[len("of=") :] for token in args if token.startswith("of=")]
 
@@ -426,9 +402,6 @@ def _redirect_targets(segment: list[str]) -> list[str]:
 
     Returns:
         リダイレクト先の生トークン（パス文字列）のリスト。
-
-    Raises:
-        例外は発生しません。
     """
     return [
         segment[index + 1]
@@ -465,9 +438,6 @@ def _write_target_tokens_in_segment(segment: list[str]) -> list[str]:
 
     Returns:
         書き込み先候補の生トークン（パス文字列）のリスト。
-
-    Raises:
-        例外は発生しません。
     """
     targets = _redirect_targets(segment)
     index = _command_index(segment)
@@ -490,9 +460,6 @@ def _changes_working_directory(segment: list[str]) -> bool:
     Returns:
         先頭の `_LEADING_SHELL_KEYWORDS` を除いた実行位置のコマンドが `DIRECTORY_CHANGE_COMMANDS`
         に属するなら True。
-
-    Raises:
-        例外は発生しません。
     """
     start = 0
     while start < len(segment) and segment[start] in _LEADING_SHELL_KEYWORDS:
@@ -510,9 +477,6 @@ def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
 
     Returns:
         `repo_root` 配下にあれば True。配下外、または `repo_root` の解決に失敗したら False。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         root_parts = fold_path_parts(repo_root.resolve().parts)
@@ -543,9 +507,6 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
     Returns:
         `_protected_target` / `find_host_guard_match` の表示名（`_blocked_message` が文言を選ぶ鍵）、
         または ``~/.claq/logs``。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     # heredoc のデータ本文は方言展開の前に 1 回だけ落とす（`block_no_verify` と同じ順序に
     # しないと、同じ入力でも hook によって解析対象が変わる）。
@@ -570,9 +531,6 @@ def _protected_write_hit(token: str, *, scope_certain: bool) -> str | None:
 
     Returns:
         保護対象の表示名。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     home_log_hit = _find_home_log_directory_match(token)
     if home_log_hit is not None:
@@ -616,9 +574,6 @@ def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | 
 
     Returns:
         保護対象の表示名。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     segments = split_segments(tokenize(command))
     scope_certain = not any(_changes_working_directory(segment) for segment in segments)
@@ -651,9 +606,6 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
 
     Returns:
         保護対象ファイル名。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     # 指標には PowerShell の長形式 cmdlet（`Remove-Item`）が入るため、トークン化経路の
     # 名前比較と同じ casefold で大小を無視する。
@@ -691,9 +643,6 @@ def _blocked_home_log_message(display_name: str) -> str:
 
     Returns:
         ブロック理由の文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"[Hook] BLOCKED: Writing to {display_name} via Bash is not allowed. "
@@ -715,9 +664,6 @@ def _blocked_git_config_message(display_name: str) -> str:
 
     Returns:
         ブロック理由の文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"[Hook] BLOCKED: Writing to {display_name} via Bash is not allowed. "
@@ -736,9 +682,6 @@ def _blocked_message(found: str) -> str:
 
     Returns:
         ブロック理由の文字列。
-
-    Raises:
-        例外は発生しません。
     """
     if found in GIT_CONFIG_DISPLAY_NAMES:
         return _blocked_git_config_message(found)
@@ -752,9 +695,6 @@ def main() -> int:
 
     Returns:
         終了コード（0: 許可、2: ブロック）
-
-    Raises:
-        例外は発生しません。
     """
     try:
         raw, truncated = read_raw_stdin_with_truncation()

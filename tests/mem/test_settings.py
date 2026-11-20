@@ -1,0 +1,69 @@
+"""settings のテスト。
+
+Settings はハードコード既定値のみを持つランタイム設定であり、
+永続化するランタイム状態を持たないことを検証する。
+"""
+
+from pathlib import Path
+
+import pytest
+
+from claq.lib.constants import BASE_DIR_NAME
+from claq.mem import settings as settings_mod
+from claq.mem.settings import Settings
+
+#: 削除済みの設定項目と state 永続化 API。どれも再導入しない。
+_REMOVED_ATTRIBUTES = (
+    *("context_warm_tokens", "context_warm_days", "context_max_tokens"),  # warm 層と旧トークン上限
+    *("sync", "team"),  # PostgreSQL チーム同期
+    # チャンク・自動圧縮（死コード化のため削除済み）
+    *("excluded_projects", "search_half_life_days", "chunk_max_length", "context_chunk_count"),
+    *("context_hot_tokens", "context_hot_hours", "context_digest_tokens", "context_digest_count"),
+    *("auto_compact_enabled", "auto_compact_interval_days", "last_compacted_at", "embedding_model"),
+    *("save", "load", "state_path"),  # state ファイルの読み書き
+)
+
+
+#: autouse フィクスチャが差し替える前の実装。環境変数を読む本物の経路を検査するテストで戻す。
+_REAL_DEFAULT_DATA_DIR = settings_mod._default_data_dir
+
+
+@pytest.fixture(autouse=True)
+def _patch_default_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """各テストで ~/.claq の代わりに一時ディレクトリを使う。"""
+    monkeypatch.setattr(settings_mod, "_default_data_dir", lambda: tmp_path)
+
+
+def test_defaults_and_derived_paths_without_touching_disk(tmp_path: Path) -> None:
+    """既定値と導出パスを返し、構築してもファイルを 1 つも作らない。"""
+    s = Settings()
+
+    assert (s.log_level, s.data_path, s.db_path, s.log_dir) == (
+        "info",
+        tmp_path,
+        tmp_path / "mem.db",
+        tmp_path / "logs",
+    )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_removed_settings_and_state_api_stay_absent() -> None:
+    """削除済みの設定項目・state 永続化 API が Settings に存在しない（インスタンス経由でクラス属性も見る）。"""
+    s = Settings()
+    for name in _REMOVED_ATTRIBUTES:
+        assert not hasattr(s, name), name
+
+
+def test_default_data_dir_reads_env_at_call_time(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """呼び出しのたびに、CLAQ_DATA_PATH があればそれを、無ければ CLAQ_HOME 配下の .claq をデータディレクトリにする。
+
+    利用者の環境の CLAQ_HOME / CLAQ_DATA_PATH に結果が左右されないよう、両方をテストの中で決める。
+    """
+    monkeypatch.setattr(settings_mod, "_default_data_dir", _REAL_DEFAULT_DATA_DIR)
+    custom = tmp_path / "custom-data"
+    monkeypatch.setenv("CLAQ_DATA_PATH", str(custom))
+    assert settings_mod.Settings().data_path == custom
+
+    monkeypatch.delenv("CLAQ_DATA_PATH")
+    monkeypatch.setenv("CLAQ_HOME", str(tmp_path))
+    assert settings_mod.Settings().data_path == tmp_path / BASE_DIR_NAME

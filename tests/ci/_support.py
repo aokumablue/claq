@@ -1,0 +1,40 @@
+"""tests/ci のテストが共有する補助（ファイル書き出し・repo マーカー・`python -m` 起動・HOME 隔離）。"""
+
+from __future__ import annotations
+
+import runpy
+from pathlib import Path
+
+import pytest
+
+
+def _write_files(root: Path, files: dict[str, str]) -> None:
+    """root 相対パス → 本文の対応どおりにファイルを書き出す。"""
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def _write_repo_markers(root: Path) -> None:
+    """プラグイン提供元の最小構造（plugin.json・agents・skills・harness_audit.py）を作る。"""
+    _write_files(root, {".claude-plugin/plugin.json": "{}", "src/claq/ci/harness_audit.py": ""})
+    (root / "agents").mkdir(exist_ok=True)
+    (root / "skills").mkdir(exist_ok=True)
+
+
+def _exit_code_as_main(module_name: str) -> object:
+    """モジュールを `python -m` と同じく `__main__` として実行し、SystemExit の終了コードを返す。
+
+    SystemExit で終わらなければ `pytest.raises` がテストを落とす。
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_module(module_name, run_name="__main__")
+    return excinfo.value.code
+
+
+@pytest.fixture(autouse=True)
+def _isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`find_plugin_install` が実ホームの導入状態を読まないよう、ホームを tmp 配下へ固定する。"""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("CLAQ_HOME", raising=False)

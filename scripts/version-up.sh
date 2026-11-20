@@ -98,7 +98,7 @@ target_version = sys.argv[2]
 bump_part = sys.argv[3]
 
 paths = {
-    "pyproject": repo_root / "plugins" / "claq" / "pyproject.toml",
+    "pyproject": repo_root / "pyproject.toml",
     "plugin_json": repo_root / "plugins" / "claq" / ".claude-plugin" / "plugin.json",
     "marketplace": repo_root / ".claude-plugin" / "marketplace.json",
 }

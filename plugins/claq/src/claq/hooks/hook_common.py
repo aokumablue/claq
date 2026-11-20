@@ -15,9 +15,9 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from claq.hooks.output_adapter import adapt_context_output, adapt_deny_output
 from claq.hooks.shell_tokens import basename_any_separator, normalize_executable_name
 from claq.lib.core_utils import get_home_dir
+from claq.lib.output_adapter import adapt_deny_output
 
 # `scan_memo` の with の中でだけ使う、引数ごとの結果の置き場。with の外では None（毎回計算する）。
 _scan_memo: dict[tuple[object, ...], object] | None = None
@@ -83,9 +83,6 @@ def resolve_repo_root() -> Path | None:
     Returns:
         リポジトリルートの絶対パス。タイムアウト・失敗時は None（呼び出し側が
         非ブロッキングにフォールバックする）。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         result = subprocess.run(
@@ -134,36 +131,25 @@ def basename(path: str) -> str:
 
     Returns:
         ファイル名を返します。
-
-    Raises:
-        例外は発生しません。
     """
     return Path(path).name
 
 
 def normalize_protected_name(path: str) -> str:
-    """保護対象ファイル名の照合用に basename を大小無視・Win32 正準化へ畳みます。
+    """保護対象ファイル名の照合用に basename を大小無視へ畳みます。
 
     `normalize_executable_name` と同じ case 演算（`casefold`）と basename 規則を使う。
     `Path.resolve()` は APFS / NTFS で綴りを実体の大小へ正規化しないため、
     ``Write Ruff.toml`` が実体 ``ruff.toml`` へ着地しても素の比較では外れる。
     `.exe` は落とさない（保護対象は設定ファイルで、同一視する根拠が無い）。
 
-    Windows は末尾のドットと空白を切り捨て、``:`` 以降を代替データストリーム名と
-    して扱うため、``ruff.toml.`` / ``ruff.toml`` +空白 / ``ruff.toml:x`` も
-    ``ruff.toml`` へ畳む。
-
     Args:
         path: 検査対象のパス文字列、またはファイル名です。
 
     Returns:
-        大小無視・Win32 正準化へ畳んだ basename を返します。
-
-    Raises:
-        例外は発生しません。
+        大小無視へ畳んだ basename を返します。
     """
-    name = basename_any_separator(path).split(":", 1)[0]
-    return name.rstrip(". \t").casefold()
+    return basename_any_separator(path).casefold()
 
 
 def fold_path_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
@@ -174,9 +160,6 @@ def fold_path_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
 
     Returns:
         畳んだ要素列。
-
-    Raises:
-        例外は発生しません。
     """
     return tuple(normalize_protected_name(part) for part in parts)
 
@@ -194,9 +177,6 @@ def match_folded_path_window(
 
     Returns:
         一致した候補（畳む前の綴り）。一致しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     folded_parts = fold_path_parts(parts)
     for segments in candidates:
@@ -217,9 +197,6 @@ def is_git_executable_token(token: str) -> bool:
 
     Returns:
         git 実行ファイルとみなせるなら True。
-
-    Raises:
-        例外は発生しません。
     """
     return normalize_executable_name(token) == "git"
 
@@ -247,8 +224,7 @@ INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl", "ruby"})
 # `bash_config_protection` と `pre_bash_commit_quality` が共有する。
 DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
 
-# sed の GNU 長形式 in-place フラグ。GNU getopt は曖昧でない長形式の短縮を受け付け、
-# ``sed --i`` も in-place になるため、この名前の非空プレフィックスを一致条件にする。
+# sed の GNU 長形式 in-place フラグの名前（長形式の短縮は意図して組み立てる回避形なので見ない）。
 _LONG_INPLACE_OPTION_NAME = "in-place"
 
 
@@ -256,9 +232,8 @@ def is_inplace_edit_flag(token: str) -> bool:
     """トークンが in-place 編集フラグ（`sed -i` / `perl -0pi` / `sed --in-place`）かを判定します。
 
     単一ダッシュの短形式は結合位置を問わず `i` を含むかで判定する（`-i` / `-i.bak` /
-    `-0pi` / `-ni`）。長形式は `_LONG_INPLACE_OPTION_NAME` の非空プレフィックスに
-    限る（`--in-place=.bak` は名前部分だけを見る）。区切りの `--` は名前部分が空に
-    なるため in-place とみなさない。
+    `-0pi` / `-ni`）。長形式は名前部分が `_LONG_INPLACE_OPTION_NAME` と一致するものに
+    限る（`--in-place=.bak` は名前部分だけを見る）。
 
     `bash_config_protection` と `pre_bash_commit_quality` が共有する。どちらかが
     長形式を除外すると ``sed --in-place ... && git commit -am x`` でガードが不発になる。
@@ -268,15 +243,11 @@ def is_inplace_edit_flag(token: str) -> bool:
 
     Returns:
         in-place 編集を指示するフラグなら True。
-
-    Raises:
-        例外は発生しません。
     """
     if not token.startswith("-") or token == "-":
         return False
     if token.startswith("--"):
-        name = token[2:].split("=", 1)[0]
-        return bool(name) and _LONG_INPLACE_OPTION_NAME.startswith(name)
+        return token[2:].split("=", 1)[0] == _LONG_INPLACE_OPTION_NAME
     return "i" in token[1:]
 
 
@@ -316,9 +287,6 @@ def resolve_effective_target(raw_path: str) -> Path | None:
     Returns:
         解決できた実体 Path。解決できない場合は None（fail-closed / fail-open の
         どちらに倒すかは呼び出し側が決める）。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         return (Path.cwd() / _expand_leading_tilde(raw_path)).resolve(strict=False)
@@ -342,9 +310,6 @@ def effective_basename(raw_path: str) -> str:
 
     Returns:
         判定に使う basename。
-
-    Raises:
-        例外は発生しません。
     """
     resolved = resolve_effective_target(raw_path)
     return resolved.name if resolved is not None else basename(raw_path)
@@ -364,24 +329,9 @@ def emit_block_output(reason: str) -> int:
 
     Returns:
         フックが返すべき終了コード。
-
-    Raises:
-        例外は発生しません。
     """
     with contextlib.suppress(Exception):
         write_stdout(adapt_deny_output(reason))
         write_stderr(reason + "\n")
     return 2
 
-
-def print_session_start_output(additional_context: str) -> None:
-    """SessionStart 用のフック出力を stdout に書き出す。
-
-    Args:
-        additional_context: コンテキストに注入する追加文字列。
-
-    Raises:
-        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
-        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
-    """
-    print(adapt_context_output("SessionStart", additional_context))

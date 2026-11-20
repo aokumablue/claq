@@ -1,7 +1,7 @@
 """知識カード入力の検証 — ``mem learn`` が使う唯一の入口。
 
 ``knowledge`` テーブルの CHECK 制約（``kind`` 6 値 / ``scope`` 2 値 /
-``status`` 3 値 / ``source`` 3 値 / ``confidence`` 0.0〜1.0）を、DB へ到達する
+``status`` 3 値 / ``source`` 1 値 / ``confidence`` 0.0〜1.0）を、DB へ到達する
 前に Python 側で強制する。現在の入力経路は ``mem learn``（stdin の JSON。
 人間・エージェントが明示的に書く）の1つのみ。
 
@@ -32,10 +32,10 @@ import re
 from dataclasses import dataclass, fields
 from typing import Any
 
+from claq.lib.redaction import redact_knowledge_text
+from claq.lib.tag_stripping import keep_allowed_chars
 from claq.mem.models import Knowledge, utc_now_iso
-from claq.mem.redaction import redact_knowledge_text
 from claq.mem.repo_identity import slugify
-from claq.mem.tag_stripping import keep_allowed_chars
 
 KINDS: frozenset[str] = frozenset({"convention", "decision", "pitfall", "howto", "fact", "preference"})
 """``knowledge.kind`` の許容値。スキーマの CHECK 制約と 1 対 1 で対応する。"""
@@ -315,7 +315,7 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     """
     # `.strip()` は前後しか落とさず、内部の改行は DB へ入る。title は注入時に
     # `- [kind] title` の 1 行として描かれる契約なので、改行が残ると 1 枚のカードが
-    # 複数行に割れ、偽の知識カード行を注入枠の内側に作れる（実測済み）。
+    # 複数行に割れ、偽の知識カード行を注入枠の内側に作れる。
     title = " ".join(keep_allowed_chars(str(payload.get("title") or "")).split())
     if not title:
         raise KnowledgeInputError("learn: title は必須です")

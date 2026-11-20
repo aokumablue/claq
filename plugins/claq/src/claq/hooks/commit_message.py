@@ -25,9 +25,6 @@ def _message_issue(kind: str, message: str, suggestion: str) -> dict:
 
     Returns:
         type / message / suggestion を持つ辞書。
-
-    Raises:
-        例外は発生しません。
     """
     return {"type": kind, "message": message, "suggestion": suggestion}
 
@@ -40,9 +37,6 @@ def _commit_message_issues(message: str) -> list[dict]:
 
     Returns:
         問題辞書のリスト。問題がなければ空リスト。
-
-    Raises:
-        例外は発生しません。
     """
     issues: list[dict] = []
     conventional = _CONVENTIONAL_COMMIT.match(message)
@@ -89,9 +83,6 @@ def validate_commit_message(command: str) -> dict | None:
 
     Returns:
         メッセージと問題一覧を含む辞書、またはメッセージがない場合は None を返します。
-
-    Raises:
-        例外は発生しません。
     """
     message_match = re.search(r"(?:-m|--message)[=\s]+[\"']?([^\"']+)[\"']?", command)
     if not message_match:

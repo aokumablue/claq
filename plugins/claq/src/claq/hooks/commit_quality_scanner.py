@@ -82,7 +82,7 @@ _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "Pipfile.lock",
 }
 _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
-    # ベンダ prefix の集合は `claq.mem.redaction._PATTERNS` と揃える（記録時はマスクするが
+    # ベンダ prefix の集合は `claq.lib.redaction._PATTERNS` と揃える（記録時はマスクするが
     # commit 時は検出しない秘密を作らないため）。
     #
     # `sk-` の文字クラスに `-` を含めるのは、OpenAI の現行形式がハイフンを含むため。
@@ -94,11 +94,8 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"xox[bpoa]-[a-zA-Z0-9-]{10,}", "Slack token"),
     (r"AIza[a-zA-Z0-9_-]{35}", "Google API key"),
     (r"(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}", "AWS Access Key"),
-    # `eyJ` の直前に base64url 文字が無いことを要求する（lookbehind）。無いと `eyJeyJeyJ…`
-    # で 3 バイトごとに開始位置が立ち、各位置が残り全体を貪欲に取って後退するため走査が
-    # 二次オーダーへ落ち、hook timeout を桁で超える。量指定子も所有的にして後退を禁じる
-    # （直後の `\.` は文字クラスと素なので一致集合は変わらない）。代償として base64url
-    # 文字へ続く `eyJ` は一致しないが、JWT の実物は区切りの直後に現れる。
+    # `eyJ` の直前に base64url 文字を許さない lookbehind と所有的量指定子で、`eyJeyJ…` の入力でも
+    # 走査を線形に保つ（二次オーダーだと hook timeout を超える）。
     (r"(?<![a-zA-Z0-9_-])eyJ[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]*+", "JWT"),
     # 認証情報の代入。クォートを任意にすると `token = segment[index]` のような通常の
     # コード代入まで拾い、commit をブロックするフックの可用性を壊す。そのため
@@ -145,9 +142,6 @@ def _monotonic() -> float:
 
     Returns:
         単調増加する時刻（秒）。
-
-    Raises:
-        例外は発生しません。
     """
     return time.monotonic()
 
@@ -160,9 +154,6 @@ def new_secret_scan_deadline() -> float:
 
     Returns:
         `_monotonic()` 基準で走査を打ち切るべき時刻（秒）。
-
-    Raises:
-        例外は発生しません。
     """
     return _monotonic() + _SECRET_SCAN_TIME_BUDGET_SECONDS
 
@@ -228,9 +219,6 @@ def _is_binary_content(content: str) -> bool:
 
     Returns:
         バイナリファイルとみなすなら True を返します。
-
-    Raises:
-        例外は発生しません。
     """
     return "\0" in content[:_BINARY_SNIFF_SIZE]
 
@@ -251,9 +239,6 @@ def _extract_printable_runs(content: str) -> list[str]:
 
     Returns:
         抽出した印字可能文字列（行単位）のリストを返します。
-
-    Raises:
-        例外は発生しません。
     """
     return [line for run in _BINARY_STRINGS_RE.findall(content) for line in run.splitlines()]
 
@@ -275,9 +260,6 @@ def _decode_scan_text(raw: bytes) -> str:
 
     Returns:
         UTF-8 の復号結果。BOM 付きで追加復号できたときはその後ろに復号本文を足した文字列。
-
-    Raises:
-        例外は発生しません。
     """
     text = raw.decode("utf-8", errors="replace")
     for bom, codec in _BOM_CODECS:
@@ -305,9 +287,6 @@ def get_staged_file_content(file_path: str) -> str | None:
 
     Returns:
         ファイル内容の文字列。取得できない場合は None を返します。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         result = subprocess.run(
@@ -345,9 +324,6 @@ def get_worktree_file_content(repo_root: Path, file_path: str) -> str | None:
     Returns:
         ファイル内容の文字列（symlink は link 先文字列）。読み取れない・repo_root 外の
         場合は None を返します。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         base = repo_root.resolve()
@@ -372,9 +348,6 @@ def should_lint_file(file_path: str) -> bool:
 
     Returns:
         lint チェック対象なら True を返します。
-
-    Raises:
-        例外は発生しません。
     """
     return Path(file_path).suffix in _LINTABLE_SUFFIXES
 
@@ -391,9 +364,6 @@ def should_scan_secrets(file_path: str) -> bool:
 
     Returns:
         シークレットスキャン対象なら True を返します。
-
-    Raises:
-        例外は発生しません。
     """
     name = Path(file_path).name
     if name in _SECRET_SCAN_EXCLUDED_FILENAMES:
@@ -413,7 +383,7 @@ def _neutralize_one_line(text: str) -> str:
     行区切りを残すと、抜粋やパスに続けて `[Hook] PASS` のような行を偽装できる。この順序（許可リスト
     →タグ→改行畳み）は抜粋と表示パスで共通なので、1 箇所に閉じる。
 
-    `claq.mem.tag_stripping` は commit の検査結果を整形するときだけ要る。全 Bash 起動で読み込むと
+    `claq.lib.tag_stripping` は commit の検査結果を整形するときだけ要る。全 Bash 起動で読み込むと
     import 時間に効くため、ここで遅延 import する。
 
     Args:
@@ -421,11 +391,8 @@ def _neutralize_one_line(text: str) -> str:
 
     Returns:
         改行を含まない無害化済みの文字列。
-
-    Raises:
-        例外は発生しません。
     """
-    from claq.mem.tag_stripping import keep_allowed_chars, strip_tags
+    from claq.lib.tag_stripping import keep_allowed_chars, strip_tags
 
     return _LINE_BREAKS.sub(" ", strip_tags(keep_allowed_chars(text)))
 
@@ -444,9 +411,6 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
 
     Returns:
         タグを無害化し上限で切り詰めた抜粋。
-
-    Raises:
-        例外は発生しません。
     """
     sanitized = _neutralize_one_line(text.strip()).strip()
     if len(sanitized) > _UNTRUSTED_EXCERPT_MAX_CHARS:
@@ -472,9 +436,6 @@ def sanitize_untrusted_path(path: str) -> str:
 
     Returns:
         タグを無害化し、1 行に畳んだ表示用のパス。
-
-    Raises:
-        例外は発生しません。
     """
     return _neutralize_one_line(path)
 
@@ -490,9 +451,6 @@ def _issue(kind: str, message: str, *, line: int, severity: str) -> dict:
 
     Returns:
         type / message / line / severity を持つ辞書を返します。
-
-    Raises:
-        例外は発生しません。
     """
     return {"type": kind, "message": message, "line": line, "severity": severity}
 
@@ -591,9 +549,6 @@ def _scan_error_issue(file_path: str, stage: str, err: Exception) -> dict:
 
     Returns:
         severity が ``"error"``（ブロック対象）の issue 辞書。
-
-    Raises:
-        例外は発生しません。
     """
     error_type = type(err).__name__
     shown_path = sanitize_untrusted_path(file_path)

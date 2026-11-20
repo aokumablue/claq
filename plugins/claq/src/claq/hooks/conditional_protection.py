@@ -19,8 +19,8 @@ from typing import Any, NoReturn
 from claq.hooks.edit_text import read_current_text, text_after_edit
 from claq.hooks.git_config_text import GitConfigParseError, adds_sensitive_entries
 from claq.hooks.hook_common import memoized_in_scan, normalize_protected_name
-from claq.hooks.stdin_io import MAX_STDIN_BYTES
 from claq.lib.harness import normalize_tool_name
+from claq.lib.stdin_io import MAX_STDIN_BYTES
 
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
 # サブセクションも拾うため prefix 一致にする。`[testenv` は tox.ini の
@@ -87,9 +87,6 @@ def _editable_text(tool_name: str, container: Any) -> list[str] | None:
     Returns:
         検査対象テキストの断片リスト。1 つも取り出せなければ None
         （呼び出し側は fail-closed として扱うこと）。
-
-    Raises:
-        例外は発生しません。
     """
     if tool_name == "apply_patch":
         text = container.get("input") if isinstance(container, dict) else container
@@ -125,9 +122,6 @@ def _section_header(line: str) -> str | None:
 
     Returns:
         ``[`` で始まり ``]`` で終わるなら見出し、それ以外は None。
-
-    Raises:
-        例外は発生しません。
     """
     stripped = line.strip()
     return stripped if stripped.startswith("[") and stripped.endswith("]") else None
@@ -146,9 +140,6 @@ def _read_section_index(file_path: str) -> tuple[str, list[int], list[str | None
 
     Returns:
         (読んだ本文, 各行の開始位置, 各行より前で最後に現れた見出し)。読めない・見つからない場合は None。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         path = Path(file_path)
@@ -187,9 +178,6 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
         True: lint 系セクションに属すると判定できた。
         False: 読めた上で lint 系セクションではないと判定できた。
         None: 読めない・見つからない等、判定不能。
-
-    Raises:
-        例外は発生しません。
     """
     if not snippet:
         return None
@@ -225,9 +213,6 @@ def _text_has_protected_signal(text: str, file_name: str) -> bool:
 
     Returns:
         lint/format/coverage 設定を弱めうる兆候があれば True。
-
-    Raises:
-        例外は発生しません。
     """
     # ファイル別分岐も畳んだ名前で選ぶ（``Package.json`` を専用のキー照合へ落とすため）。
     folded_name = normalize_protected_name(file_name)
@@ -248,9 +233,6 @@ def _conditional_blocked_message(file_name: str) -> str:
 
     Returns:
         ブロック理由文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"BLOCKED: The change to {file_name} appears to touch a protected setting "
@@ -269,9 +251,6 @@ def _unverifiable_conditional_message(file_name: str) -> str:
 
     Returns:
         ブロック理由文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"BLOCKED: Could not determine the content of the change to {file_name} "
@@ -327,9 +306,6 @@ def _settings_guarded_view(settings: dict[str, Any]) -> dict[str, Any]:
 
     Returns:
         ``_SETTINGS_GUARDED_SUBTREES`` の部分木（存在するもののみ）と ``env`` の保護対象の名前。
-
-    Raises:
-        例外は発生しません。
     """
     view = {key: settings[key] for key in _SETTINGS_GUARDED_SUBTREES if key in settings}
     env = settings.get("env", {})
@@ -350,9 +326,6 @@ def _settings_blocked_message(file_name: str) -> str:
 
     Returns:
         ブロック理由文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"BLOCKED: The change to {file_name} changes a setting that can disable the protection hooks "
@@ -371,9 +344,6 @@ def _settings_unverifiable_message(file_name: str) -> str:
 
     Returns:
         ブロック理由文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"BLOCKED: The change to {file_name} could not be verified: the result must be a plain JSON object "
@@ -398,9 +368,6 @@ def _settings_block_reason(tool_name: str, container: Any, file_path: str, file_
 
     Returns:
         ブロック理由。問題なければ None。
-
-    Raises:
-        例外は発生しません。
     """
     before = read_current_text(file_path, _FULL_TEXT_MAX_BYTES + 1)
     if len(before) > _FULL_TEXT_MAX_BYTES:
@@ -439,9 +406,6 @@ def conditional_block_reason(tool_name: str, container: Any, file_path: str, fil
 
     Returns:
         ブロック理由。問題なければ None。
-
-    Raises:
-        例外は発生しません。
     """
     if normalize_protected_name(file_name) in ("settings.json", "settings.local.json"):
         return _settings_block_reason(tool_name, container, file_path, file_name)
@@ -463,9 +427,6 @@ def _git_config_blocked_message(display_name: str) -> str:
 
     Returns:
         ブロック理由文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"BLOCKED: The change to {display_name} adds or changes a key that can disable git hooks "
@@ -484,9 +445,6 @@ def _git_config_unparsable_message(display_name: str) -> str:
 
     Returns:
         ブロック理由文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"BLOCKED: The change to {display_name} could not be verified: the resulting file does not "
@@ -511,9 +469,6 @@ def git_config_block_reason(tool_name: str, container: Any, file_path: str, disp
 
     Returns:
         ブロック理由。問題なければ None。
-
-    Raises:
-        例外は発生しません。
     """
     before = read_current_text(file_path, _FULL_TEXT_MAX_BYTES + 1)
     if len(before) > _FULL_TEXT_MAX_BYTES:

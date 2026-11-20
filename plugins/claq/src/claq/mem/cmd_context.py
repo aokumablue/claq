@@ -10,16 +10,17 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from claq.hooks.detach import recent_bg_failure_notice
 from claq.lib.core_utils import get_plugin_root
+from claq.lib.detach import recent_bg_failure_notice
 from claq.lib.env_pointer import ancestor_pointers_supported
 from claq.lib.harness import normalize_user_message
+from claq.lib.redaction import redact
+from claq.lib.tag_stripping import keep_allowed_chars, keep_allowed_chars_for_injection, strip_tags
 from claq.mem.command_support import CommandArgs, fit_budget, session_uid_of
 from claq.mem.database import Database
 from claq.mem.handoff import build_handoff, truncate_handoff
 from claq.mem.knowledge_input import optional_str
 from claq.mem.models import Knowledge, Session, utc_now_iso
-from claq.mem.redaction import redact
 from claq.mem.repo_identity import resolve_repo
 from claq.mem.settings import (
     CONTEXT_GLOBAL_CHAR_BUDGET,
@@ -27,7 +28,6 @@ from claq.mem.settings import (
     CONTEXT_REPO_CHAR_BUDGET,
     Settings,
 )
-from claq.mem.tag_stripping import keep_allowed_chars, keep_allowed_chars_for_injection, strip_tags
 
 # --- SessionStart への知識注入 ---
 

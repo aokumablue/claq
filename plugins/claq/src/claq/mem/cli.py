@@ -34,8 +34,8 @@ import sys
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from claq.hooks.hook_common import print_session_start_output
-from claq.hooks.stdin_io import read_raw_stdin
+from claq.lib.output_adapter import print_session_start_output
+from claq.lib.stdin_io import read_raw_stdin
 from claq.mem import logger as mem_logger
 from claq.mem.cmd_context import handle_context, handle_handoff
 from claq.mem.cmd_knowledge import (
@@ -61,7 +61,7 @@ _BOOL_FLAGS: frozenset[str] = frozenset({"--global", "--repo", "--json"})
 
 # stdin の JSON を実際に使う subcommand。これ以外は stdin を読まない。
 # 無条件に読むと、書き手が pipe を閉じない呼ばれ方で `list` / `search` / `show`
-# まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされ（実測 2.10 秒）、渡すべき stdin が
+# まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされ、渡すべき stdin が
 # 無いのに「stdin リダイレクト漏れの可能性」と誤って警告する。
 _STDIN_COMMANDS: frozenset[str] = frozenset({"learn", "context", "handoff"})
 

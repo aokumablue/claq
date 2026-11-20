@@ -1,0 +1,434 @@
+"""claq.mem.knowledge_input のテスト"""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+from contextlib import closing
+from itertools import pairwise
+
+import pytest
+
+from claq.mem.knowledge_input import (
+    DEFAULT_CONFIDENCE,
+    KINDS,
+    SCOPES,
+    STATUSES,
+    KnowledgeDraft,
+    KnowledgeInputError,
+    coerce_confidence,
+    generate_key,
+    optional_str,
+    parse_knowledge_payload,
+    validate_choice,
+)
+from claq.mem.schema import SCHEMA_SQL
+
+# シークレット様のリテラルは連結で組み立てる（コミット品質フックの自己スキャンが
+# このファイル自体を secret として検出しないようにするため）。
+_GITHUB_PAT = "ghp_" + "1234567890abcdef1234567890abcdef1234"
+_OTHER_GITHUB_PAT = "ghp_" + "9876543210fedcba9876543210fedcba9876"
+_ANTHROPIC_KEY = "sk-ant-" + "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+class TestGenerateKey:
+    """key の自動生成規則。"""
+
+    @pytest.mark.parametrize(
+        ("title", "kind", "expected"),
+        [
+            ("pytest をパイプする際は set -o pipefail が必須", "pitfall", "pytest-set-o-pipefail"),
+            ("use ci for checks", "convention", "use-ci-for-checks"),
+            ("Keep [REDACTED] out of titles", "pitfall", "keep-redacted-out-of-titles"),
+        ],
+        ids=["ascii-tokens-in-japanese", "three-or-more-chars", "bracketed-redacted"],
+    )
+    def test_ascii_title_becomes_stable_slug(self, title: str, kind: str, expected: str) -> None:
+        """ASCII が 3 文字以上残る title は ASCII トークンだけの安定した slug になる。"""
+        assert generate_key(title, kind) == generate_key(title, kind) == expected
+
+    @pytest.mark.parametrize(
+        ("title", "kind"),
+        [
+            ("テーブル定義変更は移行不要", "decision"),
+            ("指示文書の列挙を『上記 N 種』と個数で参照しない", "convention"),
+            ("md の構造テストで見出しを収集する", "pitfall"),
+        ],
+        ids=["no-ascii", "one-ascii-char", "two-ascii-chars"],
+    )
+    def test_short_slug_falls_back_to_kind_and_hash(self, title: str, kind: str) -> None:
+        """ASCII が 0〜2 文字の title は kind + 8 桁ハッシュの決定的 key になる。
+
+        ``n`` や ``md`` のような極端に短い key は、次に ASCII を 1〜2 文字だけ
+        含む別の title と衝突し、upsert で既存カードを上書きしてしまう。
+        """
+        key = generate_key(title, kind)
+        assert re.fullmatch(rf"{kind}-[0-9a-f]{{8}}", key)
+        assert key == generate_key(title, kind)
+
+    def test_hash_fallback_keeps_short_ascii_titles_apart(self) -> None:
+        """同じ 1 文字 ASCII を含む別の title は別の key になる（fallback が無いとどちらも "n"）。"""
+        assert generate_key("指示文書の列挙を『上記 N 種』と個数で参照しない", "convention") != generate_key(
+            "結論は N 件に絞る", "convention"
+        )
+
+
+class TestScalarHelpers:
+    """列挙値・確信度・任意文字列の変換。"""
+
+    def test_validate_choice_passes_through_allowed_value(self) -> None:
+        """許可された値はそのまま返る。"""
+        assert validate_choice("kind", "fact", KINDS) == "fact"
+
+    def test_validate_choice_lists_allowed_values_in_message(self) -> None:
+        """エラーメッセージに許可値を並べる。"""
+        with pytest.raises(KnowledgeInputError, match="kind は .*fact"):
+            validate_choice("kind", "rumor", KINDS)
+
+    @pytest.mark.parametrize(("value", "expected"), [(None, DEFAULT_CONFIDENCE), ("0.25", 0.25)])
+    def test_confidence_accepts_missing_and_numeric_string(self, value: object, expected: float) -> None:
+        """None は既定値へ倒し、数値文字列は float へ変換する。"""
+        assert coerce_confidence(value) == expected
+
+    @pytest.mark.parametrize(
+        ("value", "match"),
+        [
+            ("high", "confidence は数値"),
+            (["0.5"], "confidence は数値"),
+            (-0.1, "confidence は 0.0〜1.0"),
+            (1.5, "confidence は 0.0〜1.0"),
+        ],
+    )
+    def test_confidence_rejects_non_numeric_and_out_of_range(self, value: object, match: str) -> None:
+        """数値化できない値と 0.0〜1.0 の外は拒否する。"""
+        with pytest.raises(KnowledgeInputError, match=match):
+            coerce_confidence(value)
+
+    @pytest.mark.parametrize(("value", "expected"), [(None, None), ("", None), ([], None), ("git", "git")])
+    def test_optional_str(self, value: object, expected: str | None) -> None:
+        """空でない値だけ文字列化する。"""
+        assert optional_str(value) == expected
+
+
+class TestParseKnowledgePayload:
+    """ペイロード全体の検証。"""
+
+    def test_minimal_payload_fills_defaults(self) -> None:
+        """必須項目だけの入力は既定値で埋まる（source 既定 agent → status 既定 pending）。"""
+        draft = parse_knowledge_payload({"kind": "howto", "title": "run pytest with pipefail"})
+        assert draft == KnowledgeDraft(
+            key="run-pytest-with-pipefail",
+            scope="repo",
+            kind="howto",
+            title="run pytest with pipefail",
+            body="",
+            domain=None,
+            confidence=DEFAULT_CONFIDENCE,
+            source_ref=None,
+        )
+        card = draft.to_knowledge(None)
+        assert (card.source, card.status) == ("agent", "pending")
+
+    def test_explicit_default_source_and_status_are_kept(self) -> None:
+        """既定値と同じ値の明示（source=agent, status=pending）は無害なので許可する。"""
+        draft = parse_knowledge_payload({"kind": "fact", "title": "t", "source": "agent", "status": "pending"})
+        card = draft.to_knowledge(None)
+        assert (card.source, card.status) == ("agent", "pending")
+
+    def test_explicit_key_and_fields_are_kept(self) -> None:
+        """明示された key と任意項目はそのまま残る。"""
+        draft = parse_knowledge_payload(
+            {
+                "key": "pipefail",
+                "scope": "global",
+                "kind": "pitfall",
+                "title": "set -o pipefail",
+                "body": "パイプ先の失敗を拾う",
+                "domain": "testing",
+                "confidence": 0.9,
+                "source_ref": "CLAUDE.md",
+            }
+        )
+        assert (draft.key, draft.scope, draft.domain, draft.source_ref) == ("pipefail", "global", "testing", "CLAUDE.md")
+
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            ({"kind": "fact"}, "title は必須です"),
+            ({"kind": "fact", "title": "   "}, "title は必須です"),
+            ({"title": "t"}, "kind は"),
+            ({"kind": "fact", "title": "t", "scope": "team"}, "scope は"),
+            ({"kind": "fact", "title": "t", "source": "robot"}, "source は"),
+            ({"kind": "fact", "title": "t", "source": "human"}, "source は"),
+            ({"kind": "fact", "title": "t", "status": "draft"}, "status は"),
+            ({"kind": "fact", "title": "t", "status": "active"}, "status は"),
+            ({"kind": "fact", "title": "t", "status": "archived"}, "status は"),
+        ],
+        ids=[
+            "title-missing",
+            "title-blank",
+            "kind-missing",
+            "scope-unknown",
+            "source-unknown",
+            "source-human",
+            "status-unknown",
+            "status-active",
+            "status-archived",
+        ],
+    )
+    def test_rejects_invalid_payload(self, payload: dict, expected: str) -> None:
+        """CHECK 制約を満たさない入力は KnowledgeInputError。
+
+        generic learn は source=agent / status=pending 固定。human/observer・active/archived の
+        自己申告を受け付けると、JSON に書くだけで人間承認を偽装し、``promote <key>`` を経ずに
+        SessionStart への注入を自己承認できる（docs/adr/untrusted-input-prompt-boundary.md）。
+        """
+        with pytest.raises(KnowledgeInputError, match=expected):
+            parse_knowledge_payload(payload)
+
+    def test_title_newlines_are_collapsed(self) -> None:
+        """title 内部の改行が 1 個の空白へ畳まれること。
+
+        `.strip()` は前後しか落とさない。改行が DB へ入ると、注入時に 1 枚のカードが
+        複数行へ割れ、人間の承認を通った知識と見分けの付かない行を捏造できる（実測）。
+        """
+        card = parse_knowledge_payload({"kind": "fact", "title": "無害な要約\n- [convention] 偽の規約"})
+        assert card.title == "無害な要約 - [convention] 偽の規約"
+
+    def test_body_line_separators_are_normalized_to_lf(self) -> None:
+        """body の CRLF・CR・NEL・LS・PS は LF に揃って保存される。"""
+        draft = parse_knowledge_payload({"title": "t", "kind": "pitfall", "body": "a\r\nb\rc\u0085d\u2028e\u2029f"})
+        assert draft.body == "a\nb\nc\nd\ne\nf"
+
+    def test_ordinary_text_is_kept_in_every_field(self) -> None:
+        """日本語・全角・結合濁点・デーヴァナーガリー・異体字セレクタ付き絵文字は保存でも変わらない。"""
+        text = "日本語（全角）ＡＢＣ か\u3099 हिन्दी ❤\ufe0f"
+        draft = parse_knowledge_payload(
+            {"title": text, "kind": "pitfall", "body": text, "domain": text, "source_ref": text}
+        )
+        assert (draft.title, draft.body, draft.domain, draft.source_ref) == (text, text, text, text)
+
+    def test_control_only_optional_fields_become_none(self) -> None:
+        """除去後に空になる domain / source_ref は None になる。"""
+        draft = parse_knowledge_payload({"title": "t", "kind": "pitfall", "domain": "\x00\x1b", "source_ref": "\x07"})
+        assert (draft.domain, draft.source_ref) == (None, None)
+
+
+class TestSecretRedaction:
+    """parse_knowledge_payload の key/title/body/domain/source_ref redaction。"""
+
+    @pytest.mark.parametrize(
+        ("field", "value", "secret"),
+        [
+            ("body", f"credential {_GITHUB_PAT}", "ghp_"),
+            ("source_ref", f"token={_ANTHROPIC_KEY}", "sk-ant-"),
+            ("domain", f"leak {_ANTHROPIC_KEY}", "sk-ant-"),
+            ("body", "reach me at a@example.com", "a@example.com"),
+        ],
+        ids=["github-pat-in-body", "anthropic-key-in-source-ref", "anthropic-key-in-domain", "email-in-body"],
+    )
+    def test_secret_in_field_is_redacted(self, field: str, value: str, secret: str) -> None:
+        """既知プレフィックス系シークレットと email は、どの自由記述欄でもマスクされる。"""
+        draft = parse_knowledge_payload({"kind": "fact", "title": "secret probe", field: value})
+        stored = getattr(draft, field)
+        assert secret not in stored
+        assert "[REDACTED]" in stored
+
+    def test_commit_sha_in_body_is_not_redacted(self) -> None:
+        """40 桁の commit SHA は汎用エントロピーパターンの対象外のため保持される。
+
+        handoff.py がパスへの redact 適用を避けているのと同じ理由。
+        """
+        sha = "a" * 40
+        draft = parse_knowledge_payload({"kind": "fact", "title": "commit ref", "body": f"see commit {sha}"})
+        assert sha in draft.body
+        assert "[REDACTED]" not in draft.body
+
+    def test_key_is_stable_regardless_of_secret_in_body(self) -> None:
+        """body に secret が有る/無いで key が変わらない（key は title から生成）。"""
+        plain = parse_knowledge_payload({"kind": "fact", "title": "same title", "body": "plain"})
+        leaky = parse_knowledge_payload({"kind": "fact", "title": "same title", "body": f"credential {_GITHUB_PAT}"})
+        assert plain.key == leaky.key
+
+    def test_key_generation_uses_redacted_title_when_title_itself_is_a_secret(self) -> None:
+        """title 自体がシークレット様でも、key は redact 後の title から生成され断片を含まない。"""
+        title = "token" + "=hunter2hunter2hunter2secret!!"
+        draft = parse_knowledge_payload({"kind": "fact", "title": title})
+        assert "hunter2" not in draft.key
+        assert draft.key == generate_key(title, "fact")
+
+    def test_secret_titles_keep_stable_and_distinct_keys(self) -> None:
+        """同じ secret 入り title は同じ key、redact 後に同一へ潰れる別 secret は別 key になる。
+
+        同一 key に落ちることで再 learn が upsert になり、別 key になることで key 衝突による
+        情報混同を防ぐ。どの key にも secret 断片は残らない。
+        """
+
+        def key_of(title: str) -> str:
+            """pitfall として title を parse した key を返す。"""
+            return parse_knowledge_payload({"kind": "pitfall", "title": title}).key
+
+        repeated = f"Keep {_GITHUB_PAT} out of titles"
+        safe_a, safe_b = key_of(f"Keep {_GITHUB_PAT} safe"), key_of(f"Keep {_OTHER_GITHUB_PAT} safe")
+        assert key_of(repeated) == key_of(repeated)
+        assert safe_a != safe_b
+        assert not any("ghp_" in key for key in (key_of(repeated), safe_a, safe_b))
+
+    def test_explicit_key_with_secret_is_redacted(self) -> None:
+        """payload の明示 ``key`` もシークレット断片を素通りさせない。"""
+        assert "ghp_" not in parse_knowledge_payload({"kind": "fact", "title": "t", "key": _GITHUB_PAT}).key
+
+    @pytest.mark.parametrize(
+        ("separators", "cuts"),
+        [
+            ("\x00\x1b", (8, 20)),
+            ("\u200b\u200d\u202e\U000e0041", (8, 14, 20, 26)),
+            ("\u034f\ufe0f\U000e0100\u3164\u2800", (8, 12, 16, 20, 24)),
+        ],
+        ids=["nul-esc", "zwsp-zwj-bidi-tag", "cgj-vs-ivs-hangul-filler-braille-blank"],
+    )
+    def test_split_secret_is_rejoined_before_redaction(self, separators: str, cuts: tuple[int, ...]) -> None:
+        """制御文字・不可視文字・filler で分断した鍵も、除去で 1 本に戻してから redact されて保存されない。
+
+        redact より後に除去すると、分断された鍵は redact に一致せず保存され、注入側の除去で
+        再結合して鍵のまま載る。
+        """
+        bounds = (0, *cuts, len(_ANTHROPIC_KEY))
+        parts = [_ANTHROPIC_KEY[start:end] for start, end in pairwise(bounds)]
+        split = "".join(part + sep for part, sep in zip(parts, (*separators, ""), strict=True))
+        draft = parse_knowledge_payload(
+            {
+                "title": f"t {split}",
+                "body": f"b {split}\nline2",
+                "domain": split,
+                "source_ref": split,
+                "key": split,
+                "kind": "pitfall",
+            }
+        )
+        for field in (draft.key, draft.title, draft.body, draft.domain, draft.source_ref):
+            assert "sk-ant-" not in field
+            assert not any(ch in field for ch in separators)
+        for field in (draft.title, draft.body, draft.domain, draft.source_ref):
+            assert "[REDACTED]" in field
+        assert "\n" in draft.body
+
+
+class TestToKnowledge:
+    """KnowledgeDraft から Knowledge への変換。"""
+
+    @staticmethod
+    def _draft(scope: str = "repo") -> KnowledgeDraft:
+        """テスト用の下書きを作る。"""
+        return parse_knowledge_payload({"kind": "fact", "title": "t", "scope": scope})
+
+    def test_repo_scope_binds_repo_id(self) -> None:
+        """repo スコープは repo_id を持つ Knowledge になる。"""
+        draft = self._draft()
+        knowledge = draft.to_knowledge("claq-dev")
+        assert (knowledge.scope, knowledge.repo_id, knowledge.key) == ("repo", "claq-dev", draft.key)
+        assert knowledge.created_at == knowledge.updated_at
+
+    def test_global_scope_leaves_repo_id_none(self) -> None:
+        """global スコープは repo_id が None。"""
+        assert self._draft("global").to_knowledge(None).repo_id is None
+
+
+class TestExplicitKeyHashFallback:
+    """ASCII を含まない明示 key が同じ slug へ潰れて上書きし合う退行を防ぐ。"""
+
+    @staticmethod
+    def _key_for(explicit_key: str) -> str:
+        """明示 key を渡した learn payload から確定 key を取り出す。"""
+        return parse_knowledge_payload({"title": "タイトル", "kind": "fact", "key": explicit_key, "body": "本文"}).key
+
+    def test_non_ascii_explicit_keys_do_not_collide(self) -> None:
+        """異なる非 ASCII 明示 key が別々の key に落ち、同じ明示 key からは常に同じ key が出ること。
+
+        ハッシュ fallback が無いと slugify の FALLBACK_SLUG により全て `repo` へ
+        潰れ、upsert で別の知識カードを黙って上書きする。
+        """
+        keys = [self._key_for(k) for k in ("日本語", "別", "中文キー", "한국어")]
+        assert len(set(keys)) == len(keys), keys
+        assert all(key != "repo" for key in keys), keys
+        assert self._key_for("日本語") == keys[0]
+
+    def test_ascii_explicit_key_is_unchanged(self) -> None:
+        """十分な ASCII を含む明示 key はそのまま slug 化されること。"""
+        assert self._key_for("runtime-no-venv") == "runtime-no-venv"
+
+
+# --------------------------------------------------------------------------
+# 列挙値と SQL CHECK 句の突き合わせ
+#
+# 「許可値 1 つが通る・別の 1 つが弾かれる」サンプル検査だけでは、集合の
+# 完全一致も `schema.py` の CHECK 句との一致も見られない。たとえば `KINDS` へ
+# "insight" を足すと全テストが緑のまま `learn` が受理し、INSERT 時に sqlite の
+# CHECK で IntegrityError になる（Python 層と DB 層の食い違いが実行時まで露見
+# しない）。
+#
+# CHECK 句を正規表現で読み取るのではなく、実スキーマからインメモリ DB を作って
+# 値ごとに INSERT を試す。SQL の書き方が変わっても判定がずれないうえ、これ自体が
+# 「どの値が通り、どの値が弾かれるか」の block/allow 表になる。
+# --------------------------------------------------------------------------
+
+# 各列挙の期待内容。ここを通さずに実装側だけ増やせないようにする関門。
+_EXPECTED_KINDS = frozenset({"convention", "decision", "pitfall", "howto", "fact", "preference"})
+_EXPECTED_SCOPES = frozenset({"global", "repo"})
+_EXPECTED_STATUSES = frozenset({"active", "pending", "archived"})
+
+# 「増やされそうだが許可されていない」値。allow 側だけの表では、一律で受理する
+# 実装が緑になってしまうため、非メンバーを同じ表に載せる。
+_REJECTED_KINDS = frozenset({"insight", "rumor", "note", "convention2", ""})
+_REJECTED_SCOPES = frozenset({"team", "org", "local", "Global", ""})
+_REJECTED_STATUSES = frozenset({"draft", "promoted", "deleted", "Active", ""})
+
+
+def _insert_accepted(conn: sqlite3.Connection, *, kind: str, scope: str, status: str) -> bool:
+    """1 行 INSERT を試し、CHECK 句に受理されたかを返す（``global`` のときだけ ``repo_id`` を NULL にする）。"""
+    try:
+        conn.execute(
+            "INSERT INTO knowledge (key, scope, repo_id, kind, title, status, source,"
+            " created_at, updated_at) VALUES (?, ?, ?, ?, 't', ?, 'agent', 't0', 't0')",
+            (f"{kind}|{scope}|{status}", scope, None if scope == "global" else "demo", kind, status),
+        )
+    except sqlite3.IntegrityError:
+        return False
+    return True
+
+
+def test_enum_sets_are_exactly_as_declared() -> None:
+    """kind 6 値 / scope 2 値 / status 3 値が完全一致で固定されていること。
+
+    下の DB 突き合わせは Python 側の集合を入力にするため、値を増減させても
+    それ自体では赤くならない（増えた値が DB でも通れば両者は一致する）。
+    語彙の増減を意識的な変更に限定する関門はこちら。
+    """
+    assert (KINDS, SCOPES, STATUSES) == (_EXPECTED_KINDS, _EXPECTED_SCOPES, _EXPECTED_STATUSES)
+
+
+@pytest.mark.parametrize(
+    ("column", "allowed", "rejected"),
+    [
+        ("kind", _EXPECTED_KINDS, _REJECTED_KINDS),
+        ("scope", _EXPECTED_SCOPES, _REJECTED_SCOPES),
+        ("status", _EXPECTED_STATUSES, _REJECTED_STATUSES),
+    ],
+)
+def test_python_enum_matches_sql_check_clause(column: str, allowed: frozenset[str], rejected: frozenset[str]) -> None:
+    """Python の列挙値と `schema.py` の CHECK 句が過不足なく一致すること。
+
+    Python 側だけに値を足すと `learn` が受理して INSERT で IntegrityError に
+    なり、DB 側だけに足すと Python 検証が先に弾いて到達不能な値になる。
+    候補プール（許可値 + 非メンバー）を全件 INSERT して、DB が受理する集合が
+    Python の集合と完全一致することを表として固定する。
+    """
+    defaults = {"kind": "fact", "scope": "global", "status": "pending"}
+    with closing(sqlite3.connect(":memory:")) as conn:
+        conn.executescript(SCHEMA_SQL)
+        conn.execute(
+            "INSERT INTO repos (id, identity_key, root_path, first_seen_at, last_seen_at)"
+            " VALUES ('demo', 'demo-key', '/demo', 't0', 't0')"
+        )
+        db_accepted = {value for value in allowed | rejected if _insert_accepted(conn, **{**defaults, column: value})}
+    assert db_accepted == allowed

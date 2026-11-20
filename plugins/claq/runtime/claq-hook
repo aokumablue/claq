@@ -3,11 +3,10 @@
 #
 # hooks.json calls this file (never a bare `python3`) so that the interpreter
 # name is resolved by code we control instead of by whatever the host's ambient
-# PATH happens to bind. On a cmd.exe host the very same command string resolves
-# to the sibling `claq-hook.cmd` (cmd.exe appends PATHEXT to an extension-less
-# path). Hosts that prefer PowerShell do not, so each hooks.json entry also
-# carries a `powershell` field naming `claq-hook.cmd` explicitly; both fields
-# must launch the same module with the same arguments.
+# PATH happens to bind. Claude Code runs the `command` string through Git Bash
+# on Windows too, so this POSIX script is what runs there. The `powershell`
+# field names the sibling `claq-hook.cmd` for hosts that read that field; both
+# fields must launch the same module with the same arguments.
 #
 # Resolution order: $CLAQ_PYTHON (explicit override) -> python3 -> python.
 # `python` is probed for 3.12+ before use because on some distributions it is
@@ -15,6 +14,10 @@
 # unprobed: probing costs one extra interpreter start on every single hook
 # invocation, and launcher.py already reports an unsupported version itself
 # (`unsupported_python_version`), so the fallthrough is still a claq diagnostic.
+# PATH entries that are a `WindowsApps` directory are dropped: under Git Bash
+# `python3` / `python` there are Microsoft Store alias stubs that print
+# "Python was not found" and exit 9009 without running Python, which would
+# turn protection off silently.
 #
 # When nothing usable is found this exits 0 after writing a diagnostic to
 # stderr, matching launcher.py's documented fail-open policy (see CLAUDE.md
@@ -62,14 +65,13 @@ fi
 # 「カレントディレクトリ」と定めている。hook は cwd=プロジェクトルートで
 # 起動するため、リポジトリが同梱した `./python3` が `command -v` と `exec` の
 # 両方に採用され、**ツール入力 JSON を stdin ごと受け取り exit code も支配する**
-# 偽インタプリタになる（= 保護の完全な乗っ取り）。実測で再現済み。
+# 偽インタプリタになる（= 保護の完全な乗っ取り）。
 #
 # 「`command -v` の結果が `/` 始まりか検査する」だけでは塞がらない。この
 # wrapper の shebang は `#!/bin/sh` で、macOS の /bin/sh は POSIX モードの
 # bash 3.2 —— POSIX が `command -v` に絶対パスを要求するため、cwd 由来の候補にも
-# `$PWD` を前置して `/private/tmp/.../reproA/./python3` を返す。つまり検査は
-# 通ってしまう（実測。dash と zsh は相対名を返すので検査が効き、シェル依存で
-# 穴が開くか塞がるかが変わる）。PATH 自体を洗う方がシェル非依存に閉じる。
+# `$PWD` を前置した絶対パスを返し、検査を通ってしまう（dash と zsh は相対名を
+# 返すので、シェルによって穴が開く）。PATH 自体を洗う方がシェル非依存に閉じる。
 #
 # 洗った PATH は **export する**。hook 本体（hook_common.py・
 # commit_quality_scanner.py）は `subprocess.run(["git", ...])` で git を名前
@@ -91,6 +93,7 @@ while [ -n "$_claq_rest" ]; do
       ;;
   esac
   case "$_claq_entry" in
+    */[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss] | */[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss]/) ;;
     /*) _claq_path=${_claq_path:+$_claq_path:}$_claq_entry ;;
   esac
 done
@@ -107,8 +110,8 @@ fi
 PATH=$_claq_path
 export PATH
 
-# CLAQ_PYTHON は絶対パスのみ受け付ける。相対名は cwd に落ちうるうえ、POSIX 側
-# では実測で `CLAQ_PYTHON=./python3` が乗っ取りに成立した。PATH 探索へ**落とさ
+# CLAQ_PYTHON は絶対パスのみ受け付ける。相対名（`CLAQ_PYTHON=./python3`）は cwd の
+# 偽インタプリタへ落ちる。PATH 探索へ**落とさ
 # ない**のも意図的で、明示的な override が黙って別のインタプリタに化けるのは
 # 「指定した物が動いた」という利用者の前提を破るため。Windows 側（.cmd）も
 # 同じ検査を持つ（cmd.exe は常に cwd を先に見るため、あちらは相対名でも成立する）。

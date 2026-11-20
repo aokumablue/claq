@@ -327,8 +327,7 @@ def allocate_repo_slug(identity: RepoIdentity, db: Database) -> str:
     ``git remote add origin`` した瞬間に ``identity_key`` が repo root パスから
     ``github.com/o/r`` へ変わり、別リポジトリとして ``-2`` 付きの新 ``id`` を
     採番してしまう。その結果、旧 ``id`` 配下の ``scope='repo'`` 知識が
-    **全件 SessionStart 注入から静かに消える**（DB には残るが到達不能。
-    実測で再現済み）。remote の変更（GitHub から GitLab への移行等）や削除でも
+    **全件 SessionStart 注入から静かに消える**（DB には残るが到達不能）。remote の変更（GitHub から GitLab への移行等）や削除でも
     同じことが起きる。
 
     判定順は重要で、1 を先に見ることで ``UNIQUE(identity_key)`` 違反を
