@@ -73,6 +73,7 @@ grader / comparator / bench-analyzer の返値が検証を通らなければ保�
      - 各構成の通過率・時間・トークン数を、平均 ± 標準偏差と差分付きでまとめる
      - `with_skill` を `without_skill` の前に並べる
    - `claq:comparator` へ渡すときは、比べる 2 構成の出力を `<workspace>/compare-<ID>/candidate-a/` と `candidate-b/` へコピーし、A/B の割り当てをランダムにする
+     - 依頼文に `output_a_path`・`output_b_path`（コピー先）・`eval_prompt` と、あれば `expectations` を載せる
      - 対応表は comparator へ渡さず、返値を受け取った後に `<workspace>/compare-<ID>/mapping.json`（`{"A": "<構成名>", "B": "<構成名>"}`）へ保存する（`/skill-gen` の完了ゲートが A/B と構成の対応を引く）
      - `with_skill` / `without_skill` / `old_skill` のパスをそのまま渡さない（パス文字列から出自が分かって盲検が成立せず、`../../../agents/comparator.md` はこの形を FAIL として拒否する）
      - comparator の判定は助言として扱う。機械判定できる期待値は deterministic なアサーションで先に確定させる
