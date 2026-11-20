@@ -409,6 +409,8 @@ flowchart TD
 /test-gen src/auth/login.py
 ```
 
+---
+
 ### 依存更新
 
 ```mermaid
@@ -611,7 +613,7 @@ flowchart TD
 **トリガー**: 各コマンドの「学びの記録」ステップ（agent/skill が明示的に判断・実行。ユーザー操作は不要だがコマンド実行が前提）
 **期待効果**: 再利用可能な学び（罠・規約・決定）が知識カードとして蓄積し次セッション以降へ自動注入。agent 由来カード（`claq_mem_learn`）は**常に** `status=pending` で登録され、`/instinct promote <key>` を経て初めて注入される。`learn` に `--status` は無く、helper も CLI も指定を拒否する
 
-**実行例**: 通常操作不要（各コマンドが完了時に自動判断）。手動登録した pending 分だけ週次で `/instinct list --status pending` → 採用分を `/instinct promote <key>`
+**実行例**: 記録は不要（各コマンドが完了時に自動判断）。agent 由来も手動登録も pending で入り、昇格するまで注入されないので、週次で `/instinct list --status pending` → 採用分を `/instinct promote <key>`
 
 ---
 
