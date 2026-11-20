@@ -108,6 +108,9 @@ PROTECTED_FILES = frozenset({
 # `/harness --apply` が正当に書き込む先）。
 _PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
 
+# 保護 path のうちファイルのもの。表示名に末尾の ``/`` を付けない（`protected_path_display_name`）。
+PLUGIN_HOOKS_JSON_SEGMENT = "hooks/hooks.json"
+
 # 内容次第で保護する git config のパス。remote / branch / user の通常編集が正当にあるため
 # 無条件では塞がず、置換後の全文を解析して ``core.hooksPath`` / ``include`` / ``alias`` のように
 # フック実行を左右する key（`block_no_verify` が ``git config`` 経由で塞ぐものと同じ集合）が
@@ -208,11 +211,54 @@ def repo_git_config_path(file_path: str) -> str | None:
     return _match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS)
 
 
+def protected_path_display_name(segment: str) -> str:
+    """保護 path（`protected_path_segment` の戻り値）の表示名を返す。
+
+    ディレクトリ（``.git/hooks``）は末尾に ``/`` を付け、ファイル（``hooks/hooks.json``）はそのまま返す。
+
+    Args:
+        segment: 保護 path の ``/`` 区切りの名前。
+
+    Returns:
+        ブロック文言に出す表示名。
+    """
+    return segment if segment == PLUGIN_HOOKS_JSON_SEGMENT else f"{segment}/"
+
+
+# フックを走らせるかどうかを決める保護 path の表示名（``.git/hooks/`` と ``hooks/hooks.json``）。
+# `blocked_message_for_file` が文言を選ぶ鍵（Edit/Write と Bash で共有）。
+HOOK_CONTROL_DISPLAY_NAMES = frozenset(
+    protected_path_display_name("/".join(segments)) for segments in _PROTECTED_PATH_SEGMENTS
+)
+
+
+def hook_control_blocked_message(display_name: str) -> str:
+    """フックを走らせるかどうかを決める保護対象への書込みに対するブロック理由を生成する。
+
+    linter 設定向けの文言（設定を弱めずにコードを直す）はこれらの保護理由に合わないため、専用の文言を
+    持つ。``.git/hooks/`` とプラグインの ``hooks/hooks.json`` は Edit/Write と Bash で、ホスト設定
+    （``.claude/settings.json`` 形）は Bash の書込みで使う。
+
+    Args:
+        display_name: 保護対象の表示名。
+
+    Returns:
+        ブロック理由文字列。
+    """
+    return (
+        f"BLOCKED: Modifying {display_name} is not allowed. "
+        "It decides whether git hooks or the claq protection hooks run, so changing it can disable them. "
+        "If this change is genuinely necessary, ask the user to make it — "
+        "do not disable the protection hook yourself."
+    )
+
+
 def blocked_message_for_file(file_name: str) -> str:
     """保護されたファイルに対するブロックメッセージを生成する。
 
-    実行中の plugin root の保護ディレクトリ（`RUNNING_PLUGIN_DISPLAY_NAMES`）には専用の文言を返す。
-    Edit/Write と Bash（`bash_config_protection`）が同じ表示名から同じ文言を得るため、選択をここに置く。
+    実行中の plugin root の保護ディレクトリ（`RUNNING_PLUGIN_DISPLAY_NAMES`）と、フックを走らせるか
+    どうかを決める保護 path（`HOOK_CONTROL_DISPLAY_NAMES`）には専用の文言を返す。Edit/Write と
+    Bash（`bash_config_protection`）が同じ表示名から同じ文言を得るため、選択をここに置く。
 
     Args:
         file_name: ブロックされたファイル名、または保護 path の表示名。
@@ -222,6 +268,8 @@ def blocked_message_for_file(file_name: str) -> str:
     """
     if file_name in RUNNING_PLUGIN_DISPLAY_NAMES:
         return _running_plugin_blocked_message(file_name)
+    if file_name in HOOK_CONTROL_DISPLAY_NAMES:
+        return hook_control_blocked_message(file_name)
     return (
         f"BLOCKED: Modifying {file_name} is not allowed. "
         "Fix the source code to satisfy linter/formatter rules instead of "
@@ -347,7 +395,7 @@ def _block_reason_for_file(tool_name: str, container: Any, file_path: str) -> st
             return blocked_message_for_file(running_dir)
     protected_segment = protected_path_segment(file_path)
     if protected_segment is not None:
-        return blocked_message_for_file(f"{protected_segment}/")
+        return blocked_message_for_file(protected_path_display_name(protected_segment))
     git_config = repo_git_config_path(file_path) or global_git_config_path(file_path)
     if git_config is not None:
         reason = git_config_block_reason(tool_name, container, file_path, git_config)

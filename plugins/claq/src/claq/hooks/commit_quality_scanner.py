@@ -71,6 +71,10 @@ _SCAN_BUDGET_CHECK_BYTES = 256 * 1024
 # あること（JWT の lookbehind と所有量指定子）がこの上界の前提。
 
 _LINTABLE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
+# lint 対象のうち、ログ出力呼び出しとデバッガ文（`_scan_lint_issues` の JS 専用の 2 検査）を検出する拡張子。
+# この 2 つは JavaScript / TypeScript の構文で、Python・Go・Rust ではコメント・docstring・識別子に
+# 現れた語にすぎない。拾うとデバッガ文（error）が正当な commit を止める。
+_JAVASCRIPT_SUFFIXES = {".js", ".jsx", ".ts", ".tsx"}
 _MINIFIED_SUFFIXES = (".min.js", ".min.css")
 _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "package-lock.json",
@@ -455,16 +459,18 @@ def _issue(kind: str, message: str, *, line: int, severity: str) -> dict:
     return {"type": kind, "message": message, "line": line, "severity": severity}
 
 
-def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
+def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) -> list[dict]:
     """ファイル内容からログ出力呼び出し / デバッガ文 / Issue 参照なし TODO を検出します。
 
     `# nosec` を含む行は検出器自身のテストフィクスチャ等、意図的にパターンを含む行と
-    みなして抑制します。secret scan と同じ 1 本の実時間予算に載せます。
+    みなして抑制します。secret scan と同じ 1 本の実時間予算に載せます。ログ出力呼び出しと
+    デバッガ文は JavaScript / TypeScript のファイルでだけ検出します（`_JAVASCRIPT_SUFFIXES`）。
 
     Args:
         lines: 検査対象のデコード済みファイル内容を改行で分割した行リストです。
         deadline: 走査を打ち切る `_monotonic()` 基準の時刻です
             （`new_secret_scan_deadline` の 1 本の予算）。
+        javascript: JavaScript / TypeScript のファイルなら True。
 
     Returns:
         検出した lint 問題の辞書リストを返します。
@@ -481,11 +487,11 @@ def _scan_lint_issues(lines: list[str], *, deadline: float) -> list[dict]:
         if "# nosec" in line:
             continue
 
-        if "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
+        if javascript and "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
             message = f"console.log found at line {line_num}"  # nosec
             issues.append(_issue("console.log", message, line=line_num, severity="warning"))  # nosec
 
-        if re.search(r"\bdebugger\b", line) and not line.strip().startswith("//"):
+        if javascript and re.search(r"\bdebugger\b", line) and not line.strip().startswith("//"):
             message = f"debugger statement at line {line_num}"  # nosec
             issues.append(_issue("debugger", message, line=line_num, severity="error"))  # nosec
 
@@ -605,7 +611,8 @@ def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline:
     lines = content.split("\n")
     if do_lint:
         try:
-            issues.extend(_scan_lint_issues(lines, deadline=deadline))
+            javascript = Path(file_path).suffix in _JAVASCRIPT_SUFFIXES
+            issues.extend(_scan_lint_issues(lines, deadline=deadline, javascript=javascript))
         except SecretScanBudgetExceeded as err:
             # 予算超過だけは lint でも error。共有の予算が尽きている以上、secret scan を
             # 回してもホスト側 timeout を踏むだけなので、検査不能として返す。

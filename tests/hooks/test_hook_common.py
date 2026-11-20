@@ -1,4 +1,4 @@
-"""hook_common のフック出力ヘルパー（SessionStart）・リポジトリルート解決・保護対象判定の共有正規化のテスト。"""
+"""hook_common のフック出力ヘルパー（SessionStart・deny）・リポジトリルート解決・保護対象判定の共有正規化のテスト。"""
 
 from __future__ import annotations
 
@@ -259,3 +259,85 @@ def test_scan_memo_discards_results_when_body_raises() -> None:
     with pytest.raises(RuntimeError), hook_common.scan_memo():
         raise RuntimeError("boom")
     assert hook_common._scan_memo is None
+
+
+class _FakeOs:
+    """`hook_common` が参照する os の差し替え。devnull の open・dup2・close を記録だけする。
+
+    本物の ``os.dup2`` を呼ぶと pytest の fd 捕捉が壊れるため、`hook_common` の参照だけを差し替える。
+    """
+
+    devnull = "/dev/null"
+    O_WRONLY = 1
+
+    def __init__(self) -> None:
+        """呼び出しの記録を空で始める。"""
+        self.calls: list[tuple[object, ...]] = []
+
+    def open(self, path: str, flags: int) -> int:
+        """devnull を開いたことを記録し、固定の fd を返す。"""
+        self.calls.append(("open", path, flags))
+        return 99
+
+    def dup2(self, fd: int, fd2: int) -> None:
+        """fd の付け替えを記録する。"""
+        self.calls.append(("dup2", fd, fd2))
+
+    def close(self, fd: int) -> None:
+        """fd を閉じたことを記録する。"""
+        self.calls.append(("close", fd))
+
+
+class _Stream:
+    """flush の成否と fileno の有無を選べる出力ストリーム。"""
+
+    def __init__(self, fd: int, *, broken: bool, has_fileno: bool = True) -> None:
+        """fd・flush が失敗するか・fileno を持つかを決める。"""
+        self.fd = fd
+        self.broken = broken
+        self.has_fileno = has_fileno
+        self.written: list[str] = []
+
+    def write(self, text: str) -> int:
+        """バッファへ溜める（パイプへの書込みと同じく、ここでは失敗しない）。"""
+        self.written.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        """読み手の居ないパイプなら BrokenPipeError を送る。"""
+        if self.broken:
+            raise BrokenPipeError("pipe")
+
+    def fileno(self) -> int:
+        """fd を返す。持たないストリームは io.UnsupportedOperation 相当の OSError を送る。"""
+        if not self.has_fileno:
+            raise OSError("fileno")
+        return self.fd
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "expected_calls"),
+    [
+        (_Stream(1, broken=False), _Stream(2, broken=False), []),
+        (_Stream(1, broken=True), _Stream(2, broken=False), [("open", "/dev/null", 1), ("dup2", 99, 1), ("close", 99)]),
+        (_Stream(1, broken=False), _Stream(2, broken=True), [("open", "/dev/null", 1), ("dup2", 99, 2), ("close", 99)]),
+        (_Stream(1, broken=True, has_fileno=False), _Stream(2, broken=False), []),
+        (None, None, []),
+    ],
+    ids=["both-readable", "stdout-reader-gone", "stderr-reader-gone", "no-fileno", "closed-at-startup"],
+)
+def test_emit_block_output_discards_unflushable_output(
+    monkeypatch: pytest.MonkeyPatch, stdout: _Stream | None, stderr: _Stream | None, expected_calls: list[tuple]
+) -> None:
+    """flush できない出力は fd を devnull へ付け替えて捨て、deny の 2 を返すこと。
+
+    パイプへの書込みはバッファに溜まり、読み手が居ないことは終了時の flush で初めて失敗になる。Python は
+    そこで終了コードを 120 に書き換え、PreToolUse では non-blocking error ＝ ツール実行へ反転する。
+    """
+    fake_os = _FakeOs()
+    monkeypatch.setattr(hook_common, "os", fake_os)
+    monkeypatch.setattr(hook_common.sys, "stdout", stdout)
+    monkeypatch.setattr(hook_common.sys, "stderr", stderr)
+
+    assert hook_common.emit_block_output("[Hook] BLOCKED: test") == 2
+    assert fake_os.calls == expected_calls

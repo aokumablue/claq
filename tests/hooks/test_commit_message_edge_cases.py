@@ -18,6 +18,21 @@ _LONG_UNCONVENTIONAL = "bad message with no conventional format and a very long 
         (f'git commit -m "{_LONG_UNCONVENTIONAL}"', (_LONG_UNCONVENTIONAL, ["format", "length", "punctuation"])),
         ("git commit -m \"$(cat <<'EOF'\nfix: x\nEOF\n)\"", None),
         ("git commit -m `cat msg.txt`", None),
+        (f'git commit -m "fix: short subject\n\n{_LONG_UNCONVENTIONAL}"', (f"fix: short subject\n\n{_LONG_UNCONVENTIONAL}", [])),
+        ('git commit -am "Fix: Bad."', ("Fix: Bad.", ["format", "punctuation"])),
+        ('git commit -qm "feat: quiet"', ("feat: quiet", [])),
+        ('git commit -m"feat: attached"', ("feat: attached", [])),
+        ('git commit --message="docs: long form"', ("docs: long form", [])),
+        ('git commit --message "docs: separate value"', ("docs: separate value", [])),
+        ('git commit -m "fix: don\'t crash"', ("fix: don't crash", [])),
+        ('git commit -m "feat!: drop python 3.11" -m "body."', ("feat!: drop python 3.11", [])),
+        ('git commit -m "feat(api)!: remove v1"', ("feat(api)!: remove v1", [])),
+        ("git commit -Cmain", None),
+        ("git commit -C HEAD -m 'fix: reuse'", ("fix: reuse", [])),
+        ("git commit -v -m 'fix: verbose'", ("fix: verbose", [])),
+        ("git commit -- -m x", None),
+        ("git commit -am", None),
+        ('git commit -m ""', None),
     ],
     ids=[
         "not-a-commit",
@@ -26,12 +41,29 @@ _LONG_UNCONVENTIONAL = "bad message with no conventional format and a very long 
         "unconventional-long-with-period",
         "heredoc-command-substitution",
         "backtick-command-substitution",
+        "body-is-not-the-subject",
+        "combined-all-and-message",
+        "combined-quiet-and-message",
+        "attached-value",
+        "long-option-with-equals",
+        "long-option-separate-value",
+        "apostrophe-inside-double-quotes",
+        "breaking-change-first-message-only",
+        "breaking-change-with-scope",
+        "value-of-another-short-option",
+        "message-after-another-option-value",
+        "message-after-flag-without-value",
+        "after-end-of-options",
+        "missing-value",
+        "empty-message",
     ],
 )
 def test_validate_commit_message(command: str, expected: tuple[str, list[str]] | None) -> None:
-    """commit 以外とコマンド置換の本文は None、commit はメッセージと指摘種別を返すこと。
+    """commit 以外とコマンド置換の本文は None、commit はメッセージと件名行への指摘種別を返すこと。
 
-    指摘種別は conventional 形式・72 文字超・大文字始まり・末尾ピリオド。コマンド置換は本文が実行時に
+    指摘種別は conventional 形式・72 文字超・大文字始まり・末尾ピリオドで、どれも 1 行目だけを見る（本文の
+    長さや本文末尾の句点で件名を咎めない）。メッセージはトークン化した引数から読み、結合短形式（`-am`）・
+    値の結合（`-mmsg`）・二重引用符の中の `'` も値どおりに読む。コマンド置換は本文が実行時に
     しか決まらず、字面（`$(cat <<`）を本文として検査すると毎回の commit で形式違反の警告が出る。
     """
     result = commit_message.validate_commit_message(command)

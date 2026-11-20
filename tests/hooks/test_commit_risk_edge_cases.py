@@ -61,11 +61,25 @@ def test_parse_git_commit_command(command: str, expected: tuple[bool, list[str]]
 
 @pytest.mark.parametrize(
     ("commit_args", "expected"),
-    [(["-a", "-m", "x"], True), (["--all", "-m", "x"], True), (["-am", "x"], True), (_MX, False), (["--amend", *_MX], False)],
-    ids=["short", "long", "combined", "without-all", "amend"],
+    [
+        (["-a", "-m", "x"], True),
+        (["--all", "-m", "x"], True),
+        (["-am", "x"], True),
+        (["-qam", "x"], True),
+        (_MX, False),
+        (["--amend", *_MX], False),
+        (["-mfix: add x"], False),
+        (["-Cmain"], False),
+        (["-uall", *_MX], False),
+    ],
+    ids=["short", "long", "combined", "combined-before-message", "without-all", "amend", "attached-message", "attached-commit", "attached-mode"],
 )
 def test_is_commit_all_flag(commit_args: list[str], expected: bool) -> None:
-    """-a / --all / -am のような結合短形式だけを -a 相当と判定すること。"""
+    """-a / --all / -am のような結合短形式だけを -a 相当と判定すること。
+
+    値を取る短形式に結合した値（`-m"add x"`・`-Cmain`・`-uall`）の `a` は `-a` と読まない。読むと
+    コミットされない未ステージのファイルまで検査し、その問題で commit を止める。
+    """
     assert commit_risk.is_commit_all_flag(commit_args) is expected
 
 

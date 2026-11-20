@@ -44,7 +44,8 @@ for path in root.glob("claq-*"):
         continue  # 列挙と stat の間に Grok が古い claq-<hash> を消した
 if not candidates:
     sys.exit(1)
-print(max(candidates)[1] / "src")
+# 同 mtime のときは列挙順で先の候補を採る（Python 側と同じく Path 同士を比べない）。
+print(max(candidates, key=lambda item: item[0])[1] / "src")
 ')" || {
     echo "no installed claq-* found under ~/.grok/installed-plugins" >&2
     exit 1

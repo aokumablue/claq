@@ -424,6 +424,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
         (".claude", "settings.json"),
         (".claude", "settings.local.json"),
     ),
+    # 派生: 上の表示名（`bash_config_protection._blocked_message` が文言を選ぶ鍵）。
+    "host_guard_targets.HOST_SETTINGS_DISPLAY_NAMES": frozenset({".claude/settings.json", ".claude/settings.local.json"}),
     # 派生: 保護 basename の和集合。
     "bash_config_protection._ALL_PROTECTED_BASENAMES": (
         _folded(_EXPECTED_PROTECTED_FILES) | _folded(_EXPECTED_CONDITIONALLY_PROTECTED_FILES)
@@ -513,6 +515,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "block_no_verify._GIT_CONFIG_NEW_WRITE_OPS": frozenset({"add", "set", "unset"}),
     # --- commit_quality_scanner ---
     "commit_quality_scanner._LINTABLE_SUFFIXES": {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"},
+    "commit_quality_scanner._JAVASCRIPT_SUFFIXES": {".js", ".jsx", ".ts", ".tsx"},
     "commit_quality_scanner._MINIFIED_SUFFIXES": (".min.js", ".min.css"),
     "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES": {
         "Cargo.lock",
@@ -538,6 +541,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     ),
     "host_guard_targets._RUNTIME_ENTRYPOINT_NAMES": ("claq-hook", "claq-hook.cmd"),
     "config_protection._PROTECTED_PATH_SEGMENTS": _EXPECTED_PROTECTED_PATH_SEGMENTS,
+    # 派生: 上の表示名（ディレクトリだけ末尾に `/`。`blocked_message_for_file` が文言を選ぶ鍵）。
+    "config_protection.HOOK_CONTROL_DISPLAY_NAMES": frozenset({".git/hooks/", "hooks/hooks.json"}),
     "config_protection._GIT_CONFIG_REPO_SEGMENTS": _EXPECTED_GIT_CONFIG_REPO_SEGMENTS,
     "config_protection.GIT_CONFIG_DISPLAY_NAMES": frozenset("/".join(segments) for segments in _EXPECTED_GIT_CONFIG_REPO_SEGMENTS)
     | _EXPECTED_GLOBAL_GIT_CONFIG_DISPLAY_NAMES,
@@ -603,6 +608,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "unlink",
         }
     ),
+    # 結合短形式の中で現れたら、残りの文字をその値として読む短形式。
+    "commit_risk._SHORT_OPTIONS_WITH_VALUE": frozenset("CcFmStu"),
 }
 
 # 完全一致で固定**しない**語彙と、その代わりに何が固定しているか。

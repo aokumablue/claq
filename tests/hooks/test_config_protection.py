@@ -8,6 +8,7 @@ native camelCase・旧 file キー・空/不正/切り捨て入力）と、コ�
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -229,3 +230,20 @@ class TestProtectionHookOwnConfig:
         """ホスト設定は保護を外せるキーのときだけ deny すること。"""
         payload = {"tool_name": "Write", "tool_input": {"file_path": "/repo/.claude/settings.json", "content": content}}
         assert _run_protection(monkeypatch, payload)[0] == expected
+
+
+@pytest.mark.parametrize("display_name", [".git/hooks/", "hooks/hooks.json"])
+def test_hook_control_targets_get_their_own_reason(display_name: str) -> None:
+    """フックを走らせるかどうかを決める保護 path には、linter 設定向けの「コードを直せ」ではない理由を返すこと。"""
+    message = config_protection.blocked_message_for_file(display_name)
+
+    assert message.startswith(f"BLOCKED: Modifying {display_name} is not allowed. It decides whether git hooks")
+    assert "linter" not in message
+
+
+def test_plugin_hooks_json_is_named_as_a_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """プラグインの hooks.json への書込みは、末尾に `/` の無いファイル名で理由を出すこと。"""
+    rc, reasons = _run_protection(monkeypatch, _write_path(str(tmp_path / "claq" / "hooks" / "hooks.json")))
+
+    assert (rc, len(reasons)) == (2, 1)
+    assert reasons[0].startswith("BLOCKED: Modifying hooks/hooks.json is not allowed.")

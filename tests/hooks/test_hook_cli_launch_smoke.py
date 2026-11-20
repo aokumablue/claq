@@ -3,8 +3,8 @@
 インストール済み plugin や実 HOME には触れない。COPILOT_TEST=1 で
 Copilot の deny JSON を選ばせる。hooks.json が宣言する全エントリが
 最小 payload で壊れずに終わること、Bash 系ブロック hook の allow/deny が
-プロセス経路でも成り立つこと、SessionStart が DB を作って有効な JSON を
-出すことを見る。PreToolUse の入力軸ゲートと実装照合は
+プロセス経路でも成り立つこと、deny の exit 2 が出力先の読み手の有無に
+左右されないこと、SessionStart が DB を作って有効な JSON を出すことを見る。PreToolUse の入力軸ゲートと実装照合は
 test_hook_cli_contract.py の担当。
 """
 
@@ -163,3 +163,26 @@ def test_plugin_runtime_check_survives_an_undecodable_git_error(tmp_path: Path) 
     )
     result = _run_under_c_locale(code, repo)
     assert (result.returncode, result.stdout.strip()) == (0, "False")
+
+
+@pytest.mark.parametrize("gone", ["stdout", "stderr"])
+def test_deny_exit_code_survives_an_output_pipe_without_reader(gone: str, tmp_path: Path) -> None:
+    """読み手の居ないパイプへ deny を書いても exit 2 のままであること（120 は PreToolUse ではツール実行）。
+
+    子は stdin を待つので、書き込む前に親が読み口を閉じれば、子の出力は必ず読み手の居ないパイプへ向かう。
+    書込みはバッファに溜まり、失敗は終了時の flush で起きる。
+    """
+    proc = subprocess.Popen(
+        [sys.executable, str(LAUNCHER), "claq.hooks.block_no_verify"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=_launcher_env(tmp_path),
+    )
+    closed, remaining = (proc.stdout, proc.stderr) if gone == "stdout" else (proc.stderr, proc.stdout)
+    closed.close()
+    proc.stdin.write(json.dumps(_bash("git commit --no-verify -m x")).encode())
+    proc.stdin.close()
+    remaining.read()
+    remaining.close()
+    assert proc.wait(timeout=60) == 2

@@ -34,6 +34,7 @@ import os
 from pathlib import Path
 
 from claq.hooks.config_protection import (
+    PLUGIN_HOOKS_JSON_SEGMENT,
     protected_path_segment,
     running_plugin_guarded_dir,
     running_plugin_root_is_guarded,
@@ -48,9 +49,6 @@ from claq.hooks.hook_common import (
 )
 from claq.lib.core_utils import get_home_dir, get_plugin_root
 
-# `protected_path_segment` がプラグインの PreToolUse ガード登録元に返す表示名。
-_PLUGIN_HOOKS_JSON_SEGMENT = "hooks/hooks.json"
-_PLUGIN_HOOKS_JSON_DISPLAY = f"{_PLUGIN_HOOKS_JSON_SEGMENT}/"
 _HOOKS_JSON_NAME = "hooks.json"
 
 # `cd` を含むコマンドで basename だけで塞ぐ、実行中のランタイムの起動ファイル（hooks.json が起動する）。
@@ -60,6 +58,9 @@ _RUNTIME_DIR_DISPLAY = "runtime/"
 
 # ホスト設定の置き場（``.claude/`` 直下）と名前の構造一致。
 _HOST_SETTINGS_PATH_SEGMENTS = ((".claude", "settings.json"), (".claude", "settings.local.json"))
+
+# 上の表示名。`bash_config_protection._blocked_message` が文言を選ぶ鍵。
+HOST_SETTINGS_DISPLAY_NAMES = frozenset("/".join(segments) for segments in _HOST_SETTINGS_PATH_SEGMENTS)
 
 
 @memoized_in_scan
@@ -77,7 +78,7 @@ def _guarded_locations() -> list[tuple[tuple[str, ...], str]]:
         ``(解決済みの実体 path を畳んだ要素列, 表示名)`` のリスト。
     """
     # ホームの決定や ``~user`` の展開自体も失敗しうるので、組み立てを遅らせて下の try で 1 か所ずつ受ける。
-    candidates = [(lambda: get_plugin_root() / "hooks" / _HOOKS_JSON_NAME, _PLUGIN_HOOKS_JSON_DISPLAY)]
+    candidates = [(lambda: get_plugin_root() / "hooks" / _HOOKS_JSON_NAME, PLUGIN_HOOKS_JSON_SEGMENT)]
     configured = os.environ.get("CLAUDE_CONFIG_DIR")
     config_dirs = [lambda: get_home_dir() / ".claude"]
     if configured:
@@ -106,15 +107,15 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
         scope_certain: コマンドが `cd` 系を含まず、cwd 基準の解決を信用できるなら True。
 
     Returns:
-        ``hooks/hooks.json/``・``.claude/settings.json`` 形・``runtime/`` / ``src/claq/`` の表示名
+        ``hooks/hooks.json``・``.claude/settings.json`` 形・``runtime/`` / ``src/claq/`` の表示名
         （`bash_config_protection._blocked_message` が文言を選ぶ鍵）。該当しなければ None。
     """
-    if protected_path_segment(token) == _PLUGIN_HOOKS_JSON_SEGMENT:
-        return _PLUGIN_HOOKS_JSON_DISPLAY
+    if protected_path_segment(token) == PLUGIN_HOOKS_JSON_SEGMENT:
+        return PLUGIN_HOOKS_JSON_SEGMENT
     if not scope_certain:
         name = normalize_protected_name(basename(token))
         if name == _HOOKS_JSON_NAME:
-            return _PLUGIN_HOOKS_JSON_DISPLAY
+            return PLUGIN_HOOKS_JSON_SEGMENT
         if name in _RUNTIME_ENTRYPOINT_NAMES and running_plugin_root_is_guarded():
             return _RUNTIME_DIR_DISPLAY
     resolved = resolve_effective_target(token)

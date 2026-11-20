@@ -20,7 +20,13 @@ from typing import Any
 import pytest
 
 import claq.hooks
-from claq.hooks import bash_config_protection, commit_quality_scanner, commit_risk, heredoc, shell_tokens
+from claq.hooks import (
+    bash_config_protection,
+    commit_quality_scanner,
+    commit_risk,
+    heredoc,
+    shell_tokens,
+)
 
 from ._support import (
     _EXPECTED_VOCABULARIES,
@@ -317,6 +323,14 @@ _VOCABULARY_LAYER1_ABSENT = {
         "派生値（`_RUNNING_PLUGIN_GUARDED_DIRS` の表示名）で、`blocked_message_for_file` がブロック文言を選ぶ鍵にすぎない。"
         "保護対象かどうかの判定は変えない"
     ),
+    "config_protection.HOOK_CONTROL_DISPLAY_NAMES": (
+        "派生値（`_PROTECTED_PATH_SEGMENTS` の表示名）で、`blocked_message_for_file` がブロック文言を選ぶ鍵にすぎない。"
+        "保護対象かどうかの判定は変えない"
+    ),
+    "host_guard_targets.HOST_SETTINGS_DISPLAY_NAMES": (
+        "派生値（`_HOST_SETTINGS_PATH_SEGMENTS` の表示名）で、`bash_config_protection._blocked_message` がブロック文言を"
+        "選ぶ鍵にすぎない。保護対象かどうかの判定は変えない"
+    ),
     "bash_config_protection._RAW_TEXT_RISK_INDICATORS": (
         "派生値（`_REMOVE_COMMANDS` 等の連結）であり、構成元の各集合が層1 を持つ。"
         "この tuple 自体は malformed JSON 専用の部分一致指標で、要素単位で判定が"
@@ -458,6 +472,17 @@ def test_every_lintable_suffix_is_checked(suffix: str) -> None:
     assert not commit_quality_scanner.should_lint_file("src/app.txt")
 
 
+@pytest.mark.parametrize("suffix", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._JAVASCRIPT_SUFFIXES"]))
+def test_every_javascript_suffix_gets_the_statement_checks(suffix: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_JAVASCRIPT_SUFFIXES` の全要素でデバッガ文を検出し、Python では検出しないこと（層1・単体）。"""
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "debugger")  # nosec
+    deadline = commit_quality_scanner.new_secret_scan_deadline()
+
+    issues = commit_quality_scanner.find_file_issues(f"src/app{suffix}", deadline=deadline)
+    assert [issue["type"] for issue in issues] == ["debugger"]  # nosec
+    assert commit_quality_scanner.find_file_issues("src/app.py", deadline=deadline) == []
+
+
 @pytest.mark.parametrize(
     "name", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES"])
 )
@@ -474,6 +499,13 @@ def test_every_minified_suffix_skips_secret_scan(suffix: str) -> None:
     assert commit_quality_scanner.should_scan_secrets("dist/bundle.js")
 
 
+@pytest.mark.parametrize("flag", sorted(_EXPECTED_VOCABULARIES["commit_risk._SHORT_OPTIONS_WITH_VALUE"]))
+def test_short_options_with_value_take_the_rest_of_the_cluster(flag: str) -> None:
+    """値を取る短形式の後ろの文字をフラグと読まないこと（層1・単体）。値を取らない `-q` に替えると `a` は `-a` になる。"""
+    assert not commit_risk.is_commit_all_flag([f"-{flag}all"])
+    assert commit_risk.is_commit_all_flag(["-qall"])
+
+
 def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     """層2 で固定した全語彙が、層1 の担い手か不在理由のどちらかを宣言していること。
 
@@ -487,8 +519,10 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
         "shell_tokens.WRITE_REDIRECT_OPERATORS",
         "heredoc._HEREDOC_CONTINUATION_SUFFIXES",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
+        "commit_quality_scanner._JAVASCRIPT_SUFFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",
+        "commit_risk._SHORT_OPTIONS_WITH_VALUE",
     }
     declared = (
         {case[0] for case in _VOCABULARY_DENY_ALLOW_CASES}

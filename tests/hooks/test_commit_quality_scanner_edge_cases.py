@@ -56,6 +56,14 @@ def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch
         ),
         ("src/app.py", "api" + "_key" + ' = "hunter2secret"  # nosec', [("secret", 1, "error")]),
         ("src/app.py", 'console.log("debug")  # nosec', []),
+        # ログ出力呼び出しとデバッガ文は JavaScript / TypeScript の構文。Python・Rust ではコメント・docstring・
+        # 識別子の語にすぎず、拾うとデバッガ文（error）が正当な commit を止める。TODO は言語を問わず見る。
+        (
+            "src/app.py",
+            '"""Attach the debugger first."""\n# useful under a debugger\nlog = "console.log"\n# TODO: tidy',  # nosec
+            [("todo", 4, "info")],
+        ),
+        ("src/main.rs", "let debugger = 1; /* console.log */", []),  # nosec
         # `sk-ant-...`（`sk-` 直後にハイフン）は OpenAI 形のパターンに一致しないため専用パターンで検出する。
         ("src/app.py", "sk-" + "ant-" + "abcdefghijklmnopqrstuvwxyz0123456789", [("secret", 1, "error")]),
         # lint 対象外の拡張子でも secret は検出し、lint だけを行わない。
@@ -83,6 +91,8 @@ def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch
         "nosec-hides-lint-not-secret",
         "nosec-does-not-hide-secret",
         "nosec-hides-console-log",
+        "python-words-are-not-js-statements",
+        "rust-words-are-not-js-statements",
         "anthropic-key",
         "non-lint-extension-secret",
         "non-lint-extension-skips-lint",

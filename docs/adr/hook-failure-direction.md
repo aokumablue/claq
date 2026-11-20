@@ -147,7 +147,9 @@ Windows の wrapper + インタプリタ起動の遅さで host 側 timeout（�
    有無は確かめていない）
 3. **deny の終了コードは出力層の失敗から独立させる。** 出力例外は内側で捕まえ、exit code は必ず
    返す。PreToolUse では exit 1 が non-blocking error（＝ツール実行）になるため、出力層の例外が
-   deny を allow へ反転させてはならない
+   deny を allow へ反転させてはならない。パイプへの書込みはバッファに溜まり、読み手が居ないことは
+   終了時の flush で初めて失敗になる。Python はそこで終了コードを 120 に書き換えるので、deny の出力は
+   書いた場で flush し、flush できない fd は devnull へ付け替えて残りを捨てる
 4. **`config_protection` はプラグイン自身の `hooks.json`、実行中のプラグインのランタイム、ホスト設定の無効化口を守る。**
    - `plugins/claq/hooks/hooks.json` はパス連続一致で無条件保護する（basename 一致だと consumer の
      `.claude/hooks.json` と衝突する）。

@@ -28,7 +28,7 @@ _HUGE_LINE = "a" * (1024 * 1024)
         # 行数 1 でも予算確認が走ること（「行数」基準では素通りする）。
         lambda: commit_quality_scanner._scan_secret_issues([_HUGE_LINE], deadline=0.0),
         # lint scanner も同じ 1 本の予算に載っていること。
-        lambda: commit_quality_scanner._scan_lint_issues([_HUGE_LINE], deadline=0.0),
+        lambda: commit_quality_scanner._scan_lint_issues([_HUGE_LINE], deadline=0.0, javascript=True),
     ],
     ids=["secret-short-line", "secret-huge-line", "lint-huge-line"],
 )
