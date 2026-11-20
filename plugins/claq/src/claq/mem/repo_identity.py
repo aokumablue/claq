@@ -36,6 +36,7 @@ _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*)://(.*)$", re.DOTALL)
 _PORT_RE = re.compile(r":\d+$")
 _QUERY_OR_FRAGMENT_RE = re.compile(r"[?#]")
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
+_PATH_SEPARATOR_RE = re.compile(r"[/\\]")
 
 
 def _run_git(cwd: str, *args: str) -> str | None:
@@ -300,7 +301,9 @@ def base_slug(identity: RepoIdentity) -> str:
 
     ``identity_key`` の最終セグメントを使う。remote 由来なら
     ``github.com/owner/repo`` の ``repo``、パス由来なら repo root の
-    ディレクトリ名がそのまま最終セグメントになる。
+    ディレクトリ名がそのまま最終セグメントになる。区切りは ``/`` と ``\\`` の両方を見る
+    （Windows の repo root は ``C:\\Users\\<name>\\proj`` で、``/`` だけで割るとパス全体が
+    1 セグメントになり、利用者名を含む長いスラッグの末尾が ``MAX_SLUG_LENGTH`` で切れる）。
 
     Args:
         identity: 確定済みの正体情報。
@@ -308,7 +311,7 @@ def base_slug(identity: RepoIdentity) -> str:
     Returns:
         スラッグ化した文字列。
     """
-    return slugify(identity.identity_key.rsplit("/", 1)[-1])
+    return slugify(_PATH_SEPARATOR_RE.split(identity.identity_key)[-1])
 
 
 def allocate_repo_slug(identity: RepoIdentity, db: Database) -> str:

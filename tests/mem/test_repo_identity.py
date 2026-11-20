@@ -189,11 +189,15 @@ class TestSlugify:
             (RepoIdentity("github.com/aokumablue/claq-dev", "/x/y", "git@github.com:a/b.git"), "claq-dev"),
             (RepoIdentity("/Users/x/dev/claq-dev", "/Users/x/dev/claq-dev", None), "claq-dev"),
             (RepoIdentity("/", "/", None), FALLBACK_SLUG),
+            (RepoIdentity("C:\\Users\\x\\dev\\claq-dev", "C:\\Users\\x\\dev\\claq-dev", None), "claq-dev"),
         ],
-        ids=["remote", "path", "root-path"],
+        ids=["remote", "path", "root-path", "windows-path"],
     )
     def test_base_slug_uses_last_segment(self, identity: RepoIdentity, expected: str) -> None:
-        """base_slug は identity_key の最終セグメントを使い、空なら FALLBACK_SLUG になる。"""
+        """base_slug は identity_key の最終セグメントを使い、空なら FALLBACK_SLUG になる。
+
+        Windows の repo root（`\\` 区切り）もディレクトリ名だけを使い、利用者名を含むパス全体をスラッグにしない。
+        """
         assert base_slug(identity) == expected
 
 
