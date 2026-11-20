@@ -20,6 +20,7 @@ command: /perf
     - クエリ例: `perf bottleneck {対象ファイルパス}`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: ステップ5 で、効いた・効かなかった最適化だけを `claq_mem_learn --kind pitfall` か `howto` で残す
+  - code-refiner・reviewer の報告にある学びの候補も同じ基準で取捨する（子は自分では書かない）
 
 ## ステップ1: 計測コマンドを決める
 

@@ -20,6 +20,7 @@ command: /refactor
     - クエリ例: `refactor clean simplify perf review {対象ファイルパス}` / `critical high blocker`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
 - 記録: ステップ8 の基準で `claq_mem_learn` を使う
+  - code-refiner・reviewer の報告にある学びの候補も同じ基準で取捨する（子は自分では書かない）
 - 相対パスの md: このファイルは `commands/` にある
   - プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 

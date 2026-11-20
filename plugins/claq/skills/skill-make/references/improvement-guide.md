@@ -24,10 +24,11 @@
 
 ## 上級編: 盲検比較
 
-スキルの 2 版をより厳密に比べたいときは、盲検比較を使える（`../../../agents/comparator.md` と `../../../agents/bench-analyzer.md`）。
+スキルの 2 版をより厳密に比べたいときは、盲検比較を使える（`claq:comparator` と `claq:bench-analyzer`。定義は `../../../agents/comparator.md` と `../../../agents/bench-analyzer.md`）。
 
 - どちらがどちらかを明かさずに 2 つの出力を独立したエージェントに渡して品質を判定させ、その勝因を分析する
 - bench-analyzer（`posthoc_comparison`）を使うのは、両方に SKILL.md がある `old_skill` との比較に限る
+- bench-analyzer の依頼文には `mode: posthoc_comparison` を書く
 - bench-analyzer へ渡すもの: `compare-<ID>/comparison.json`、`mapping.json` で引いた勝者・敗者それぞれの SKILL.md と run の `transcript.md`
 - `winner` が `TIE` の比較は bench-analyzer へ渡さない
 - 返値の改善案は、eval-workflow の「5. 分析結果をもとに改善する」の材料にする

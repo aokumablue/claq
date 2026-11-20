@@ -23,7 +23,9 @@ _DEFENSE_FIELD_RE = re.compile(r"^(?:## )?追加した防御|`追加した防御
 _STOP_HEADING_RE = re.compile(r"^## 停止点$", re.M)
 _IMPLEMENTATION_HEADING_RE = re.compile(r"^#{2,3} 実装の手順$", re.M)
 _PLANNER_MODE_RE = re.compile(r"mode: (?:evaluate|decide)")
-_RELATIVE_MD_HINT = '`. "$HOME/.claq/env.sh" && claq_plugin_root`'
+_CANDIDATE_REPORT = "候補を呼び出し元へ報告する"
+_CANDIDATE_CONSUME = "学びの候補"
+_RELATIVE_MD_HINT ='`. "$HOME/.claq/env.sh" && claq_plugin_root`'
 _DELEGATORS_LINE_RE = re.compile(r"^- `loop-dev` ← (.+)$", re.M)
 _DESCRIPTION_DELEGATORS_RE = re.compile(r"^description: .*?。([a-z/-]+) からの委譲専用。$", re.M)
 _SKILL_INVOCATION_RE = re.compile(r"`([a-z-]+)` skill")
@@ -119,6 +121,36 @@ def test_planner_callers_state_mode() -> None:
         if "`claq:planner` を起動" in text and not _PLANNER_MODE_RE.search(text)
     ]
     assert not missing, "planner の起動に mode 指定が無い:\n" + "\n".join(missing)
+
+
+def test_callers_of_candidate_reporting_agents_consume_candidates() -> None:
+    """学びの候補を呼び出し元へ報告する agent を起動する定義は、その候補を取捨する手順を持つ。
+
+    子は自分では知識カードを書かないため、呼び出し元が拾わなければ候補は失われる。
+    """
+    reporters = [
+        path.stem
+        for path, text in _corpus()
+        if path.parts[0] == "agents" and _CANDIDATE_REPORT in text
+    ]
+    assert reporters, "学びの候補を報告する agent が見つからない"
+    missing = [
+        str(path)
+        for path, text in _corpus()
+        if path.parts[0] != "agents"
+        and any(f"`claq:{name}`" in text for name in reporters)
+        and _CANDIDATE_CONSUME not in text
+    ]
+    assert not missing, "子の学びの候補を取捨する手順が無い:\n" + "\n".join(missing)
+
+
+def test_tdd_writer_receives_task_type_from_loop_dev() -> None:
+    """loop-dev は tdd-writer への依頼文に `task_type` を載せる（tdd-writer は `task_type: test` で経路を変える）。"""
+    loop_dev = (_ROOT / "skills" / "loop-dev" / "SKILL.md").read_text(encoding="utf-8")
+    tdd_writer = (_ROOT / "agents" / "tdd-writer.md").read_text(encoding="utf-8")
+    assert "`task_type: test`" in tdd_writer
+    forwarding = [line for line in loop_dev.splitlines() if "`task_type`" in line and "tdd-writer" in line]
+    assert forwarding, "loop-dev が tdd-writer へ task_type を渡す行が無い"
 
 
 def test_commands_with_relative_md_reference_state_base() -> None:
