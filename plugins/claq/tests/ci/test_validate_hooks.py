@@ -1,4 +1,4 @@
-"""claq.ci.validate_hooks と実リポジトリの hooks/hooks.json のテスト。"""
+"""claq_dev.validate_hooks と実リポジトリの hooks/hooks.json のテスト。"""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from claq_dev import validate_hooks
+from claq_dev.ci_common import PLUGIN_ROOT
+from claq_dev.validate_hooks import REQUIRED_EVENTS, REQUIRED_HOOKS_VERSION
 
-from claq.ci import validate_hooks
-from claq.ci.ci_common import PLUGIN_ROOT
-from claq.ci.validate_hooks import REQUIRED_EVENTS, REQUIRED_HOOKS_VERSION
 from claq.mem.cli import _COMMAND_HANDLERS
 
 from ._support import _exit_code_as_main
@@ -158,7 +158,7 @@ def test_validate_hooks_main_and_module_entrypoint(
     assert "個のフックマッチャーを検証しました" in capsys.readouterr().out
 
     monkeypatch.setattr(sys, "argv", ["validate_hooks.py", "--hooks-file", str(hooks_file)])
-    assert _exit_code_as_main("claq.ci.validate_hooks") == 0
+    assert _exit_code_as_main("claq_dev.validate_hooks") == 0
 
 
 # --- 単一フックエントリ -------------------------------------------------------

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-from claq.ci.ci_common import (
+from claq_dev.ci_common import (
     PLUGIN_ROOT,
     emit_error,
     extract_frontmatter,

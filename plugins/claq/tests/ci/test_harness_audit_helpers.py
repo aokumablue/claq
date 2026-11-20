@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from claq.ci import harness_audit, harness_audit_utils
-from claq.ci.harness_audit_repo_checks import (
+from claq_dev.harness_repo_checks import (
     _event_has_matching_command,
     _hook_command_argv,
     always_on_description_chars,
 )
+
+from claq.ci import harness_audit, harness_audit_utils
 
 from ._support import _isolate_home as _isolate_home
 from ._support import _write_files

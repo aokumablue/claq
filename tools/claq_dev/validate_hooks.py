@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from claq.ci.ci_common import (
+from claq_dev.ci_common import (
     PLUGIN_ROOT,
     emit_error,
     is_non_empty_string,

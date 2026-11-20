@@ -21,11 +21,11 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 {
   "scope": "repo",
   "root_dir": "/abs/path/to/repo",
-  "target_mode": "repo",
+  "target_mode": "consumer",
   "deterministic": true,
   "rubric_version": "2026-11-18",
-  "overall_score": 50,
-  "max_score": 58,
+  "overall_score": 18,
+  "max_score": 25,
   "categories": {},
   "checks": [],
   "top_actions": [{"action": "Fix ...", "path": "path/to/file", "category": "Quality Gates", "points": 3}]

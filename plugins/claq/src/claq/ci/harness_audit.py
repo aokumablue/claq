@@ -1,4 +1,8 @@
-"""ハーネス監査の決定論的スコアリングを行う。"""
+"""ハーネス監査の決定論的スコアリングを行う（利用者のプロジェクトを consumer モードで採点する）。
+
+採点の仕組み（scope の絞り込み・カテゴリ集計・表示・CLI）は ``assemble_report`` と ``run`` に置き、
+claq 自身のリポジトリを採点する開発用の repo モード（``claq_dev.harness_repo``）と共有する。
+"""
 
 from __future__ import annotations
 
@@ -9,10 +13,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
 
-from claq.ci.harness_audit_repo_checks import get_repo_checks
 from claq.ci.harness_audit_utils import (
     count_files,
-    detect_target_mode,
     file_has_content,
     find_plugin_install,
     has_file_with_extension,
@@ -38,7 +40,6 @@ CATEGORIES = [
 
 VALID_SCOPES = {"repo", "hooks", "skills", "commands", "agents"}
 VALID_FORMATS = {"text", "json"}
-VALID_TARGET_KINDS = {"repo", "consumer"}
 
 
 RUBRIC_VERSION = "2026-11-18"
@@ -60,19 +61,10 @@ def normalize_scope(scope: str | None) -> str:
     return value
 
 
-def _normalize_target_kind(value: str) -> str:
-    """--target-kind の値を正規化する。"""
-    normalized = value.lower()
-    if normalized not in VALID_TARGET_KINDS:
-        raise ValueError(f"Invalid target-kind: {value}. Use repo or consumer.")
-    return normalized
-
-
 _VALUE_OPTIONS: tuple[tuple[str, str, Callable[[str], Any]], ...] = (
     ("--format", "format", str.lower),
     ("--scope", "scope", normalize_scope),
     ("--root", "root", lambda value: Path(value).resolve()),
-    ("--target-kind", "target_kind", _normalize_target_kind),
 )
 """値を取るフラグ名・格納先キー・値の変換。"""
 
@@ -132,7 +124,7 @@ def parse_args(argv: Sequence[str] | None) -> dict[str, Any]:
         argv: 引数リスト。None なら ``sys.argv[1:]``。
 
     Raises:
-        ValueError: 不明な引数・値の欠落・不正な scope / format / target-kind の場合。
+        ValueError: 不明な引数・値の欠落・不正な scope / format の場合。
     """
     args = list(sys.argv[1:] if argv is None else argv)
     parsed: dict[str, Any] = {
@@ -140,7 +132,6 @@ def parse_args(argv: Sequence[str] | None) -> dict[str, Any]:
         "format": "text",
         "help": False,
         "root": Path(os.getcwd()).resolve(),
-        "target_kind": None,
     }
     index = 0
     while index < len(args):
@@ -344,52 +335,32 @@ def summarize_category_scores(checks: list[dict[str, Any]]) -> dict[str, dict[st
     return scores
 
 
-def _plugin_provider_hint(root_dir: Path) -> str:
-    """root 配下に plugin 提供元ディレクトリがあれば、`--root` の指定を促す 1 文を返す。
-
-    プラグイン提供元リポジトリのルートは、それ自体はプラグインではないので
-    consumer と判定される。「repo モードで測りたいのに consumer の点数が出る」を
-    自力で解けるよう、実際に指すべきパスを提示する。該当が無ければ空文字列。
-    """
-    providers = sorted((root_dir / "plugins").glob("*/.claude-plugin/plugin.json"))
-    if not providers:
-        return ""
-    paths = " ".join(str(path.parent.parent.relative_to(root_dir)) for path in providers)
-    return f" このルートには plugin 提供元ディレクトリがあります: --root {paths}"
-
-
-def build_report(scope: str, root_dir: str | Path, target_mode: str | None = None) -> dict[str, Any]:
-    """監査レポートを組み立てる。
-
-    `target_mode` を明示した場合、自動判定（`detect_target_mode`）と不一致なら
-    ValueError を送出する。誤った作業ルートを監査していることに、明示指定と
-    自動判定の食い違いで気付けるようにするため、黙って明示値を信用しない。
+def build_report(scope: str, root_dir: str | Path) -> dict[str, Any]:
+    """利用者のプロジェクトを consumer モードで採点したレポートを組み立てる。
 
     Args:
         scope: 監査スコープ。
         root_dir: 監査対象のルート。
-        target_mode: ``"repo"`` / ``"consumer"`` を明示する場合に指定する。
-            None なら自動判定に任せる。
-
-    Raises:
-        ValueError: 明示した target_mode が自動判定と食い違う場合。
     """
     resolved_root = Path(root_dir).resolve()
-    detected_mode = detect_target_mode(resolved_root)
-    if target_mode is not None and target_mode != detected_mode:
-        raise ValueError(
-            f"--target-kind {target_mode} does not match the auto-detected mode "
-            f"({detected_mode}) for root {resolved_root}. Pass the correct root, "
-            "or omit --target-kind to use auto-detection."
-            + _plugin_provider_hint(resolved_root)
-        )
-    resolved_mode = target_mode or detected_mode
-    hosting_service = detect_git_hosting_service(resolved_root)
-    checks_source = (
-        get_repo_checks(resolved_root)
-        if resolved_mode == "repo"
-        else get_consumer_checks(resolved_root, hosting_service)
-    )
+    checks = get_consumer_checks(resolved_root, detect_git_hosting_service(resolved_root))
+    return assemble_report(scope, resolved_root, "consumer", checks)
+
+
+def assemble_report(
+    scope: str, root_dir: Path, target_mode: str, checks_source: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """チェック定義を scope で絞り、カテゴリ集計と上位の改善案を添えたレポートにする。
+
+    Args:
+        scope: 監査スコープ。
+        root_dir: 監査対象のルート（解決済み）。
+        target_mode: レポートに記す採点モード（``"consumer"`` / ``"repo"``）。
+        checks_source: 採点モードのチェック定義。
+
+    Raises:
+        AssertionError: カテゴリの獲得点の合計が全体の獲得点と一致しない場合。
+    """
     checks = [check for check in checks_source if scope in check["scopes"]]
     category_scores = summarize_category_scores(checks)
     max_score = sum(check["points"] for check in checks)
@@ -406,8 +377,8 @@ def build_report(scope: str, root_dir: str | Path, target_mode: str | None = Non
     failed_checks = sorted((check for check in checks if not check["pass"]), key=lambda c: c["points"], reverse=True)
     return {
         "scope": scope,
-        "root_dir": str(resolved_root),
-        "target_mode": resolved_mode,
+        "root_dir": str(root_dir),
+        "target_mode": target_mode,
         "deterministic": True,
         "rubric_version": RUBRIC_VERSION,
         "overall_score": overall_score,
@@ -449,30 +420,32 @@ def print_text(report: dict[str, Any]) -> None:
             print(f"{index}) [{action['category']}] {action['action']} ({action['path']})")
 
 
-def show_help() -> NoReturn:
-    """ヘルプを表示して終了コード 0 で終了する。"""
-    print(
-        """
+_USAGE = """
 Usage: python3 "${CLAUDE_PLUGIN_ROOT}/src/claq/launcher.py" claq.ci.harness_audit [scope] [--scope <repo|hooks|skills|commands|agents>] [--format <text|json>]
-       [--root <path>] [--target-kind <repo|consumer>]
+       [--root <path>]
 
-Deterministic harness audit based on explicit file/rule checks.
-Audits the current working directory by default and auto-detects repo vs consumer-project mode.
---target-kind asserts the expected mode; the audit fails if it disagrees with auto-detection
-(catches auditing the wrong root, e.g. a plugin provider repo without --root pointing at the
-provider directory).
+Deterministic harness audit of a project that uses claq (consumer mode), based on explicit file/rule checks.
+Audits the current working directory by default.
 """
-    )
+
+
+def show_help(usage: str) -> NoReturn:
+    """ヘルプを表示して終了コード 0 で終了する。"""
+    print(usage)
     raise SystemExit(0)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """CLI のエントリポイント。"""
+def run(argv: Sequence[str] | None, build: Callable[[str, Path], dict[str, Any]], usage: str) -> int:
+    """CLI 引数を解釈し、``build(scope, root)`` が返すレポートを出力する。
+
+    Returns:
+        チェックが全件合格なら 0、不合格があれば 1、引数・入出力の失敗も 1。
+    """
     try:
         args = parse_args(argv)
         if args["help"]:
-            show_help()
-        report = build_report(args["scope"], root_dir=args["root"], target_mode=args["target_kind"])
+            show_help(usage)
+        report = build(args["scope"], args["root"])
         if args["format"] == "json":
             print(json.dumps(report, indent=2, ensure_ascii=False))
         else:
@@ -481,6 +454,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI のエントリポイント。"""
+    return run(argv, build_report, _USAGE)
 
 
 if __name__ == "__main__":

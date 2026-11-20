@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 
-from claq.ci.ci_common import (
+from claq_dev.ci_common import (
     PLUGIN_ROOT,
     emit_error,
     list_markdown_files,
@@ -15,7 +15,7 @@ from claq.ci.ci_common import (
     report_errors,
     report_missing,
 )
-from claq.lib.frontmatter import FrontmatterError, MissingFrontmatterError, parse_yaml, split_frontmatter
+from claq_dev.frontmatter import FrontmatterError, MissingFrontmatterError, parse_yaml, split_frontmatter
 
 DEFAULT_ROOT_DIR = PLUGIN_ROOT
 DEFAULT_COMMANDS_DIR = PLUGIN_ROOT / "commands"

@@ -211,18 +211,17 @@ mtime は判定に使わない（WAL のチェックポイントは読み取り�
 
 ### scan_scaffold_drift（足場タグ denylist の陳腐化検知）
 
-`ci/scan_scaffold_drift.py` は、`lib/harness.py` の `SCAFFOLD_TAGS` から漏れた新しい足場タグを実 transcript から検知する。
+`tools/claq_dev/scan_scaffold_drift.py` は、`lib/harness.py` の `SCAFFOLD_TAGS` から漏れた新しい足場タグを実 transcript から検知する。
 コンポーネントのインベントリとは別の単位で、コンポーネント数には加えない。
 
 ```bash
-. "$HOME/.claq/env.sh" || exit 127
-claq_run claq.ci.scan_scaffold_drift
+python3 -m claq_dev.scan_scaffold_drift   # リポジトリ直下の .venv を有効化して実行する
 ```
 
 - `0`（ドリフトなし）: 対応不要
 - `1`（未知の足場タグ検出）: 実 transcript による一次証跡なので、通常の指摘として裁定に載せる
   - 3 択の振り分けは `../maintain/SKILL.md` `## ステップ5: final gate` に従う
-- `2`（走査対象ゼロ）と `127`（`claq_run` が root ポインタ未記録で解決できない）: 合格ではなく未実施
+- `2`（走査対象ゼロ）: 合格ではなく未実施
   - コンポーネント単位の `Not run` とは別に数え、出力に `Scaffold-Drift: NOT-RUN` を必ず書く
 
 ### 裁定の規則

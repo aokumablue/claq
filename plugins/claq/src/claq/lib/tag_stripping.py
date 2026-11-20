@@ -80,7 +80,7 @@ from claq.lib.redaction import PLACEHOLDER, redact
 # 無害化対象タグ（大文字小文字区別なし）。正規表現へ literal として埋めるため、
 # 正規表現メタ文字を含まない名前だけを置く。
 #
-# 診断側（ci/scan_scaffold_drift.py）が「既知タグ」を組み立てるための公開名でもある。
+# 診断側（tools/claq_dev/scan_scaffold_drift.py）が「既知タグ」を組み立てるための公開名でもある。
 # これは**ブロック除去**の語彙であり、escape の語彙（`_NEUTRALIZE_TAGS`）とは
 # 別物で、後者のほうが広い。診断側が知りたいのは「中身ごと落としたブロック」の
 # 名前なのでこちらを渡す。escape の語彙へ名前を足しても診断側の既知集合は
@@ -261,7 +261,7 @@ def drop_known_tag_blocks(text: str) -> str:
     ``_MAX_NESTING_PASSES`` を上限に反復する。上限超過分が残っても
     ``strip_tags`` 後段のエスケープが無害化する。
 
-    公開しているのは診断側（``ci/scan_scaffold_drift``）のためである。あちらが
+    公開しているのは診断側（``tools/claq_dev/scan_scaffold_drift``）のためである。あちらが
     欲しいのは「中身ごと落としたブロックの内側タグを未知タグとして数えない」
     ことだけで、無害化は要らない。``strip_tags`` は秘密の分断を検出すると本文を
     ``[REDACTED]`` へ倒し、未知タグが見えなくなる。ドリフト診断が最も見たいのは

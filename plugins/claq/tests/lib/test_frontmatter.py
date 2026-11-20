@@ -1,10 +1,9 @@
-"""claq.lib.frontmatter の単体テスト（厳格モードと寛容モード）。"""
+"""claq_dev.frontmatter の単体テスト（厳格モードと寛容モード）。"""
 
 from __future__ import annotations
 
 import pytest
-
-from claq.lib.frontmatter import (
+from claq_dev.frontmatter import (
     FrontmatterError,
     MissingFrontmatterError,
     UnterminatedFrontmatterError,

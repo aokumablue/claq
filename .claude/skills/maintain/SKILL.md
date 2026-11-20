@@ -58,13 +58,12 @@ commands/skills/agents/hooks をレビューし、実害を直し、効いてい
 
 baseline を取る（リポジトリ直下の `.venv` を有効化する）。
 
-- `python3 -m pytest -q`（全体）と `cd plugins/claq && python3 -m pytest -q --cov`（カバレッジ）
-- `ruff check plugins/claq`
-- `python3 -m claq.ci.validate_skills`（`validate_commands` / `validate_agents` / `validate_hooks` も同じ形で 4 つすべて）
-- `python3 -m claq.ci.harness_audit repo --root plugins/claq --target-kind repo --format json`
+- `python3 -m pytest -q --cov`（リポジトリ直下。全体とカバレッジ 100% をここで判定する）
+- `ruff check .`
+- `python3 -m claq_dev.validate_skills`（`validate_commands` / `validate_agents` / `validate_hooks` も同じ形で 4 つすべて）
+- `python3 -m claq_dev.harness_repo repo --root plugins/claq --format json`
   - audit の scope は `repo|hooks|skills|commands|agents` のキーワードで、本スキルの `--scope`（パス）とは別物
-  - `--root` を省くとリポジトリ直下が対象になって consumer と誤判定され、provider 側の checks を見なくなる
-  - `--target-kind repo` は自動判定との食い違いを FAIL で検出する
+  - `--root` を省くとリポジトリ直下が対象になり、プラグインの surfaces を見ない
 
 既存の失敗を記録し、新しい失敗の判定基準にする。
 
@@ -149,14 +148,13 @@ hooks / `src/claq/hooks/` を含む回は、両ハーネス互換（原則4）�
    - exit 2（走査対象ゼロ）は未実施として報告し、繰り返しの条件にしない
 
 ```bash
-. "$HOME/.claq/env.sh" || exit 127
-claq_run claq.ci.scan_scaffold_drift
+python3 -m claq_dev.scan_scaffold_drift
 ```
 
 exit 1（未知の足場タグを検出）は、次の 3 択から判断して振り分ける。
 
 1. ホストが生成した足場 → `lib/harness.py` の `SCAFFOLD_TAGS` へ追加
-2. 依頼本文に現れる良性の HTML タグ → `ci/scan_scaffold_drift.py` の `BENIGN_TAGS` へ追加
+2. 依頼本文に現れる良性の HTML タグ → `tools/claq_dev/scan_scaffold_drift.py` の `BENIGN_TAGS` へ追加
 3. どちらでもない（依頼本文がコード片として引用しただけ等）→ コードスパンの除去で落ちるはずなので、落ちないなら除去側の穴
 
 緑にするためだけに `BENIGN_TAGS` へ語を足さない（`document` のようにホストの足場にもなりうる語を入れると、将来の本物の漏れを黙って握り潰す）。

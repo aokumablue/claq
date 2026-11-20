@@ -16,13 +16,11 @@ def _write_files(root: Path, files: dict[str, str]) -> None:
         path.write_text(content, encoding="utf-8")
 
 
-def _write_repo_markers(root: Path, *, include_harness: bool = True) -> None:
-    """repo モード判定に必要なマーカー（plugin.json・agents・skills・harness_audit.py）を作る。"""
-    _write_files(root, {".claude-plugin/plugin.json": "{}"})
+def _write_repo_markers(root: Path) -> None:
+    """プラグイン提供元の最小構造（plugin.json・agents・skills・harness_audit.py）を作る。"""
+    _write_files(root, {".claude-plugin/plugin.json": "{}", "src/claq/ci/harness_audit.py": ""})
     (root / "agents").mkdir(exist_ok=True)
     (root / "skills").mkdir(exist_ok=True)
-    if include_harness:
-        _write_files(root, {"src/claq/ci/harness_audit.py": ""})
 
 
 def _exit_code_as_main(module_name: str) -> object:

@@ -252,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name}: {files} ファイル", file=sys.stderr)
     print(
         "足場なら lib/harness.py の SCAFFOLD_TAGS へ、依頼本文に現れる良性タグなら"
-        " ci/scan_scaffold_drift.py の BENIGN_TAGS へ追加してください。",
+        " tools/claq_dev/scan_scaffold_drift.py の BENIGN_TAGS へ追加してください。",
         file=sys.stderr,
     )
     return EXIT_DRIFT

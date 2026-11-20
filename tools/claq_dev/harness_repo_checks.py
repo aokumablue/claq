@@ -1,4 +1,4 @@
-"""ハーネス監査の repo モード向けチェック定義群。"""
+"""claq 自身のリポジトリを採点する repo モードのチェック定義群。"""
 
 from __future__ import annotations
 
@@ -9,16 +9,21 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from claq.ci.ci_common import extract_frontmatter
 from claq.ci.harness_audit_utils import (
     count_files,
-    file_exists,
     file_has_content,
     make_check,
     safe_parse_json,
     safe_read,
 )
 from claq.hooks.shell_tokens import basename_any_separator
+from claq_dev.ci_common import extract_frontmatter
+
+
+def file_exists(root_dir: str | Path, relative_path: str) -> bool:
+    """相対パスが存在するかを確認する。"""
+    return Path(root_dir, relative_path).exists()
+
 
 _HOOK_WRAPPER_BASENAMES = {"claq-hook", "claq-hook.cmd"}
 

@@ -1,7 +1,7 @@
 ---
 name: harness
 description: ハーネスを監査して改善案を示す。適用は `--apply` 指定時のみ。
-argument-hint: "[scope] [--format=text|json] [--root=<path>] [--target-kind=repo|consumer] [--audit-only] [--apply]"
+argument-hint: "[scope] [--format=text|json] [--root=<path>] [--audit-only] [--apply]"
 command: /harness
 ---
 
@@ -26,21 +26,20 @@ command: /harness
 
 ## 使い方
 
-- `claq_run` には `--root` と `--target-kind repo|consumer` を常に渡す（渡さないと cwd から自動判定され、provider リポジトリ直下を consumer と誤判定しうる）
-- ユーザーが省いたら、監査対象のルートと種別を自分で決めて渡す
+- `claq_run` には `--root` を常に渡す（ユーザーが省いたら、監査対象のプロジェクトのルートを自分で決めて渡す）
 
 ## ステップ1: ベースライン取得
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127
-claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path> --target-kind <repo|consumer>
+claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path>
 ```
 
 スコアカードを出力する。
 
 - `--apply` 指定時は harness-tuner へ生の JSON を渡すため `--format json` で実行し、表示はその JSON から整形する（text 出力に JSON は含まれない）
 - `--audit-only` は /harness の制御フラグで `claq_run` へは渡さない
-- `--root` / `--target-kind` はステップ4 の比較まで同じ値を保つ
+- `--root` はステップ4 の比較まで同じ値を保つ
 
 採点はこのスクリプトの出力だけを根拠にし、手で採点しない。
 
@@ -60,7 +59,7 @@ harness-tuner の出力が届かない、または先頭行が `FAIL:` なら、
 
 ```bash
 . "$HOME/.claq/env.sh" || exit 127
-claq_run claq.ci.harness_audit <scope> --format json --root <path> --target-kind <repo|consumer>
+claq_run claq.ci.harness_audit <scope> --format json --root <path>
 ```
 
 ステップ1 と同じ `--format json` で採取する（カテゴリ別の差分を両方の JSON から計算するため）。
@@ -75,6 +74,5 @@ claq_run claq.ci.harness_audit <scope> --format json --root <path> --target-kind
 - `--scope=<scope>`: 位置引数の別名
 - `--format=text|json`（既定: `text`）
 - `--root=<path>`: 監査対象ルート
-- `--target-kind=repo|consumer`: 期待する判定モード（自動判定と食い違えば FAIL）
 - `--audit-only`: ステップ1 だけで終える
 - `--apply`: トップ3を harness-tuner に適用させる（ステップ3〜5）

@@ -1,6 +1,6 @@
 """claq テスト向けの Pytest 設定と共有フィクスチャ。
 
-テストのインポート用に plugin root 配下の src/ が Python パスへ含まれることを保証し、
+テストのインポート用に plugin root 配下の src/ と開発ツールの tools/ が Python パスへ含まれることを保証し、
 利用者の git 設定と host マーカー環境変数を全テストから切り離す。
 """
 
@@ -17,9 +17,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "plugins" / "claq" / "src"
+TOOLS = ROOT / "tools"
 
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+for _path in (SRC, TOOLS):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 _GIT_CONFIG_ENV_NAMES = frozenset({"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"})
 _GIT_CONFIG_ENV_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")

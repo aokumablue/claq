@@ -5,8 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from claq.ci import ci_common
+from claq_dev import ci_common
 
 
 def test_read_json_parses_and_wraps_decode_errors(tmp_path: Path) -> None:

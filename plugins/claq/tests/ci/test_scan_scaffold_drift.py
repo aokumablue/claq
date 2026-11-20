@@ -1,4 +1,4 @@
-"""claq.ci.scan_scaffold_drift のテスト。"""
+"""claq_dev.scan_scaffold_drift のテスト。"""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import time
 from pathlib import Path
 
 import pytest
+from claq_dev import scan_scaffold_drift as scanner
 
-from claq.ci import scan_scaffold_drift as scanner
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS
 from claq.lib.tag_stripping import STRIPPED_TAGS
 
@@ -250,7 +250,7 @@ class TestMain:
         monkeypatch.setattr(sys, "argv", ["scan_scaffold_drift", "--root", str(tmp_path / "empty")])
 
         assert scanner.main() == scanner.EXIT_NOTHING_SCANNED
-        assert _exit_code_as_main("claq.ci.scan_scaffold_drift") == scanner.EXIT_NOTHING_SCANNED
+        assert _exit_code_as_main("claq_dev.scan_scaffold_drift") == scanner.EXIT_NOTHING_SCANNED
 
 
 class TestStripCodeSpans:

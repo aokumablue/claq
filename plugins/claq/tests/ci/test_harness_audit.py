@@ -11,7 +11,7 @@ import pytest
 from claq.ci import harness_audit
 from claq.ci.harness_audit_utils import make_check
 
-from ._support import _exit_code_as_main, _write_files, _write_repo_markers
+from ._support import _exit_code_as_main, _write_files
 from ._support import _isolate_home as _isolate_home
 
 
@@ -22,17 +22,15 @@ from ._support import _isolate_home as _isolate_home
         (["hooks", "--format=json", "--scope", "skills"], {"scope": "skills", "format": "json"}),
         (["--scope=skills", "--format=json", "--root", "sub"], {"scope": "skills", "format": "json", "root": "sub"}),
         (["--help", "--format", "json", "--root=sub"], {"help": True, "format": "json", "root": "sub"}),
-        (["--target-kind", "repo"], {"target_kind": "repo"}),
-        (["--target-kind=consumer"], {"target_kind": "consumer"}),
     ],
-    ids=["defaults", "positional-then-flag", "equals-and-space", "help-and-long-form", "kind-repo", "kind-consumer"],
+    ids=["defaults", "positional-then-flag", "equals-and-space", "help-and-long-form"],
 )
 def test_parse_args_accepts_values(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str], expected: dict[str, object]
 ) -> None:
     """値の 2 形式・位置引数・ヘルプを解釈し、未指定は既定値になる（root は cwd 基準で解決）。"""
     monkeypatch.chdir(tmp_path)
-    defaults = {"scope": "repo", "format": "text", "help": False, "target_kind": None}
+    defaults = {"scope": "repo", "format": "text", "help": False}
 
     assert harness_audit.parse_args(argv) == {
         **defaults,
@@ -53,20 +51,17 @@ def test_option_value_returns_value_and_next_index() -> None:
         (["--format"], "--format requires a non-empty value"),
         (["--root"], "--root requires a non-empty value"),
         (["--scope"], "--scope requires a non-empty value"),
-        (["--target-kind"], "--target-kind requires a non-empty value"),
         (["--root="], "--root requires a non-empty value"),
         (["--root", "--help"], "--root requires a non-empty value"),
         (["--scope", "--format"], "--scope requires a non-empty value"),
-        (["--target-kind", "--help"], "--target-kind requires a non-empty value"),
         (["--format", "--help"], "--format requires a non-empty value"),
         (["--format=xml"], "Invalid format"),
         (["--bogus"], "Unknown argument: --bogus"),
-        (["--target-kind", "provider"], "Invalid target-kind"),
     ],
     ids=[
-        "format-missing", "root-missing", "scope-missing", "kind-missing", "root-empty",
-        "root-eats-help", "scope-eats-format", "kind-eats-help", "format-eats-help",
-        "format-invalid", "unknown-flag", "kind-invalid",
+        "format-missing", "root-missing", "scope-missing", "root-empty",
+        "root-eats-help", "scope-eats-format", "format-eats-help",
+        "format-invalid", "unknown-flag",
     ],
 )
 def test_parse_args_rejects_invalid_arguments(argv: list[str], match: str) -> None:
@@ -87,39 +82,8 @@ def test_normalize_scope_defaults_lowercases_and_rejects_unknown() -> None:
         harness_audit.normalize_scope("bad")
 
 
-@pytest.mark.parametrize(
-    ("include_harness", "expected"), [(True, "repo"), (False, "consumer")], ids=["python-marker", "js-marker-only"]
-)
-def test_detect_target_mode_requires_python_harness_marker(
-    tmp_path: Path, include_harness: bool, expected: str
-) -> None:
-    """repo 判定には harness_audit.py が要り、JS 版のマーカーは数えない。"""
-    _write_repo_markers(tmp_path, include_harness=include_harness)
-    _write_files(tmp_path, {"scripts/harness-audit.js": ""})
-
-    assert harness_audit.detect_target_mode(tmp_path) == expected
-
-
-@pytest.mark.parametrize("target_mode", [None, "repo"], ids=["auto", "explicit-match"])
-def test_build_report_scores_repo_markers_in_repo_mode(tmp_path: Path, target_mode: str | None) -> None:
-    """repo マーカーだけの root は repo モードで採点され、明示指定が自動判定と一致しても同じ結果になる。
-
-    surface が 1 つも無い fixture では予算系 2 件（context-always-on-budget /
-    cost-no-oversized-surface）が自明に通る。surface の欠落は tool-agent-count / tool-skill-count が見る。
-    """
-    _write_repo_markers(tmp_path)
-    (tmp_path / "commands").mkdir()
-
-    report = harness_audit.build_report("repo", root_dir=tmp_path, target_mode=target_mode)
-
-    assert report["target_mode"] == "repo"
-    assert (report["overall_score"], report["max_score"], len(report["checks"])) == (5, 58, 22)
-    assert report["categories"]["Tool Coverage"]["max_points"] == 10
-    assert report["top_actions"][0]["path"] == "hooks/hooks.json"
-
-
 def test_build_report_scores_empty_root_in_consumer_mode(tmp_path: Path) -> None:
-    """空の root は consumer モードで 0 点になり、配点の高い不合格から top_actions に並ぶ。"""
+    """空の root は 0 点になり、配点の高い不合格から top_actions に並ぶ。"""
     report = harness_audit.build_report("repo", root_dir=tmp_path)
 
     assert report["target_mode"] == "consumer"
@@ -140,7 +104,7 @@ def test_build_report_consumer_checks_follow_project_files(tmp_path: Path) -> No
         },
     )
 
-    report = harness_audit.build_report("repo", root_dir=tmp_path, target_mode="consumer")
+    report = harness_audit.build_report("repo", root_dir=tmp_path)
 
     assert {check["id"] for check in report["checks"] if check["pass"]} == {
         "consumer-project-overrides",
@@ -212,33 +176,13 @@ def test_build_report_top_actions_pick_highest_failing_points(monkeypatch: pytes
     assert (report["overall_score"], report["max_score"]) == (5, 16)
 
 
-@pytest.mark.parametrize(
-    ("with_provider", "match"),
-    [
-        (False, "does not match the auto-detected mode"),
-        (True, r"does not match the auto-detected mode.*--root plugins/demo"),
-    ],
-    ids=["plain", "provider-hint"],
-)
-def test_build_report_target_kind_mismatch_raises(tmp_path: Path, with_provider: bool, match: str) -> None:
-    """明示 target_kind が自動判定と食い違えば FAIL し、提供元ディレクトリがあれば --root の指定先を案内する。
-
-    プラグイン提供元リポジトリのルートはそれ自体はプラグインではないので consumer と判定される。
-    """
-    if with_provider:
-        _write_files(tmp_path, {"plugins/demo/.claude-plugin/plugin.json": "{}"})
-
-    with pytest.raises(ValueError, match=match):
-        harness_audit.build_report("repo", root_dir=tmp_path, target_mode="repo")
-
-
 def test_summarize_self_check_detects_broken_aggregation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """カテゴリ earned_points の合計が overall_score と一致しなければ落とす（取りこぼし・二重計上の検出）。"""
     zero = {"earned_points": 0, "max_points": 0, "normalized_score": 0}
     monkeypatch.setattr(
         harness_audit, "summarize_category_scores", lambda _checks: dict.fromkeys(harness_audit.CATEGORIES, zero)
     )
-    _write_repo_markers(tmp_path)
+    _write_files(tmp_path, {".gitignore": ".env\n"})
 
     with pytest.raises(AssertionError, match="一致しません"):
         harness_audit.build_report("repo", root_dir=tmp_path)
@@ -329,8 +273,7 @@ def test_main_help_exits_zero_and_errors_return_one(
 
 
 def test_main_entrypoint_exits_with_audit_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """`python -m` 起動は main の戻り値で終了し、不合格のある repo では 1 になる。"""
-    _write_repo_markers(tmp_path)
+    """`python -m` 起動は main の戻り値で終了し、不合格のあるプロジェクトでは 1 になる。"""
     monkeypatch.setattr(sys, "argv", ["harness_audit.py", "--scope", "repo", "--format=json", "--root", str(tmp_path)])
 
     assert _exit_code_as_main("claq.ci.harness_audit") == 1

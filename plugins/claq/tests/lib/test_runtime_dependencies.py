@@ -44,13 +44,11 @@ MIN_PYTHON = (3, 12)
 
 # claq が import してよいトップレベルモジュール名。
 #
-# `claq` 以外はすべて Python 3.12 の標準ライブラリである（最も新しい `tomllib`
-# でも 3.11 追加で、下限を下回らない）。ここへ名前を足すときは、追加した
+# `claq` 以外はすべて Python 3.12 の標準ライブラリである。ここへ名前を足すときは、追加した
 # モジュールが 3.12 に存在することを確認すること —— 実行中インタプリタに
 # あるかどうかは根拠にならない（上記の欠陥そのもの）。
 ALLOWED_TOP_LEVEL_MODULES = frozenset({
     "__future__",
-    "argparse",
     "bisect",
     "collections",
     "contextlib",
@@ -75,7 +73,6 @@ ALLOWED_TOP_LEVEL_MODULES = frozenset({
     "tempfile",
     "threading",
     "time",
-    "tomllib",
     "types",
     "typing",
     "unicodedata",

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from claq.lib.core_utils import get_plugin_root
-from claq.lib.frontmatter import FrontmatterError, parse_yaml, split_frontmatter
+from claq_dev.frontmatter import FrontmatterError, parse_yaml, split_frontmatter
 
 PLUGIN_ROOT = get_plugin_root()
 

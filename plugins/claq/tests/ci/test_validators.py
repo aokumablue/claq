@@ -8,9 +8,8 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-
-from claq.ci import validate_agents, validate_commands, validate_skills
-from claq.ci.ci_common import extract_frontmatter
+from claq_dev import validate_agents, validate_commands, validate_skills
+from claq_dev.ci_common import extract_frontmatter
 
 from ._support import _exit_code_as_main, _write_files
 

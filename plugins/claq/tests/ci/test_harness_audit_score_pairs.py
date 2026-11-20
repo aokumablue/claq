@@ -16,9 +16,9 @@ import json
 from pathlib import Path
 
 import pytest
+from claq_dev.harness_repo_checks import get_repo_checks
 
 from claq.ci import harness_audit
-from claq.ci.harness_audit_repo_checks import get_repo_checks
 
 from ._support import _isolate_home as _isolate_home
 from ._support import _write_files
@@ -36,7 +36,7 @@ def _repo_check(root_dir: Path, check_id: str) -> dict[str, object]:
 
 def _consumer_check_pass(root_dir: Path, check_id: str) -> bool:
     """consumer モードのチェック 1 件の合否を返す。"""
-    report = harness_audit.build_report("repo", root_dir=root_dir, target_mode="consumer")
+    report = harness_audit.build_report("repo", root_dir=root_dir)
     return next(check for check in report["checks"] if check["id"] == check_id)["pass"]
 
 

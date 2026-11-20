@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from claq.ci.ci_common import extract_frontmatter
+from claq_dev.ci_common import extract_frontmatter
 
 _ROOT = Path(__file__).resolve().parents[1]
 _TARGET_DIRS = ("agents", "skills", "commands")
