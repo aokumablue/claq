@@ -14,6 +14,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import TextIO
 
 from claq.hooks.shell_tokens import basename_any_separator, normalize_executable_name
 from claq.lib.core_utils import get_home_dir
@@ -315,6 +316,28 @@ def effective_basename(raw_path: str) -> str:
     return resolved.name if resolved is not None else basename(raw_path)
 
 
+def _flush_or_discard(stream: TextIO | None) -> None:
+    """ストリームを今 flush し、書けなければ fd を devnull へ付け替えて残りを捨てる。
+
+    パイプへの書込みはバッファに溜まるだけで、読み手が居なくても ``write`` は失敗しない。
+    失敗はインタプリタ終了時の flush で起き、Python はそこで終了コードを 120 に書き換える。
+    deny の exit 2 が 120 になると、PreToolUse では non-blocking error ＝ ツール実行へ反転する。
+    ここで flush して失敗を握り、fd を devnull へ向ければ、終了時の flush は残りを devnull へ
+    書いて成功し、終了コードは変わらない。
+
+    Args:
+        stream: flush する出力ストリーム。fd 1 / 2 が閉じた状態で起動したときは None。
+    """
+    try:
+        stream.flush()
+    except Exception:
+        with contextlib.suppress(Exception):
+            fd = stream.fileno()
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, fd)
+            os.close(devnull)
+
+
 def emit_block_output(reason: str) -> int:
     """ツール実行ブロックを host 非依存の合併出力で stdout/stderr に書き出す。
 
@@ -322,7 +345,8 @@ def emit_block_output(reason: str) -> int:
     返すこと。出力層の例外（host がパイプを閉じたときの BrokenPipeError 等）が抜けると
     exit 1 になり、PreToolUse では non-blocking error ＝ ツールが実行されて deny が
     allow へ反転する。出力の唯一の口であるここで握り潰し、判定は exit code で運ぶ
-    （docs/adr/hook-failure-direction.md）。
+    （docs/adr/hook-failure-direction.md）。書いた出力はここで flush する。終了時の flush に
+    任せると、そこでの失敗が終了コードを 120 に変える（`_flush_or_discard`）。
 
     Args:
         reason: ブロック理由（ユーザー / エージェントに提示される）。
@@ -333,5 +357,7 @@ def emit_block_output(reason: str) -> int:
     with contextlib.suppress(Exception):
         write_stdout(adapt_deny_output(reason))
         write_stderr(reason + "\n")
+    _flush_or_discard(sys.stdout)
+    _flush_or_discard(sys.stderr)
     return 2
 
