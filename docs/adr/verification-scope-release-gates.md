@@ -79,7 +79,10 @@ installed tree だけを見て pytest を実行すると「テストが無い」
 1. ホストの strict validate がプラグインに対して PASS する
 2. ホストへ plugin detail を問い合わせた出力に、実ディレクトリと一致する Skills / Agents 数が
    現れる
-3. debug log にプラグインコンポーネント読み取り失敗のエラーが 0 件である
+3. debug log にプラグインコンポーネント読み取り失敗のエラーが 0 件である。hooks.json の
+   `version` に対する未知キーの記録（`unknown key "version" ignored`）は数えない。`version` は
+   Copilot CLI が hooks ファイルの形式として求めるキーで、Claude Code はこのキーを無視して読み込みを
+   続ける
 
 **CLI に依存しない静的ゲートも併置する。** ホストの CLI が PATH に無い環境ではホスト確認は実行
 できず、skip されるゲートはゲートとして機能しない。そのため、manifest が `agents` を宣言して

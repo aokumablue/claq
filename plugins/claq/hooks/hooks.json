@@ -13,8 +13,7 @@
             "timeout": 15,
             "onFailure": "continue"
           }
-        ],
-        "description": "git hook-bypassフラグをブロックして、pre-commit、commit-msg、pre-pushフックがスキップされないように保護します。"
+        ]
       },
       {
         "matcher": "^(Bash|bash|shell|run_terminal_command|PowerShell|powershell)$",
@@ -26,8 +25,7 @@
             "timeout": 30,
             "onFailure": "continue"
           }
-        ],
-        "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
+        ]
       },
       {
         "matcher": "^(Bash|bash|shell|run_terminal_command|PowerShell|powershell)$",
@@ -39,8 +37,7 @@
             "timeout": 15,
             "onFailure": "continue"
           }
-        ],
-        "description": "Bashのリダイレクト/tee/sed -iなどによる、linter/formatter設定・.git/hooks・gitのフック無効化設定・claq自身のhooks.json・ホスト設定への直接書き換えをブロックします（config_protectionのEdit/Write限定を補完）。"
+        ]
       },
       {
         "matcher": "^(Edit|Write|MultiEdit|edit|write|multiedit|apply_patch|search_replace)$",
@@ -52,8 +49,7 @@
             "timeout": 15,
             "onFailure": "continue"
           }
-        ],
-        "description": "linter/formatterの設定ファイルへの変更をブロックします。エージェントが設定を弱めるのではなく、コードを修正するように導きます。"
+        ]
       }
     ],
     "PreCompact": [
@@ -66,8 +62,7 @@
             "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.pre_compact",
             "timeout": 15
           }
-        ],
-        "description": "コンテキスト圧縮の発生を ~/.claq/session-data/compaction-log.txt に記録します（ブロックしません）"
+        ]
       }
     ],
     "SessionStart": [
@@ -80,8 +75,7 @@
             "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.mem.cli context",
             "timeout": 20
           }
-        ],
-        "description": "永続メモリから共通知識・リポジトリ知識・前回の引き継ぎを <claq-memory> として注入する（DB が無ければ作成）"
+        ]
       }
     ],
     "SessionEnd": [
@@ -95,8 +89,7 @@
             "async": true,
             "timeout": 10
           }
-        ],
-        "description": "セッション終了時に次セッションへの引き継ぎを sessions.handoff へ記録する（非ブロッキング）"
+        ]
       }
     ]
   }
