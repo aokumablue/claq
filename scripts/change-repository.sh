@@ -599,7 +599,7 @@ if [[ -d "${VENV_DIR}" ]]; then
   if [[ "${STALE_FOUND}" == false ]]; then
     echo "  .venv に旧名の editable install 残骸はありません"
   fi
-  echo "  → 'bash scripts/install-dev.sh' を再実行して editable install を張り直してください"
+  echo "  → '.venv/bin/python -m pip install -e \"plugins/${PLUGIN_NAME}[dev]\"' で editable install を張り直してください"
 else
   echo "  .venv なし（スキップ）"
 fi
@@ -618,4 +618,4 @@ echo "リポジトリ外の手作業（本スクリプトの対象外）:"
 echo "  1. git remote: git remote set-url origin <新 URL>"
 echo "  2. ランタイムデータ: mv ~/.${FROM_PLUGIN_NAME} ~/.${PLUGIN_NAME}"
 echo "  3. チェックアウト先ディレクトリ名の変更（必要なら）"
-echo "  4. bash scripts/install-dev.sh"
+echo "  4. python3 -m venv .venv && .venv/bin/python -m pip install -e \"plugins/${PLUGIN_NAME}[dev]\""

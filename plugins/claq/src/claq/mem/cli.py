@@ -381,7 +381,7 @@ HELP_TEXT = """\
 CLI Commands for mem
 
 Usage:
-  python -m claq.mem <command> [options]
+  claq_run claq.mem.cli <command> [options]
 
 Commands:
   init                                  Recreate the local mem database from scratch
