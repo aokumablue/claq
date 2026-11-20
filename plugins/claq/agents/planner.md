@@ -116,10 +116,10 @@ ComponentName: 入力型 → 出力型
    - Dependencies: ステップ1 / 複雑度: 中 / Risk: Low
 
 ## Phase 2: テスト
-3. **ユニットテスト追加** (plugins/claq/tests/mem/test_cmd_knowledge.py)
+3. **ユニットテスト追加** (tests/mem/test_cmd_knowledge.py)
    - Action: days 指定 / 未指定 / 境界値（ちょうど N 日前）のテストを追加
    - Why: days 指定・未指定・境界値の挙動を回帰から守るため
-   - Verify: `cd plugins/claq && python3 -m pytest -q tests/mem/test_cmd_knowledge.py` が exit 0
+   - Verify: `python3 -m pytest -q tests/mem/test_cmd_knowledge.py` が exit 0
    - Dependencies: ステップ2 / 複雑度: 中 / Risk: Low
 
 ## テスト戦略
@@ -134,10 +134,10 @@ ComponentName: 入力型 → 出力型
 ## 変更ファイル一覧
 - plugins/claq/src/claq/mem/cli.py
 - plugins/claq/src/claq/mem/cmd_knowledge.py
-- plugins/claq/tests/mem/test_cmd_knowledge.py
+- tests/mem/test_cmd_knowledge.py
 
 ## テストコマンド
-`cd plugins/claq && python3 -m pytest -q`
+`python3 -m pytest -q`
 
 ## Assumptions
 - `updated_at` は既存スキーマに存在する前提（`mem/schema.py` 未確認、Phase 1着手前に要確認）

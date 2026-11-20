@@ -198,7 +198,16 @@ def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
     return bool(declared) and all(file_exists(root_dir, entry.lstrip("./").rstrip("/")) for entry in declared)
 
 
-def _coverage_gate_configured(root_dir: str | Path) -> bool:
+def _dev_root(root_dir: str | Path) -> Path:
+    """プラグインディレクトリ（``<repo>/plugins/claq``）から開発リポジトリのルートを返す。
+
+    pyproject.toml と tests/ は配布物の外（リポジトリ直下）に置くため、品質ゲートの検査はここを見る。
+    check の ``path`` も、これらはリポジトリ直下からの相対パスで書く。
+    """
+    return Path(root_dir).resolve().parents[1]
+
+
+def _coverage_gate_configured(dev_root: Path) -> bool:
     """``[tool.coverage.report].fail_under`` がゲートとして機能する値（数値かつ 1 以上）かを判定する。
 
     部分文字列照合では ``fail_under = 0``（何も落とさない）もコメントアウトも
@@ -213,7 +222,7 @@ def _coverage_gate_configured(root_dir: str | Path) -> bool:
             読めないだけの場合（`tomllib.TOMLDecodeError`）は False として扱う。
     """
     try:
-        threshold: Any = tomllib.loads(safe_read(root_dir, "pyproject.toml"))
+        threshold: Any = tomllib.loads(safe_read(dev_root, "pyproject.toml"))
     except tomllib.TOMLDecodeError:
         return False
     for key in ("tool", "coverage", "report", "fail_under"):
@@ -317,8 +326,9 @@ def _context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 def _quality_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Quality Gates カテゴリのチェックを返す。"""
     category = "Quality Gates"
-    pyproject_toml = safe_read(root_dir, "pyproject.toml")
-    validators_test = safe_read(root_dir, "tests/ci/test_validators.py")
+    dev_root = _dev_root(root_dir)
+    pyproject_toml = safe_read(dev_root, "pyproject.toml")
+    validators_test = safe_read(dev_root, "tests/ci/test_validators.py")
     return [
         make_check(
             check_id="quality-test-runner", category=category, points=3, scopes=["repo"],
@@ -338,7 +348,7 @@ def _quality_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             check_id="quality-hook-tests", category=category, points=2, scopes=["repo", "hooks"],
             path="tests/hooks/test_hook_edge_cases.py",
             description="フックカバレッジテストファイルが存在する",
-            passed=file_has_content(root_dir, "tests/hooks/test_hook_edge_cases.py"),
+            passed=file_has_content(dev_root, "tests/hooks/test_hook_edge_cases.py"),
             fix="Add tests/hooks/test_hook_edge_cases.py for hook behavior validation.",
         ),
     ]
@@ -395,7 +405,8 @@ def _eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             check_id="eval-tests-presence", category=category, points=2, scopes=["repo"],
             path="tests/",
             description="カバレッジゲートが設定され、テスト surface が失われていない（数は品質指標ではない）",
-            passed=count_files(root_dir, "tests", ".py") >= 1 and _coverage_gate_configured(root_dir),
+            passed=count_files(_dev_root(root_dir), "tests", ".py") >= 1
+            and _coverage_gate_configured(_dev_root(root_dir)),
             fix="Keep tests/ populated and configure a coverage threshold (fail_under) in pyproject.toml.",
         ),
     ]
