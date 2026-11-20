@@ -42,7 +42,7 @@ import pytest
 
 from claq.lib.harness import _TOOL_NAME_MAP, normalize_tool_name
 
-from ._support import HOOKS_JSON
+from ._support import HOOKS_JSON, _run
 
 # 全ツールを表す特別値。正規表現として評価されないためアンカー化しない。
 WILDCARD_MATCHER = "*"
@@ -114,3 +114,31 @@ def test_matcher_lists_every_accepted_alias_and_no_ignored_name(
 
     assert missing == set(), f"{module}: matcher に不足しているツール名 {sorted(missing)}"
     assert stray == set(), f"{module}: フックが受理しないツール名が matcher に残っています {sorted(stray)}"
+
+
+def test_pre_tool_use_hooks_continue_on_failure() -> None:
+    """PreToolUse のフックは ``onFailure: continue`` を持つ。
+
+    Git Bash の無い Windows の Claude Code は ``command`` を PowerShell で実行し、そこでは起動できない
+    フックの失敗が、未設定のままだとツール呼び出しを止める。環境の故障は fail-open に倒す
+    （docs/adr/hook-failure-direction.md）。
+    """
+    hooks = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
+    missing = [
+        hook["command"]
+        for entry in hooks["PreToolUse"]
+        for hook in entry["hooks"]
+        if hook.get("onFailure") != "continue"
+    ]
+    assert missing == []
+
+
+def test_powershell_tool_is_judged_like_bash(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PowerShell ツールの入力も、Bash と同じく保護フックが判定する。
+
+    Windows で PowerShell ツールが有効なとき、Claude Code はシェルのコマンドをそちらへ流し、``Bash`` だけに
+    一致する matcher のフックは発火しない。
+    """
+    payload = {"tool_name": "PowerShell", "tool_input": {"command": "git commit --no-verify -m x"}}
+
+    assert _run("block_no_verify", payload, monkeypatch) == 2

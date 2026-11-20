@@ -47,6 +47,8 @@ VALID_EVENTS = [
     "SessionEnd",
 ]
 VALID_HOOK_TYPES = ["command", "http", "prompt", "agent"]
+# command フックの onFailure に書ける値。
+VALID_ON_FAILURE = frozenset({"continue", "block"})
 EVENTS_WITHOUT_MATCHER = {"UserPromptSubmit", "Notification", "Stop", "SubagentStop"}
 
 DEFAULT_HOOKS_FILE = PLUGIN_ROOT / "hooks" / "hooks.json"
@@ -76,6 +78,9 @@ def _command_hook_errors(hook: dict, label: str) -> Iterator[str]:
     # POSIX 用 command へフォールバックせず、全ツール呼び出しが hook error になる。
     if "powershell" in hook and not is_non_empty_string(hook["powershell"]):
         yield f"{label} の 'powershell' は空でない文字列である必要があります"
+    # ホストが受け付ける値は continue / block だけで、それ以外は未設定と同じに読まれうる。
+    if "onFailure" in hook and hook["onFailure"] not in VALID_ON_FAILURE:
+        yield f"{label} の 'onFailure' は 'continue' か 'block' である必要があります"
 
 
 def _http_hook_errors(hook: dict, label: str) -> Iterator[str]:

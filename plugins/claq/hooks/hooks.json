@@ -4,37 +4,40 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Bash|bash|shell|run_terminal_command)$",
+        "matcher": "^(Bash|bash|shell|run_terminal_command|PowerShell|powershell)$",
         "hooks": [
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.hooks.block_no_verify",
             "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.block_no_verify",
-            "timeout": 15
+            "timeout": 15,
+            "onFailure": "continue"
           }
         ],
         "description": "git hook-bypassフラグをブロックして、pre-commit、commit-msg、pre-pushフックがスキップされないように保護します。"
       },
       {
-        "matcher": "^(Bash|bash|shell|run_terminal_command)$",
+        "matcher": "^(Bash|bash|shell|run_terminal_command|PowerShell|powershell)$",
         "hooks": [
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.hooks.pre_bash_commit_quality",
             "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.pre_bash_commit_quality",
-            "timeout": 30
+            "timeout": 30,
+            "onFailure": "continue"
           }
         ],
         "description": "コミット前の品質チェック：ステージングされたファイルのリンティング、コミットメッセージのフォーマット検証、コミット前にconsole.log/debugger/secretsを検出します。"
       },
       {
-        "matcher": "^(Bash|bash|shell|run_terminal_command)$",
+        "matcher": "^(Bash|bash|shell|run_terminal_command|PowerShell|powershell)$",
         "hooks": [
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.hooks.bash_config_protection",
             "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.bash_config_protection",
-            "timeout": 15
+            "timeout": 15,
+            "onFailure": "continue"
           }
         ],
         "description": "Bashのリダイレクト/tee/sed -iなどによる、linter/formatter設定・.git/hooks・gitのフック無効化設定・claq自身のhooks.json・ホスト設定への直接書き換えをブロックします（config_protectionのEdit/Write限定を補完）。"
@@ -46,7 +49,8 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook\" claq.hooks.config_protection",
             "powershell": "& \"${CLAUDE_PLUGIN_ROOT}/runtime/claq-hook.cmd\" claq.hooks.config_protection",
-            "timeout": 15
+            "timeout": 15,
+            "onFailure": "continue"
           }
         ],
         "description": "linter/formatterの設定ファイルへの変更をブロックします。エージェントが設定を弱めるのではなく、コードを修正するように導きます。"

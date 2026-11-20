@@ -27,6 +27,7 @@ _GIT_BASH = Path(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "bi
 
 _BASH_ALLOW = {"tool_name": "Bash", "tool_input": {"command": "git status"}}
 _BASH_DENY = {"tool_name": "Bash", "tool_input": {"command": "git commit --no-verify -m x"}}
+_POWERSHELL_DENY = {"tool_name": "PowerShell", "tool_input": {"command": "git commit --no-verify -m x"}}
 _WRITE_ALLOW = {"tool_name": "Write", "tool_input": {"file_path": "app.py", "content": "x"}}
 _WRITE_DENY = {"tool_name": "Write", "tool_input": {"file_path": "ruff.toml", "content": "x"}}
 
@@ -64,10 +65,11 @@ def _run(argv: list[str], payload: dict, tmp_path: Path, plugin_root: str) -> su
     [
         ("claq.hooks.block_no_verify", _BASH_ALLOW, 0),
         ("claq.hooks.block_no_verify", _BASH_DENY, 2),
+        ("claq.hooks.block_no_verify", _POWERSHELL_DENY, 2),
         ("claq.hooks.config_protection", _WRITE_ALLOW, 0),
         ("claq.hooks.config_protection", _WRITE_DENY, 2),
     ],
-    ids=["bash-allow", "bash-deny", "write-allow", "write-deny"],
+    ids=["bash-allow", "bash-deny", "powershell-tool-deny", "write-allow", "write-deny"],
 )
 def test_command_under_git_bash(
     tmp_path: Path, root_style: str, module: str, payload: dict, expected: int

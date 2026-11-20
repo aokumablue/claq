@@ -210,6 +210,14 @@ _POWERSHELL_COMMAND_ONLY = "label では 'powershell' は command フックで�
                 ("powershell-array", ["& x"]),
             ]
         ),
+        *(
+            pytest.param(
+                {"type": "command", "command": "echo ok", "onFailure": value},
+                ["label の 'onFailure' は 'continue' か 'block' である必要があります"],
+                id=name,
+            )
+            for name, value in [("on-failure-typo", "continu"), ("on-failure-bool", True)]
+        ),
         # 非 command フックの powershell を拒否しないと無診断で捨てられ、Windows だけ静かに動かない。
         pytest.param(
             {"type": "http", "url": "https://example.com", "powershell": "& x"},
@@ -236,6 +244,7 @@ def test_hook_entry_errors_rejects(hook: object, messages: list[str]) -> None:
     [
         pytest.param({"type": "command", "command": "echo ok"}, id="command-minimal"),
         pytest.param({"type": "command", "command": "echo ok", "async": False, "timeout": 0}, id="command-full"),
+        pytest.param({"type": "command", "command": "echo ok", "onFailure": "continue"}, id="command-on-failure"),
         pytest.param(
             {
                 "type": "command",

@@ -23,6 +23,9 @@ _TOOL_NAME_MAP = {
     "apply_patch": "Edit",
     "agent": "Agent",
     "bash": "Bash",
+    # Windows の Claude Code の PowerShell ツール（Copilot CLI の powershell も同名）。
+    # 保護フックは PowerShell の書き方も読むので、Bash と同じ判定に通す。
+    "powershell": "Bash",
     "shell": "Bash",
     "edit": "Edit",
     "glob": "Glob",

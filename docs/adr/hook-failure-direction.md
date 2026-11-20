@@ -47,6 +47,9 @@ fail-closed（exit 2）にする。全面 fail-closed（読めない・確定で
 - **commit と無関係な malformed Bash 呼び出し**: raw 文字列上に `git commit` らしき痕跡が無ければ
   exit 0 にする。matcher が Bash 全体である以上、malformed というだけで一律 deny すると無関係な
   呼び出しまで巻き込む
+- **Git Bash の無い Windows**: Claude Code は `command` を PowerShell で実行し、フックは起動できない。
+  起動できない失敗は、`onFailure` が未設定だとツール呼び出しを止めるため、PreToolUse のフックには
+  `onFailure: continue` を書いて fail-open に倒す
 - **secret scanner の実時間バジェット超過**: 検査対象（commit 対象ファイル）は既に確定している
   ため deny（severity error）にする。ホストの hook timeout に達して外側から強制終了されるより、
   内側で先に制御された失敗にする方が安全
@@ -139,7 +142,7 @@ Windows の wrapper + インタプリタ起動の遅さで host 側 timeout（�
    できていて外側より長くならないので、入口の検査が再帰先も縛る。1 回の判定の中で変わらない値（保護対象の
    置き場所・プラグインのルート・同じトークンの実体 path）は `scan_memo` で使い回し、書込み先の数に比例する
    重い計算を残さない。複数のコンテナキーや入れ子の配列の合計は縛らない。保護フックの matcher は組み込みの
-   シェルツール（`Bash`・`bash`・`shell`・`run_terminal_command`）だけで、各ホストがツール定義（文字列、Codex は
+   シェルツール（`Bash`・`bash`・`shell`・`run_terminal_command`・`PowerShell`・`powershell`）だけで、各ホストがツール定義（文字列、Codex は
    文字列の配列）で引数をフックより前に検証し、モデルはこの形を作れない、という前提に立つ（ホストごとの検証の
    有無は確かめていない）
 3. **deny の終了コードは出力層の失敗から独立させる。** 出力例外は内側で捕まえ、exit code は必ず

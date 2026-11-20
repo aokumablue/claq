@@ -62,7 +62,7 @@ claq は、Claude Code の作業を「最初の計画からレビューまで」
 
 - OS: macOS / Linux / Windows
 - `python3` 3.12 以上（PATH 上で解決できること。ランタイムは venv を作らない）。3.12 未満では保護フックが警告付きで無効化される
-- Windows の Claude Code では Git Bash（Git for Windows）が要る。Claude Code はフックの `command` を Git Bash で実行し、Git Bash が無い環境では保護フックが動かない
+- Windows の Claude Code では Git Bash（Git for Windows）が要る。Claude Code はフックの `command` を Git Bash で実行し、Git Bash が無い環境では保護フックが動かない（フックの失敗でツール呼び出しは止めない）。保護フックは Bash ツールと PowerShell ツールの両方を判定する
 
 ### 他のホスト
 
