@@ -169,7 +169,7 @@ Windows の wrapper + インタプリタ起動の遅さで host 側 timeout（�
      `claq-hook.cmd` の書込み先を deny する。
    - `settings.json` / `settings.local.json`（basename で判定）は置換前後の全文を JSON として比べる
      （全文の作り方は git config と同じ）。比べるのは top-level の `hooks` / `enabledPlugins` /
-     `disabledPlugins` の部分木（有無の変化を含む）と、`env` のうちインタプリタ解決に効く
+     `disabledPlugins` / `disableAllHooks` の部分木（有無の変化を含む）と、`env` のうちインタプリタ解決に効く
      `CLAQ_PYTHON` / `PATH` / `PYTHONPATH` / `PYTHONHOME`（名前は大小無視）である。`env` が object
      でなければ値全体を比べ、`env` が無いことは空と同じに扱う。値は型まで区別する（`true` を `1` に
      変えるのも変化）。これらが変わる編集だけを deny し、それ以外（`model` / `permissions` / `env`
