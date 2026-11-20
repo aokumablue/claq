@@ -101,9 +101,6 @@ def detached_spawn_kwargs() -> dict[str, Any]:
 
     Returns:
         ``subprocess.Popen`` へ展開する追加キーワード引数。
-
-    Raises:
-        例外は発生しません。
     """
     if hasattr(os, "setsid"):
         return {"start_new_session": True}

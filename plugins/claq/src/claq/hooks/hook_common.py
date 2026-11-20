@@ -83,9 +83,6 @@ def resolve_repo_root() -> Path | None:
     Returns:
         リポジトリルートの絶対パス。タイムアウト・失敗時は None（呼び出し側が
         非ブロッキングにフォールバックする）。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         result = subprocess.run(
@@ -134,9 +131,6 @@ def basename(path: str) -> str:
 
     Returns:
         ファイル名を返します。
-
-    Raises:
-        例外は発生しません。
     """
     return Path(path).name
 
@@ -166,9 +160,6 @@ def fold_path_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
 
     Returns:
         畳んだ要素列。
-
-    Raises:
-        例外は発生しません。
     """
     return tuple(normalize_protected_name(part) for part in parts)
 
@@ -186,9 +177,6 @@ def match_folded_path_window(
 
     Returns:
         一致した候補（畳む前の綴り）。一致しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     folded_parts = fold_path_parts(parts)
     for segments in candidates:
@@ -209,9 +197,6 @@ def is_git_executable_token(token: str) -> bool:
 
     Returns:
         git 実行ファイルとみなせるなら True。
-
-    Raises:
-        例外は発生しません。
     """
     return normalize_executable_name(token) == "git"
 
@@ -302,9 +287,6 @@ def resolve_effective_target(raw_path: str) -> Path | None:
     Returns:
         解決できた実体 Path。解決できない場合は None（fail-closed / fail-open の
         どちらに倒すかは呼び出し側が決める）。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         return (Path.cwd() / _expand_leading_tilde(raw_path)).resolve(strict=False)
@@ -328,9 +310,6 @@ def effective_basename(raw_path: str) -> str:
 
     Returns:
         判定に使う basename。
-
-    Raises:
-        例外は発生しません。
     """
     resolved = resolve_effective_target(raw_path)
     return resolved.name if resolved is not None else basename(raw_path)
@@ -350,9 +329,6 @@ def emit_block_output(reason: str) -> int:
 
     Returns:
         フックが返すべき終了コード。
-
-    Raises:
-        例外は発生しません。
     """
     with contextlib.suppress(Exception):
         write_stdout(adapt_deny_output(reason))

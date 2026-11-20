@@ -61,7 +61,7 @@ _BOOL_FLAGS: frozenset[str] = frozenset({"--global", "--repo", "--json"})
 
 # stdin の JSON を実際に使う subcommand。これ以外は stdin を読まない。
 # 無条件に読むと、書き手が pipe を閉じない呼ばれ方で `list` / `search` / `show`
-# まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされ（実測 2.10 秒）、渡すべき stdin が
+# まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされ、渡すべき stdin が
 # 無いのに「stdin リダイレクト漏れの可能性」と誤って警告する。
 _STDIN_COMMANDS: frozenset[str] = frozenset({"learn", "context", "handoff"})
 

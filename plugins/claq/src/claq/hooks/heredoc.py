@@ -40,9 +40,6 @@ def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, b
 
     Returns:
         ((区切り語, タブ剥がし可（``<<-``）) のリスト, 行末時点の未閉鎖クォート文字)。
-
-    Raises:
-        例外は発生しません。
     """
     delimiters: list[tuple[str, bool]] = []
     state = QuoteState(quote)
@@ -71,9 +68,6 @@ def _line_keeps_heredoc_bodies(line: str) -> bool:
 
     Returns:
         本文を残すなら True、剥がしてよいなら False。
-
-    Raises:
-        例外は発生しません。
     """
     if strip_line_comments(line).rstrip().endswith(_HEREDOC_CONTINUATION_SUFFIXES):
         return True
@@ -96,9 +90,6 @@ def _consume_heredoc_bodies(
     Returns:
         (再開する index, 出力に残す終端行のリスト)。1 つでも終端行が見つからなければ None
         （呼び出し側が剥がすのをやめる）。
-
-    Raises:
-        例外は発生しません。
     """
     index = start
     terminators: list[str] = []
@@ -136,9 +127,6 @@ def strip_data_heredoc_bodies(command: str) -> str:
 
     Returns:
         データ本文を除去した文字列。剥がせないと判断した場合はその行以降を入力のまま残す。
-
-    Raises:
-        例外は発生しません。
     """
     if "<<" not in command:
         return command

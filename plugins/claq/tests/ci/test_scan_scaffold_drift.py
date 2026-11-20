@@ -164,10 +164,9 @@ class TestScan:
         """除去とコードスパン除去を通した後に残る未知タグだけを報告する。
 
         走査は除去（``drop_known_tag_blocks``）だけを通し、無害化
-        （``strip_tags``）は通さない。無害化は細工を検出すると ``&`` と ``<`` を
-        全て倒す／本文を ``[REDACTED]`` へ倒すため、そのメッセージ内の未知タグが
-        1 つも見えなくなる（実測）。診断が最も見たいのはその種のメッセージで
-        （forged-scaffold / tag-split-secret の行）、ここで見落とすと
+        （``strip_tags``）は通さない。無害化は秘密の分断を検出すると本文を ``[REDACTED]``
+        へ倒すため、そのメッセージ内の未知タグが見えなくなる。診断が最も見たいのは
+        その種のメッセージで（tag-split-secret の行）、ここで見落とすと
         docs/adr/staleness-detection.md の「素通り」がそのまま残る。
         """
         path = _write_transcript(tmp_path, "a.jsonl", [text])

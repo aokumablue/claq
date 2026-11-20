@@ -51,9 +51,6 @@ def _stdin_is_absent() -> bool:
 
     Returns:
         読む対象が無いと確定できれば True。
-
-    Raises:
-        例外は発生しません。
     """
     if sys.stdin is None:
         return True
@@ -179,9 +176,6 @@ def read_raw_stdin() -> str:
     Returns:
         読み取られた文字列（`MAX_STDIN_BYTES` バイトで切り捨て済み）。読む対象が
         無い場合・読み取れなかった場合は空文字列。
-
-    Raises:
-        例外は発生しません。
     """
     if _stdin_is_absent():
         return ""
@@ -222,9 +216,6 @@ def stdin_unreadable_message(hook_name: str, reason: object) -> str:
 
     Returns:
         deny 理由の文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"[Hook] BLOCKED: {hook_name} could not read its stdin payload ({reason}). "
@@ -245,9 +236,6 @@ def truncated_input_message(hook_name: str, subject: str) -> str:
 
     Returns:
         deny 理由の文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"[Hook] BLOCKED: input exceeded {MAX_STDIN_BYTES} bytes for {hook_name}. "

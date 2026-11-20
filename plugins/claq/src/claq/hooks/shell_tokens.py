@@ -11,11 +11,8 @@ import shlex
 from typing import NamedTuple
 
 # 1 コマンドに許すバイト数の上限。
-# `shlex` の走査コストは単一の巨大トークンでバイト数の二次になり、1MB で hooks.json の timeout（15 秒）に
-# 迫る。host が kill した hook は exit code を返さず silent fail-open になるため、超過は走査せず BLOCKED で
-# 返す（docs/adr/hook-failure-direction.md）。64KB の 1 トークンは起動から終了まで 0.2 秒（実測）。
-# この上限の内側では、エージェントが作れる形（単一のコマンド・argv 配列）で 3 つの保護フックとも
-# 起動から終了まで 1.1 秒以下（bash_config_protection の書込み先を変えた繰り返しが最も遅い。macOS・Python 3.14 で実測）。
+# `shlex` の走査コストは単一の巨大トークンでバイト数の二次になり、host の timeout で kill された hook は
+# 許可として扱われるため、超過は走査せず BLOCKED で返す（docs/adr/hook-failure-direction.md）。
 MAX_COMMAND_BYTES = 64 * 1024
 
 # コマンド全体をセグメントに割るシェル区切りトークン。区切り文字に密着した
@@ -49,9 +46,6 @@ def basename_any_separator(path: str) -> str:
 
     Returns:
         両方の区切りで切り出した末尾要素を返します。
-
-    Raises:
-        例外は発生しません。
     """
     return path.replace("\\", "/").rsplit("/", 1)[-1]
 
@@ -70,9 +64,6 @@ def normalize_executable_name(token: str) -> str:
 
     Returns:
         basename を大小無視へ畳み、末尾の `.exe` を除いた名前を返します。
-
-    Raises:
-        例外は発生しません。
     """
     name = basename_any_separator(token).casefold()
     return name[: -len(".exe")] if name.endswith(".exe") else name
@@ -86,9 +77,6 @@ def is_shell_wrapper_token(token: str) -> bool:
 
     Returns:
         畳んだ名前が `SHELL_WRAPPER_EXECUTABLES` に属するなら True。
-
-    Raises:
-        例外は発生しません。
     """
     return normalize_executable_name(token) in SHELL_WRAPPER_EXECUTABLES
 
@@ -120,9 +108,6 @@ def extract_shell_wrapper_call(segment: list[str]) -> ShellWrapperCall | None:
 
     Returns:
         シェル起動より前のトークン列とラップされた文字列コマンド。見つからなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     # 後ろのシェルトークンから見る範囲は最初のシェルトークンから見る範囲に含まれるので、最初の 1 つだけ見る。
     start = next((i for i, token in enumerate(segment) if is_shell_wrapper_token(token)), None)
@@ -172,9 +157,6 @@ class QuoteState:
         Returns:
             クォート外の、エスケープされていない文字なら True。``\\`` とクォート文字自体は
             状態を変えるだけなので False。
-
-        Raises:
-            例外は発生しません。
         """
         if self.escaped:
             self.escaped = False
@@ -212,9 +194,6 @@ def strip_line_comments(command: str) -> str:
 
     Returns:
         行コメントを除去した文字列。改行は保持する。
-
-    Raises:
-        例外は発生しません。
     """
     if "#" not in command:
         return command
@@ -255,9 +234,6 @@ def _strip_line_continuations(command: str) -> str:
 
     Returns:
         行継続を連結した文字列。
-
-    Raises:
-        例外は発生しません。
     """
     if "\\\n" not in command:
         return command
@@ -286,9 +262,6 @@ def _replace_unquoted_newlines(command: str) -> str:
 
     Returns:
         クォート外の改行を ``;`` へ置き換えた文字列。
-
-    Raises:
-        例外は発生しません。
     """
     if "\n" not in command:
         return command
@@ -332,9 +305,6 @@ def command_dialect_variants(command: str) -> tuple[str, ...]:
 
     Returns:
         検査すべき読み方のタプル。Windows 読みが元と同じなら 1 つだけ。
-
-    Raises:
-        例外は発生しません。
     """
     windows_reading = _WINDOWS_ESCAPED_SPACE_RE.sub("", _WINDOWS_SEPARATOR_BACKSLASH_RE.sub("/", command))
     if windows_reading == command:
@@ -352,9 +322,6 @@ def tokenize(command: str) -> list[str]:
 
     Returns:
         トークンのリスト。
-
-    Raises:
-        例外は発生しません。
     """
     return tokenize_with_status(command)[0]
 
@@ -371,9 +338,6 @@ def command_exceeds_scan_budget(command: str) -> bool:
 
     Returns:
         UTF-8 のバイト数が上限を超えるなら True。
-
-    Raises:
-        例外は発生しません。
     """
     return len(command.encode("utf-8", "surrogatepass")) > MAX_COMMAND_BYTES
 
@@ -389,9 +353,6 @@ def scan_budget_message(hook_name: str, subject: str) -> str:
 
     Returns:
         deny 理由の文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return (
         f"[Hook] BLOCKED: command exceeds {MAX_COMMAND_BYTES} bytes for {hook_name}. "
@@ -450,9 +411,6 @@ def _split_operator_run(token: str) -> list[str]:
 
     Returns:
         記号だけの語なら演算子単位のリスト、それ以外は ``[token]``。
-
-    Raises:
-        例外は発生しません。
     """
     if not _OPERATOR_RUN_RE.fullmatch(token):
         return [token]
@@ -485,9 +443,6 @@ def tokenize_with_status(command: str) -> tuple[list[str], bool]:
 
     Returns:
         (トークンのリスト, ``shlex`` が最後まで解析できたか) のタプル。
-
-    Raises:
-        例外は発生しません。
     """
     normalized = _replace_unquoted_newlines(_strip_line_continuations(strip_line_comments(command)))
     lexer = shlex.shlex(normalized, posix=True, punctuation_chars=True)
@@ -511,9 +466,6 @@ def split_segments(tokens: list[str]) -> list[list[str]]:
     Returns:
         区切りトークンを含まないセグメント（トークンリスト）のリスト。
         空セグメントは除外します。
-
-    Raises:
-        例外は発生しません。
     """
     segments: list[list[str]] = []
     current: list[str] = []

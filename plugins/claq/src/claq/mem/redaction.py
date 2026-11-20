@@ -13,30 +13,15 @@ PLACEHOLDER = "[REDACTED]"
 
 # (name, pattern) の順序付きリスト。上から順にマッチを置換する。
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    # JWT トークン（ヘッダー.ペイロード.署名 全体をマスク）。
-    # `eyJ` の直前に base64url 文字が無いことを要求する（lookbehind）。これが無いと
-    # `eyJeyJeyJ…` のような入力で 3 バイトごとに開始位置が立ち、そのたびに
-    # `[A-Za-z0-9_-]+` が残り全体を貪欲に取ってから後退するため、走査が二次
-    # オーダーへ落ちる（実測: 24,000 文字で 0.15s、入力 2 倍で時間 4 倍。1MiB へ
-    # 外挿すると約 280 秒で、`redact` を呼ぶ SessionEnd フックの timeout 10 秒を
-    # 桁で超える）。lookbehind が付くと開始位置の直前は必ず非 base64url 文字に
-    # なり、各開始位置が走査する文字クラス連鎖どうしが重ならないため全体が線形。
-    # 併せて量指定子を所有的（`++` / `*+`）にして後退そのものを禁じる。直後の
-    # `\.` は文字クラスと素なので貪欲一致は元から `.` の手前で止まり、一致する
-    # 文字列の集合は変わらない。
-    # 代償として `abceyJhbGci…` のように base64url 文字へ続く `eyJ` は一致
-    # しなくなる。JWT はトークンであり実物は区切りの直後に現れるため、これは
-    # 意図した絞り込み。`hooks/commit_quality_scanner.py` の JWT パターンが
-    # 先に同じ判断を採っており、本パターンはそれに揃えたもの
-    # （`tests/mem/test_redaction.py` の同期テストが両者の同時適用を機械検査する）。
+    # JWT（ヘッダー.ペイロード.署名 全体）。`eyJ` の直前に base64url 文字を許さない lookbehind と
+    # 所有的量指定子で、`eyJeyJ…` の入力でも走査を線形に保つ（SessionEnd の timeout 内に収める）。
     (
         "jwt_token",
         re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]++\.[A-Za-z0-9_-]++\.[A-Za-z0-9_-]*+"),
     ),
     # Anthropic / OpenAI API キー
     ("anthropic_key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
-    # 文字クラスに `-` を含めるのは、OpenAI の現行形式（`sk-` の後に
-    # セグメントとハイフンが続く）が旧クラスでは一致しないため。
+    # OpenAI の現行形式は `sk-` の後にハイフンを含む。
     ("openai_key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")),
     # Slack Bot / User トークン
     ("slack_token", re.compile(r"\bxox[bpoa]-[A-Za-z0-9-]{10,}\b")),
@@ -52,31 +37,10 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("aws_secret", re.compile(r'(?i)(?:aws.?secret|secret.?access.?key)\s*[=:]\s*["\']?([A-Za-z0-9/+]{40})["\']?')),
     # Generic Bearer token
     ("bearer_token", re.compile(r'(?i)\bbearer\s+[A-Za-z0-9\-._~+/]+=*\b')),
-    # パスワード / シークレット代入（password= / secret= 等）。キー語の後ろに許すのは
-    # 次の 2 つだけで、どちらも実在する代入形に限る。
-    #  - 接続語 `_KEY` / `_TOKEN` / `_SECRET` / `_BASE` / `_ACCESS_KEY`（`SECRET_KEY` /
-    #    `SECRET_KEY_BASE` / `AWS_SECRET_ACCESS_KEY` の代入）。`_ACCESS` は `_ACCESS_KEY` の組
-    #    でだけ許す。単独だと `token_access:` / `secret_access:` のような普通のプロパティが
-    #    伏せられる。
-    #    キー語に続く任意の識別子文字を許すと `passwordless:` / `reset_password_url =` /
-    #    `secretary:` / `tokenizer:` のような普通の識別子まで値を伏せてしまうため、
-    #    閉じた語彙にする。
-    #  - キーを囲む閉じ引用符（JSON `"password": "…"` / dict repr `'password': '…'`）。
-    #    この形は値も引用符で始まる場合に限る。コード中の `{"X_SECRET": secrets.token_hex(32)}`
-    #    のような式は文字列リテラルの秘密ではなく、JSON / dict repr の文字列値は必ず
-    #    引用符付きで現れるため、取りこぼしは生まない。エスケープ済み JSON
-    #    （`\"password\": \"…\"`）は引用符の前に高々 1 個のバックスラッシュを許して拾う。
-    #    添字代入（`os.environ["AWS_SECRET_ACCESS_KEY"] = "…"`）は閉じ引用符と区切りの間に
-    #    高々 1 個の `]` を許して拾う。参照だけ（`=` が無い）や比較（`==`）は区切りの後に
-    #    引用符が続かないので一致しない。
-    # キー語の左には語境界も接頭辞の制約も置かない。`AWS_` / `MY_APP_` のような接頭辞は
-    # 検索の開始位置がキー語に立つだけで通り、接頭辞を量指定子で表すと各開始位置から
-    # 左へ余計な走査が生じるだけで一致集合は増えない。
-    # 接続語は最大 2 個の所有的量指定子にする。無界の `*` だと `secret_key_secret_key_…`
-    # の各 `secret` が開始位置になり、そのたびに連鎖の末尾まで走査して二次オーダーに
-    # なる（実測: 8 万文字で 2.5 秒、入力 2 倍で 4 倍。1MiB へ外挿して数百秒）。
-    # 実在する最長の連鎖は `SECRET_KEY_BASE` / `SECRET_ACCESS_KEY` の 2 個。
-    # 値は従来どおり 8 文字以上の非空白・非引用符の連続に限る。
+    # パスワード / シークレット代入。キー語の後ろに許すのは、閉じた語彙の接続語（`SECRET_KEY` /
+    # `SECRET_KEY_BASE` / `AWS_SECRET_ACCESS_KEY`。最大 2 個の所有的量指定子で線形に保つ）と、
+    # キーを囲む閉じ引用符（JSON / dict repr。値も引用符で始まるときだけ）。任意の識別子文字を許すと
+    # `passwordless:` / `tokenizer:` のような普通の識別子の値まで伏せる。
     (
         "password_assign",
         re.compile(
@@ -85,31 +49,9 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"""(?:\s*[=:]\s*["']?|\\?["']\]?\s*[=:]\s*\\?["'])([^\s"']{8,})["']?"""
         ),
     ),
-    # メールアドレス。local part は上限付きの所有的量指定子 `{1,64}+` にする。
-    #
-    # 曖昧な `+` のままだと、クラス内の長い連続に `\b` が多数立つ入力
-    # （`AAA…A+AAA…A+…` / ハイフン・ドット区切りの長大トークン）で二次オーダー
-    # へ落ちる。`\b` が n/40 箇所に立ち、その各開始位置から残り全体を貪欲に
-    # 走査するためで、実測は 80,000 文字 0.25s・入力 2 倍で時間 4 倍、1MiB へ
-    # 外挿して約 43 秒になる（`redact` を呼ぶ SessionEnd の timeout は 10 秒）。
-    #
-    # 所有化（`++`）だけでは足りない。後退は消えても「開始位置ごとに残り全体を
-    # 前向きに走査する」コストが残り、二次オーダーのままになる。
-    # 長さ上限が要る。上限 64 は RFC 5321 の local part 上限（64 オクテット）で、
-    # これを超えるアドレスはそもそも配送不能なため、実在アドレスの取りこぼしは
-    # 生まない。上限を付けたうえで所有的にするのは、後退が必ず失敗する
-    # （`@` は文字クラスと素なので、貪欲一致を縮めても `@` は現れない）ことが
-    # 静的に分かっており、64 回の無駄な後退を開始位置ごとに繰り返さないため。
-    #
-    # 64 文字超の local part を落とすのは意図した絞り込みである。二次オーダーを
-    # 残す方が危険で、SessionEnd の timeout に達すればフックごと落ちて
-    # **redact が 1 件も適用されない**（＝全文が素通りする）ため、上限による
-    # 局所的な false negative より失うものが大きい。
-    #
-    # domain 側（`[A-Za-z0-9.\-]+\.`）は所有化も上限付けもしない —— `.` が
-    # クラスに含まれるため末尾 `\.` へ渡すには後退が必要で、所有化すると
-    # `a@b.c.com` が一致しなくなる。domain 側は `@` の直後からしか開始せず、
-    # `@` はクラスと素なので各走査長の総和が入力長に収まり、原理的に線形。
+    # メールアドレス。local part は RFC 5321 の上限 64 の所有的量指定子にして、長大なトークンでも
+    # 走査を線形に保つ（上限が無いと二次オーダーで SessionEnd の timeout を超え、redact が 1 件も
+    # 適用されない）。domain 側は `@` の直後からしか始まらないので線形のまま。
     ("email", re.compile(r"\b[A-Za-z0-9._%+\-]{1,64}+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")),
     # IPv4 アドレス（プライベートアドレス帯のみ: 10.x / 172.16-31.x / 192.168.x）
     (
@@ -148,13 +90,8 @@ def redact(text: str) -> str:
 # commit SHA・長い識別子を丸ごと [REDACTED] に潰してしまう
 # （handoff.py がファイルパスへの redact 適用を避けているのと同じ理由:
 # 「40 文字超のパスを丸ごと潰す」既知の危険を knowledge にも継承しない）。
-# 既知プレフィックス・キーワード系パターンのみを残す。
-#
-# これは false negative を意図的に許容する判断である。キーワードもプレフィックスも伴わない 40 文字超の
-# 高エントロピー文字列は knowledge へそのまま保存される。知識カードは人間が読む
-# 前提の要約であり、raw credential を貼る経路自体が想定外なので、**knowledge に
-# secret を貼らないのは呼び出し側の責務**とする。汎用エントロピー検出を戻すと、
-# commit SHA・長い識別子・パスという正当な内容を日常的に潰すコストの方が大きい。
+# 既知プレフィックス・キーワード系パターンのみを残し、キーワードもプレフィックスも伴わない
+# 高エントロピー文字列の取りこぼしは許容する（knowledge に secret を貼らないのは呼び出し側の責務）。
 _KNOWLEDGE_EXCLUDED_PATTERN_NAMES = frozenset({"hex_secret", "base64_long"})
 _KNOWLEDGE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (name, pattern) for name, pattern in _PATTERNS if name not in _KNOWLEDGE_EXCLUDED_PATTERN_NAMES

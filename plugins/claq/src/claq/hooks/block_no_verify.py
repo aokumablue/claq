@@ -199,9 +199,6 @@ def _consume_long_option(
     Returns:
         (値として追加で消費すべき後続トークン数（0 または 1）,
         値を取るか判定できない未知の long オプションか) の 2 要素タプル。
-
-    Raises:
-        例外は発生しません。
     """
     name, has_value, inline_value = token.partition("=")
     flags.append(name)
@@ -235,9 +232,6 @@ def _consume_short_option(
     Returns:
         (値として追加で消費すべき後続トークン数（0 または 1）,
         git グローバルオプションとして未知の文字を含むか) の 2 要素タプル。
-
-    Raises:
-        例外は発生しません。
     """
     last_index = len(token) - 1
     unknown = False
@@ -274,9 +268,6 @@ def _consume_option(
     Returns:
         (値として追加で消費すべき後続トークン数（0 または 1）, 未知のオプションか) の 2 要素タプル。
         非オプション語（``-`` 単独を含む）はフラグを残さず ``(0, False)``。
-
-    Raises:
-        例外は発生しません。
     """
     if token.startswith("--"):
         return _consume_long_option(token, next_token, flags, config_values)
@@ -393,8 +384,8 @@ class _GitScan:
     ``git config core.hooksPath <path>`` の検出に使う。
 
     起動位置ごとに末尾まで読み直すと ``git git git ...`` でトークン数の二次になり、
-    ``sh -c`` の束と 2 方言の掛け算で hook の timeout を超える（60KB の入力で 15.8 秒を実測。
-    timeout で kill された hook は host に許可として扱われる）。値として消費するトークン数は
+    ``sh -c`` の束と 2 方言の掛け算で hook の timeout を超える（kill された hook は許可として
+    扱われる）。値として消費するトークン数は
     そのトークンと次のトークンだけで決まり読み始めの位置によらないので、位置 j から同じ歩幅で
     末尾まで読んだときの集計を右から左へ 1 回で作り、各起動はその次の位置の集計を引く。
     """
@@ -518,9 +509,6 @@ def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix:
         ``git config`` の書込み操作、または literal ``GIT_CONFIG_*`` / ``HOME`` / ``XDG_CONFIG_HOME``
         環境変数代入のいずれか経由）、``git commit`` の ``-n``、またはサブコマンドを確定できない状態での
         ``-n`` を検出したら True。
-
-    Raises:
-        例外は発生しません。
     """
     # heredoc のデータ本文はトークン化の前に落とす。入口で正規化するので `sh -c` の
     # 再帰先にも同じ規則が効く。
@@ -548,9 +536,6 @@ def _segment_has_bypass(segment: list[str], inherited_prefix: tuple[str, ...]) -
 
     Returns:
         フックを迂回する git 起動があれば True。
-
-    Raises:
-        例外は発生しません。
     """
     scan: _GitScan | None = None
     env = _EnvAssignmentScan(inherited_prefix)
@@ -574,9 +559,6 @@ def _has_bypass_flag_in_dialect(command: str, *, _recursed: bool, _inherited_pre
 
     Returns:
         バイパスフラグを検出したら True。
-
-    Raises:
-        例外は発生しません。
     """
     tokens, parsed_cleanly = tokenize_with_status(command)
     if not parsed_cleanly and _UNPARSED_RAW_BYPASS_RE.search(command):
@@ -621,9 +603,6 @@ def main() -> int:
 
     Returns:
         終了コード（0: 許可、ブロック時は 2）
-
-    Raises:
-        例外は発生しません。
     """
     try:
         raw, truncated = read_raw_stdin_with_truncation()

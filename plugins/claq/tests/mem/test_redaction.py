@@ -237,7 +237,7 @@ _ONE_MIB = 1024 * 1024
 
 # `redact` を呼ぶ最も締切の厳しい経路は SessionEnd の handoff
 # （`hooks/hooks.json` の `claq.mem.cli handoff` は timeout 10 秒）。
-# `tag_stripping._forges_tag` は 1 回の判定で `redact` を 2 度呼ぶため、
+# `tag_stripping._hides_secret_behind_tags` は 1 回の判定で `redact` を 2 度呼ぶため、
 # 1 回あたりの実測はこの予算より十分小さくなければならない。
 _SESSION_END_BUDGET_SECONDS = 10.0
 

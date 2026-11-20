@@ -24,9 +24,6 @@ def adapt_context_output(event_name: str, additional_context: str) -> str:
     Returns:
         additionalContext（トップレベル）と hookSpecificOutput を同時に
         含む合併 JSON 文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return json.dumps(
         {
@@ -51,9 +48,6 @@ def adapt_deny_output(reason: str) -> str:
 
     Returns:
         permissionDecision=deny の JSON 文字列。
-
-    Raises:
-        例外は発生しません。
     """
     return json.dumps(
         {"permissionDecision": "deny", "permissionDecisionReason": reason},

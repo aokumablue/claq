@@ -30,9 +30,6 @@ def read_current_text(file_path: str, limit: int) -> str:
 
     Returns:
         現在の内容。
-
-    Raises:
-        例外は発生しません。
     """
     resolved = resolve_effective_target(file_path)
     if resolved is None:
@@ -59,9 +56,6 @@ def _apply_edit(text: str, old: object, new: str, *, replace_all: bool, max_char
 
     Returns:
         置換後の全文。置換対象が空・文字列でない・全文に見つからない・結果が上限を超えるなら None。
-
-    Raises:
-        例外は発生しません。
     """
     if not isinstance(old, str) or not old or old not in text:
         return None
@@ -87,9 +81,6 @@ def text_after_edit(tool_name: str, container: Any, before: str, max_chars: int)
 
     Returns:
         置換後の全文。組み立てられなければ None（呼び出し側は fail-closed とする）。
-
-    Raises:
-        例外は発生しません。
     """
     if tool_name == "apply_patch" or not isinstance(container, dict):
         return None

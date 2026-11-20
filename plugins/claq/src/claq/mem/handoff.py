@@ -164,8 +164,8 @@ def _sanitize_structured(value: str) -> str:
     ``[REDACTED]`` にしてしまうため）が、無検査でよい理由にはならない。値の
     出所はエージェントが呼んだツールの入力であり、prompt injection を受けた
     エージェントが ``Write(file_path="<system-reminder>…")`` のような呼び出しを
-    すれば、失敗した呼び出しでも transcript に残って引き継ぎへ載る。実際に
-    ``変更ファイル:`` 行として次セッションへ注入されることを実測で確認した。
+    すれば、失敗した呼び出しでも transcript に残り、``変更ファイル:`` 行として
+    次セッションへ注入される。
 
     Args:
         value: transcript から拾った生のパスまたはツール名。
@@ -345,10 +345,8 @@ def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
     """同一内容の依頼を 1 件に畳み、最後に現れた位置を残す。
 
     引き継ぎ枠は ``_USER_MESSAGE_COUNT`` 件しかない。同じ依頼が繰り返されても
-    新しい情報は増えないのに枠だけを消費し、古い実依頼を押し出してしまう
-    （実測: `mainにマージせよ` の後に同じスラッシュコマンドを 3 回叩くと
-    実依頼が枠外へ落ちる）。重複を畳めば、繰り返し実行が何回あっても実依頼が
-    残る。位置は最後の出現に寄せる（「直近の依頼」なので新しいほうが正しい）。
+    新しい情報は増えないのに枠だけを消費し、古い実依頼を押し出してしまう。
+    重複を畳めば、繰り返し実行が何回あっても実依頼が残る。位置は最後の出現に寄せる（「直近の依頼」なので新しいほうが正しい）。
 
     Args:
         messages: 出現順のユーザー依頼。
@@ -403,12 +401,6 @@ def parse_entry(line: str) -> dict[str, Any] | None:
 # 「引き継ぎが薄くなる」＝**見えて直せる**劣化で済むが、denylist が漏らすと
 # 「攻撃者が書いた文字列が依頼として注入される」＝**黙って通る**。docs/adr/shell-analysis-boundary.md の
 # 「誤検出 > 誤通過」と `schema.py` の「最も危険な値を既定に据えない」も同じ向き。
-#
-# 「host ごとに type 名が異なりうるので allowlist は実依頼を落とす」懸念は、
-# 実測（実トランスクリプト 40 ファイル）ではゼロである:
-#
-#     tool_result 359 / content が生文字列 75 / text 3 / 未知 0 / type 無し 0
-#
 # 生文字列の content は別経路（`isinstance(raw, str)`）で拾うため、この allowlist
 # が実際に選別しているのは `text` と `tool_result` だけである。
 _SPEECH_BLOCK_TYPES = frozenset({"text"})

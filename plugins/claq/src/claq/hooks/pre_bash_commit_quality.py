@@ -167,9 +167,6 @@ def _points_git_elsewhere(token: str) -> bool:
 
     Returns:
         該当すれば True を返します。
-
-    Raises:
-        例外は発生しません。
     """
     return bool(_REPOSITORY_ENV_RE.match(token)) or _CORE_WORKTREE_KEY in token.casefold()
 
@@ -189,9 +186,6 @@ def _commit_target_risk(command: str) -> str | None:
 
     Returns:
         deny すべき場合は `_COMMIT_TARGET_UNVERIFIABLE_MESSAGE`、問題なければ None を返します。
-
-    Raises:
-        例外は発生しません。
     """
     for segment in split_segments(tokenize(command)):
         commit_args = find_git_commit_args_in_segment(segment)
@@ -229,9 +223,6 @@ def _git_name_only(git_args: list[str]) -> list[str] | None:
 
     Returns:
         ファイルパスのリスト。git 自体の失敗・timeout 時は None。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         result = run_text(git_args, timeout=5)
@@ -248,9 +239,6 @@ def get_staged_files() -> list[str] | None:
     Returns:
         ステージングされたファイルパスのリストを返します。git 自体の
         失敗・timeout で取得できない場合は None（「0 件」とは区別する）。
-
-    Raises:
-        例外は発生しません。
     """
     return _git_name_only(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRT"])
 
@@ -265,9 +253,6 @@ def _head_exists() -> bool | None:
     Returns:
         HEAD があれば True、初回コミット等で無ければ False。git 自体が
         失敗・timeout して判定できなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         result = run_text(["git", "rev-parse", "--verify", "--quiet", "HEAD"], timeout=5)
@@ -290,9 +275,6 @@ def get_unstaged_modified_files() -> list[str] | None:
     Returns:
         変更されている作業ツリーファイルパスのリスト。初回コミットで HEAD が
         無い場合は空リスト。git 自体の失敗・timeout で取得できない場合は None。
-
-    Raises:
-        例外は発生しません。
     """
     result = _git_name_only(["git", "diff", "HEAD", "--name-only", "--diff-filter=ACMRT"])
     if result is not None:
@@ -332,9 +314,6 @@ def _scan_targets(files: list[str]) -> list[str]:
 
     Returns:
         スキャン対象のファイルパス。
-
-    Raises:
-        例外は発生しません。
     """
     return [path for path in files if should_lint_file(path) or should_scan_secrets(path)]
 
@@ -355,9 +334,6 @@ def _partition_commit_all_files(
         (index_files, worktree_files) のタプルです。`-a`/`--all` が無ければ
         `worktree_files` は空リストです。`-a` 指定時に作業ツリーの列挙自体が
         失敗した場合は None を返します（呼び出し元で fail-closed にする）。
-
-    Raises:
-        例外は発生しません。
     """
     if not is_commit_all_flag(commit_args):
         return list(staged_files), []
@@ -386,9 +362,6 @@ def _count_file_issues(
 
     Returns:
         (total_issues, error_count, warning_count, info_count) のタプルを返します。
-
-    Raises:
-        例外は発生しません。
     """
     severity_label = {"error": "ERROR", "warning": "WARNING", "info": "INFO"}
     counts = dict.fromkeys(severity_label, 0)
@@ -414,9 +387,6 @@ def _log_commit_message_issues(command: str) -> int:
 
     Returns:
         メッセージの問題の件数を返します。すべて警告として数える件数です。
-
-    Raises:
-        例外は発生しません。
     """
     message_validation = validate_commit_message(command)
     if not (message_validation and message_validation["issues"]):
@@ -448,9 +418,6 @@ def _finalize_result(
 
     Returns:
         error_count > 0 ならブロック理由、それ以外は None。
-
-    Raises:
-        例外は発生しません。
     """
     if total_issues == 0:
         log("\n[Hook] PASS: All checks passed!")
@@ -481,9 +448,6 @@ def _collect_worktree_issues(worktree_targets: list[str], *, deadline: float) ->
     Returns:
         (total_issues, error_count, warning_count, info_count)。対象が無ければすべて 0。
         repo root が必要なのに解決できなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     if not worktree_targets:
         return 0, 0, 0, 0
@@ -507,9 +471,6 @@ def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | No
 
     Returns:
         ブロックする場合は理由、通す場合は None。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         staged_files = get_staged_files()
@@ -605,9 +566,6 @@ def _malformed_input_reason(raw_input: str) -> str | None:
 
     Returns:
         生文字列上に `git commit` が見えれば `_MALFORMED_COMMIT_MESSAGE`、それ以外は None。
-
-    Raises:
-        例外は発生しません。
     """
     if not raw_input.strip():
         return None
@@ -631,9 +589,6 @@ def evaluate(raw_input: str) -> str | None:
 
     Returns:
         ブロックする場合は理由、通す場合は None。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         payload = parse_json_object(raw_input)
@@ -696,9 +651,6 @@ def main() -> int:
 
     Returns:
         コミットを許可する場合は 0、ブロックする場合は 2 を返します。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         raw, truncated = read_raw_stdin_with_truncation()

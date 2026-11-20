@@ -59,9 +59,6 @@ def find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
 
     Returns:
         commit 呼び出しの引数トークンリスト。見つからなければ None を返します。
-
-    Raises:
-        例外は発生しません。
     """
     # 後ろの git トークンから見る範囲は最初の git トークンから見る範囲に含まれるので、最初の 1 つだけ見る。
     start = next((i for i, token in enumerate(segment) if is_git_executable_token(token)), None)
@@ -88,9 +85,6 @@ def parse_git_commit_command(command: str) -> tuple[bool, list[str]]:
     Returns:
         (is_commit, commit_args) のタプル。is_commit が False の場合、
         commit_args は空リストです。
-
-    Raises:
-        例外は発生しません。
     """
     tokens, parsed_cleanly = tokenize_with_status(command)
     for segment in split_segments(tokens):
@@ -162,9 +156,6 @@ def _is_fd_duplication(segment: list[str], index: int) -> bool:
 
     Returns:
         `>&` で、直後が ASCII 数字のみのトークンか `-` なら True を返します。
-
-    Raises:
-        例外は発生しません。
     """
     if segment[index] != _FD_DUP_OPERATOR or index + 1 >= len(segment):
         return False
@@ -183,9 +174,6 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
 
     Returns:
         変更しうるなら True を返します。
-
-    Raises:
-        例外は発生しません。
     """
     if any(
         token in WRITE_REDIRECT_OPERATORS and not _is_fd_duplication(segment, i) for i, token in enumerate(segment)
@@ -233,9 +221,6 @@ def compound_commit_risk(command: str) -> str | None:
 
     Returns:
         deny すべき場合はその理由文字列、問題なければ None を返します。
-
-    Raises:
-        例外は発生しません。
     """
     segments = split_segments(tokenize(command))
     commit_indices = [i for i, segment in enumerate(segments) if find_git_commit_args_in_segment(segment) is not None]
@@ -259,9 +244,6 @@ def is_commit_all_flag(commit_args: list[str]) -> bool:
 
     Returns:
         `-a` 相当のフラグが含まれるなら True を返します。
-
-    Raises:
-        例外は発生しません。
     """
     return any(
         token == "--all"

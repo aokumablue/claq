@@ -62,9 +62,6 @@ def _is_key_char(char: str) -> bool:
 
     Returns:
         使える文字なら True。
-
-    Raises:
-        例外は発生しません。
     """
     return char.isascii() and (char.isalnum() or char == "-")
 
@@ -78,9 +75,6 @@ def _skip_line(text: str, pos: int) -> int:
 
     Returns:
         次の行頭の位置。
-
-    Raises:
-        例外は発生しません。
     """
     newline = text.find("\n", pos)
     return len(text) if newline < 0 else newline + 1
@@ -314,9 +308,6 @@ def is_sensitive_config_key(key: str) -> bool:
 
     Returns:
         `_SENSITIVE_CONFIG_KEY_PREFIXES` のいずれかに前方一致すれば True。
-
-    Raises:
-        例外は発生しません。
     """
     normalized = key.strip().lower()
     return any(normalized.startswith(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES)
@@ -377,9 +368,6 @@ def _global_git_config_candidates() -> tuple[tuple[Path, str], ...]:
 
     Returns:
         ``~/.gitconfig`` と XDG の設定ファイルの組。
-
-    Raises:
-        例外は発生しません。
     """
     try:
         home = get_home_dir()
@@ -406,9 +394,6 @@ def global_git_config_path(file_path: str) -> str | None:
 
     Returns:
         該当した保護 path の表示名。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     resolved = resolve_effective_target(file_path)
     if resolved is None:

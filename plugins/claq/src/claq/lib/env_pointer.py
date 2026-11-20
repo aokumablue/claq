@@ -202,9 +202,6 @@ def _ps_parent_and_lstart(pid: int, deadline: float) -> tuple[int, str] | None:
     Returns:
         ``(ppid, lstart)``。締め切り超過・``ps`` の起動失敗・非 0 終了（PID が居ない）・
         出力が読めない場合は None。
-
-    Raises:
-        例外は発生しません。
     """
     remaining = deadline - time.monotonic()
     if remaining <= 0:
@@ -242,9 +239,6 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
         段で打ち切る（最初の段で失敗すれば空リスト。docs/adr/hook-failure-direction.md の
         fail-open — この回は書けた分だけ書き、次回 hook 起動での自己修復に委ねる）。
         親が PID 0/1 に達した時点でも打ち切る。
-
-    Raises:
-        例外は発生しません。
     """
     deadline = time.monotonic() + _PS_TIMEOUT_SECONDS
     chain: list[tuple[int, str]] = []

@@ -75,9 +75,6 @@ def _guarded_locations() -> list[tuple[tuple[str, ...], str]]:
 
     Returns:
         ``(解決済みの実体 path を畳んだ要素列, 表示名)`` のリスト。
-
-    Raises:
-        例外は発生しません。
     """
     # ホームの決定や ``~user`` の展開自体も失敗しうるので、組み立てを遅らせて下の try で 1 か所ずつ受ける。
     candidates = [(lambda: get_plugin_root() / "hooks" / _HOOKS_JSON_NAME, _PLUGIN_HOOKS_JSON_DISPLAY)]
@@ -111,9 +108,6 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
     Returns:
         ``hooks/hooks.json/``・``.claude/settings.json`` 形・``runtime/`` / ``src/claq/`` の表示名
         （`bash_config_protection._blocked_message` が文言を選ぶ鍵）。該当しなければ None。
-
-    Raises:
-        例外は発生しません。
     """
     if protected_path_segment(token) == _PLUGIN_HOOKS_JSON_SEGMENT:
         return _PLUGIN_HOOKS_JSON_DISPLAY
