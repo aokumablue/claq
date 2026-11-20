@@ -1,4 +1,4 @@
-"""agents/skills/commands の md が名指しするものの実在と一致を検証する構造テスト。
+"""agents/skills/commands の md（コンポーネント名・モジュール名は開発用スキルも）が名指しするものの実在と一致を検証する構造テスト。
 
 md の本文は import にも型検査にも現れないため、参照切れは実行時の Read 失敗（プロンプト破損）に
 直結する。相対 .md パス・節参照・コンポーネント名・モジュール名・関数名・シェルヘルパ・README の
@@ -379,17 +379,30 @@ def test_section_ref_helpers_detect_and_accept() -> None:
 
 _PLUGIN_REF_RE = re.compile(r"claq:([a-z][\w-]*)")
 
+# 配布しない claq 開発用のスキル（リポジトリ直下の .claude/skills）。置き場所に依らない
+# 名前の実在検査（コンポーネント名・モジュール名）にだけ含める。相対 .md パスの検査は
+# 配布物の中で解決することを求めるので、開発用スキルには当てない。
+_DEV_SKILLS = _REPO_ROOT / ".claude" / "skills"
+
+
+@functools.cache
+def _named_reference_corpus() -> tuple[tuple[Path, str], ...]:
+    """名前の実在を検査する md（配布物の定義と開発用スキル）と本文の組を列挙する。"""
+    dev_skills = tuple((path, path.read_text(encoding="utf-8")) for path in sorted(_DEV_SKILLS.rglob("*.md")))
+    return _md_corpus() + dev_skills
+
+
 # md が名指しする Python モジュールの参照形。`claq_run <module>` だけを見ると、
-# md に実在する `python3 -m claq.X` 形（skills/maintain/SKILL.md や
-# skills/release-verify/SKILL.md）が import 可能性検査を素通りし、
+# md に実在する `python3 -m claq.X` / `python3 -m claq_dev.X` 形（.claude/skills/maintain/SKILL.md や
+# .claude/skills/release-verify/SKILL.md）が import 可能性検査を素通りし、
 # モジュールをリネームしても md が dangling のまま緑になる。
 #
 # モジュール名の各要素を ASCII の Python 識別子に限る理由: `\w` は既定で Unicode
 # 対応なので、`[\w.]*` 系のパターンは散文の `python3 -m claq.モジュール名`
-# （skills/release-verify/SKILL.md）まで拾って偽 RED を出す（実測:
+# （.claude/skills/release-verify/SKILL.md）まで拾って偽 RED を出す（実測:
 # `re.search(r"claq[\w.]*\w", "claq.モジュール名")` はマッチする）。さらに
 # ドット付き要素を 1 個以上必須にすることで、その散文はどの位置でもマッチしない。
-_MODULE_REF_RE = re.compile(r"(?:claq_run|python3 -m)\s+(claq(?:\.[A-Za-z_][A-Za-z0-9_]*)+)")
+_MODULE_REF_RE = re.compile(r"(?:claq_run|python3 -m)\s+(claq(?:_dev)?(?:\.[A-Za-z_][A-Za-z0-9_]*)+)")
 
 
 def test_plugin_component_references_exist() -> None:
@@ -405,8 +418,8 @@ def test_plugin_component_references_exist() -> None:
         | {p.stem for p in (_ROOT / "commands").glob("*.md")}
     )
     missing = [
-        f"{md_file.relative_to(_ROOT)}: claq:{name}"
-        for md_file, text in _md_corpus()
+        f"{md_file.relative_to(_REPO_ROOT)}: claq:{name}"
+        for md_file, text in _named_reference_corpus()
         for name in _PLUGIN_REF_RE.findall(text)
         if name not in known
     ]
@@ -420,8 +433,8 @@ def test_claq_run_module_references_are_importable() -> None:
     に現れないため、リネームやモジュール削除で静かに壊れる。
     """
     missing = [
-        f"{md_file.relative_to(_ROOT)}: {module}"
-        for md_file, text in _md_corpus()
+        f"{md_file.relative_to(_REPO_ROOT)}: {module}"
+        for md_file, text in _named_reference_corpus()
         for module in _MODULE_REF_RE.findall(text)
         if importlib.util.find_spec(module) is None
     ]

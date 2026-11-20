@@ -1,7 +1,7 @@
 """保護フックの既知バイパスを block / allow の表で固定する。
 
-`harness_audit` はフックの**存在**を測るだけで実効性を測らない
-（`skills/maintain/SKILL.md` のステップ5 が明記）ため、`Security Guardrails` が
+`claq_dev.harness_repo` はフックの**存在**を測るだけで実効性を測らない
+（`.claude/skills/maintain/SKILL.md` のステップ5 が明記）ため、`Security Guardrails` が
 満点でも保護フックが素通りしうる。そのため実効性の回帰はこのファイルの
 block / allow 一覧が担う。
 

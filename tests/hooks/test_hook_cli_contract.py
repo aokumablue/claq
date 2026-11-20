@@ -51,7 +51,7 @@ def _assert_discriminates(hook: str, denied_payload: dict, allowed_payload: dict
 #
 # 判定関数の in-process テストは stdin JSON → コンテナキー解決 → 形状展開 → exit code までの経路を通らない。
 # プロセス層が dict 形状しか流さないと、`{"tool_input": [{"file_path": "ruff.toml"}]}` や
-# `{"tool_input": "ruff.toml"}` の素通りを止められる層が 1 つも無い（`harness_audit` も実効性は測らない）。
+# `{"tool_input": "ruff.toml"}` の素通りを止められる層が 1 つも無い（`claq_dev.harness_repo` も実効性は測らない）。
 
 # 形状名 → (フィールド名, 値) をコンテナへ包む関数。
 _PAYLOAD_SHAPES = {
