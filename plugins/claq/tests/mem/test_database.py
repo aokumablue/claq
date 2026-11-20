@@ -36,7 +36,7 @@ def _knowledge(key: str = "use-python3", **overrides: object) -> Knowledge:
         "scope": "global",
         "kind": "convention",
         "title": "Python は python3 コマンドで実行する",
-        "source": "human",
+        "source": "agent",
         # status は必須引数（既定値なし）。DB 層のテストは注入対象の挙動を見る
         # ものが多いため、ヘルパの既定は 'active' に置く。
         "status": "active",
@@ -58,10 +58,10 @@ class TestSchema:
 
     @pytest.mark.parametrize(
         ("pragma", "expected"),
-        [("foreign_keys", 1), ("journal_mode", "wal"), ("temp_store", 2), ("mmap_size", 268435456)],
+        [("foreign_keys", 1), ("journal_mode", "wal")],
     )
     def test_pragmas_applied(self, db: Database, pragma: str, expected: object) -> None:
-        """外部キー・WAL・最適化 PRAGMA が適用されている。"""
+        """外部キー・WAL が適用されている。"""
         assert db.conn.execute(f"PRAGMA {pragma}").fetchone()[0] == expected
 
     @pytest.mark.parametrize(
@@ -270,7 +270,7 @@ class TestKnowledge:
                 domain="testing",
                 confidence=0.8,
                 status="pending",
-                source="observer",
+                source="agent",
                 source_ref="plugins/claq/src/claq/mem/database.py",
                 superseded_by=base.id,
             )
@@ -280,7 +280,7 @@ class TestKnowledge:
         assert stored.domain == "testing"
         assert stored.confidence == 0.8
         assert stored.status == "pending"
-        assert stored.source == "observer"
+        assert stored.source == "agent"
         assert stored.source_ref.endswith("database.py")
         assert stored.superseded_by == base.id
 

@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS knowledge (
   -- agent 由来カードが promote を経ずに注入されないようにする。
   status        TEXT NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('active','pending','archived')),
-  source        TEXT NOT NULL CHECK (source IN ('agent','observer','human')),
+  source        TEXT NOT NULL CHECK (source = 'agent'),  -- 書込みの入口 mem learn が固定する
   source_ref    TEXT,                      -- 出所の自由記述（ファイルパス等）
   superseded_by INTEGER REFERENCES knowledge(id) ON DELETE SET NULL,
   created_at    TEXT NOT NULL,

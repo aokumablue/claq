@@ -347,7 +347,7 @@ def test_non_ascii_output_survives_a_non_utf8_locale(tmp_path: Path) -> None:
                 title="検査 ✓ の知識",
                 body="b",
                 status="active",
-                source="human",
+                source="agent",
                 created_at=utc_now_iso(),
                 updated_at=utc_now_iso(),
             )

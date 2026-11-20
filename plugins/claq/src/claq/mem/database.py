@@ -47,7 +47,7 @@ class Database:
     """
 
     def __init__(self, db_path: str | Path) -> None:
-        """DB へ接続し、スキーマ初期化と最適化 PRAGMA を適用する。
+        """DB へ接続し、スキーマを初期化する。
 
         新規作成は ``os.open`` の O_CREAT|O_EXCL で最初から 0600 にする
         （sqlite3.connect に作らせて後から chmod すると、その間だけ他ユーザーに
@@ -83,12 +83,6 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA_SQL)
         self.conn.commit()
-        for pragma in (
-            "PRAGMA temp_store = MEMORY",
-            "PRAGMA mmap_size = 268435456",
-            "PRAGMA cache_size = -64000",
-        ):
-            self.conn.execute(pragma)
 
     def close(self) -> None:
         """DB 接続を閉じる。"""

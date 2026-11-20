@@ -1,7 +1,7 @@
 """知識カード入力の検証 — ``mem learn`` が使う唯一の入口。
 
 ``knowledge`` テーブルの CHECK 制約（``kind`` 6 値 / ``scope`` 2 値 /
-``status`` 3 値 / ``source`` 3 値 / ``confidence`` 0.0〜1.0）を、DB へ到達する
+``status`` 3 値 / ``source`` 1 値 / ``confidence`` 0.0〜1.0）を、DB へ到達する
 前に Python 側で強制する。現在の入力経路は ``mem learn``（stdin の JSON。
 人間・エージェントが明示的に書く）の1つのみ。
 

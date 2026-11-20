@@ -372,7 +372,7 @@ class TestResolveRepo:
                 repo_id=before.id,
                 kind="fact",
                 title="repo スコープの知識",
-                source="human",
+                source="agent",
                 status="active",
             )
         )

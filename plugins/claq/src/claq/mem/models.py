@@ -91,7 +91,7 @@ class Knowledge(_RowModel):
         kind: ``convention`` / ``decision`` / ``pitfall`` / ``howto`` /
             ``fact`` / ``preference``。
         title: 1 行。これ単体で意味が通ること。
-        source: ``agent`` / ``observer`` / ``human``。
+        source: 常に ``agent``（書込みの入口 ``mem learn`` が固定する）。
         repo_id: ``scope='repo'`` のとき必須、``global`` のとき None。
         body: why / how の補足。空でよい。
         domain: ``testing`` ``git`` ``build`` 等。任意。

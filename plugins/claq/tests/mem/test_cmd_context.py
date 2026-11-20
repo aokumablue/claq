@@ -308,7 +308,7 @@ class TestContext:
         )
 
     def test_pending_and_archived_are_not_injected(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """observer の下書き（pending）と archived は注入しない。"""
+        """下書き（pending）と archived は注入しない。"""
         repo_id = _repo_id(tmp_path)
         _seed(tmp_path, key="p", title="pending card", status="pending")
         _seed(tmp_path, key="a", title="archived card", status="archived")

@@ -71,7 +71,6 @@ class TestLearn:
         ("options", "payload", "expected"),
         [
             ([], {**_OBSERVED, "source": "human"}, "source は"),
-            ([], {**_OBSERVED, "source": "observer"}, "source は"),
             ([], {**_OBSERVED, "status": "active"}, "status は"),
             ([], {**_OBSERVED, "status": "archived"}, "status は"),
             (["--status", "active"], _OBSERVED, "learn --status は指定できません"),
@@ -85,7 +84,6 @@ class TestLearn:
         ],
         ids=[
             "source-human",
-            "source-observer",
             "status-active",
             "status-archived",
             "status-flag",
@@ -103,7 +101,7 @@ class TestLearn:
     ) -> None:
         """不正な入力は stderr 1 行と exit_code=1 で拒否し、行を作らない。
 
-        回帰防止: JSON の非既定 source（human/observer）・status（active/archived）や
+        回帰防止: JSON の非既定 source（human 等）・status（active/archived）や
         ``learn --status`` を受け付けると、caller が書くだけで人間承認を偽装・自己承認できる。
         """
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn", *options], payload)
