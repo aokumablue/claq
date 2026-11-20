@@ -50,7 +50,7 @@ commands/skills/agents/hooks をレビューし、実害を直し、効いてい
 
 - 蓄積メモリ: `python3 -m claq.mem.cli search "maintain harness 勘所 違反"` を引く
   - editable install が venv の `claq` をリポジトリの `plugins/claq/src` へ向けるので `PYTHONPATH` は不要
-  - 既定の `active` だけで引き、`--status pending` を判断材料に混ぜない（理由は `../learn/SKILL.md`）
+  - 既定の `active` だけで引き、`--status pending` を判断材料に混ぜない（理由は `plugins/claq/skills/learn/SKILL.md`）
   - 返るのは `- [kind] title (key)` の 1 行だけ。本文が要るカードだけ `python3 -m claq.mem.cli show <key>` に渡す（0 件なら何も出ない）
 - 最新の Claude Code の動向（既定で有効。`--no-web` で無効）: WebSearch/WebFetch でハーネス設計のベストプラクティスを調べる
   - 上限は検索 5 件・取得 3 件
@@ -178,7 +178,7 @@ claq_mem_learn --key <slug> --kind pitfall --scope repo --domain harness \
   --title "<1 行要約>" --body "<根拠と回避法>"
 ```
 
-記録基準は `../learn/SKILL.md` の「記録する / しない」。同じ違反の 2 回目の扱いも `../learn/SKILL.md` に従う。
+記録基準は `plugins/claq/skills/learn/SKILL.md` の「記録する / しない」。同じ違反の 2 回目の扱いも `plugins/claq/skills/learn/SKILL.md` に従う。
 起動した子（reviewer・tdd-writer・code-refiner）の報告にある学びの候補も、同じ基準で取捨する（子は自分では書かない）。
 
 要約は結論から書き、修正コミット・final gate の結果・残タスク（`/plan` 提示分）を示す。

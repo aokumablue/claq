@@ -84,7 +84,7 @@ def test_loop_dev_delegators_match_commands() -> None:
     """loop-dev の description と release-verify の委譲元一覧は、loop-dev を起動する command と一致する。"""
     callers = _loop_dev_callers()
     description = (_ROOT / "skills" / "loop-dev" / "SKILL.md").read_text(encoding="utf-8")
-    listed = (_ROOT / "skills" / "release-verify" / "SKILL.md").read_text(encoding="utf-8")
+    listed = (_ROOT.parent.parent / ".claude" / "skills" / "release-verify" / "SKILL.md").read_text(encoding="utf-8")
     described = _DESCRIPTION_DELEGATORS_RE.search(description)
     delegators = _DELEGATORS_LINE_RE.search(listed)
     assert described is not None

@@ -107,7 +107,7 @@ claude plugin install claq@claq
 
 ---
 
-## 🧩 Skills (21)
+## 🧩 Skills (19)
 
 すべて `plugins/claq/skills/<name>/SKILL.md` に定義。**起動方法**は `user-invocable` / `disable-model-invocation` の組み合わせで決まる（詳細は [用語](#用語) と [Architecture](#-architecture) を参照）。**実行形態**は `context: fork`（既定はバックグラウンド実行。結果を次の手順に使う skill は `background: false` で前景に固定する。どちらも対話不可）か inline（親セッションで実行・対話可）か。
 
@@ -120,7 +120,6 @@ claude plugin install claq@claq
 | [`learn`](plugins/claq/skills/learn/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 知識カード蓄積 | セッションから再利用可能な知識カードを抽出し knowledge テーブルへ蓄積 |
 | [`loop-audit`](plugins/claq/skills/loop-audit/SKILL.md) | 自動発火 + `/loop-audit` | fork | ループ収束品質診断 | loop-dev 開発サイクルの収束品質を履歴から集計しスコア化 |
 | [`loop-dev`](plugins/claq/skills/loop-dev/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 実装ループ本体 | plan→generate→evaluate を最大2反復で収束させる実装ループ（feat-dev/bugfix/refactor 等専用） |
-| [`maintain`](plugins/claq/skills/maintain/SKILL.md) | 自動発火 + `/maintain` | fork | ハーネス定期メンテ | commands/skills/agents/hooks のレビュー→修正→強化→検証→記録を1回で完遂 |
 | [`mcp-gen`](plugins/claq/skills/mcp-gen/SKILL.md) | 自動発火 + `/mcp-gen` | inline | MCP サーバ生成 | 検証済みスケルトンを複製して Python の MCP サーバを新規構築。上流 API を包むなら取得ファサードの骨格を重ねる |
 | [`quick-code`](plugins/claq/skills/quick-code/SKILL.md) | `/quick-code`（自動発火なし） | inline | 往復実装 | 人間が実行とテストを担う往復実装モード。自分ではテスト・ビルドを走らせない |
 | [`quick-debug`](plugins/claq/skills/quick-debug/SKILL.md) | `/quick-debug`（自動発火なし） | inline | 往復切り分け | 人間が再現とログ採取を担う往復切り分けモード。修正は当てず観測だけを入れる |
@@ -129,7 +128,6 @@ claude plugin install claq@claq
 | [`quick-test`](plugins/claq/skills/quick-test/SKILL.md) | `/quick-test`（自動発火なし） | inline | 往復テスト実装 | 人間がテストを実行する往復モード。テストコードだけを書いて返す |
 | [`refactor-prep`](plugins/claq/skills/refactor-prep/SKILL.md) | 自動発火 / 内部委譲のみ | fork | リファクタ事前準備 | 対象分割・依存可視化・実行前テストセットを最小コストで確定（`refactor` 専用） |
 | [`refactor-rollback`](plugins/claq/skills/refactor-rollback/SKILL.md) | 自動発火 / 内部委譲のみ | inline | ロールバック計画 | refactor-prep の出力を受けてファイル単位ロールバック計画を確定し失敗時の復旧を高速化 |
-| [`release-verify`](plugins/claq/skills/release-verify/SKILL.md) | 自動発火 + `/release-verify` | inline | リリース前実起動検証 | 配布ビルドへ実 payload を流し exit code と出力を実測して裁定する |
 | [`search`](plugins/claq/skills/search/SKILL.md) | 自動発火 / 内部委譲のみ | fork | 既存解決策探索 | 新機能・新しい依存・新しい抽象化の前に、既存実装・ライブラリ・MCP・スキルを調べて採用／拡張／自作を決め、採用なら導入まで行う |
 | [`secure`](plugins/claq/skills/secure/SKILL.md) | `/secure`（自動発火なし） | inline | セキュリティ点検 | 入口と攻撃者を特定し、攻撃者が得るものを書けた穴だけを最小の変更で塞ぐ。書けない改善はハードニング提案として報告する |
 | [`skill-make`](plugins/claq/skills/skill-make/SKILL.md) | 自動発火 / 内部委譲のみ | fork | スキル生成本体 | 新スキル生成/eval実行/ベンチマーク分析/説明文最適化（`skill-gen` 専用委譲先） |
@@ -139,7 +137,7 @@ claude plugin install claq@claq
 
 ## 🧭 Workflows
 
-claq が「どの場面でどう動くか」を 5 ジャンル・20 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。すべての Commands / Skills はいずれかの図に登場します。
+claq が「どの場面でどう動くか」を 5 ジャンル・18 のワークフロー図で示します。各図には **コマンド・エージェント・スキル・自動処理** が登場します。すべての Commands / Skills はいずれかの図に登場します。
 
 ### 凡例
 
@@ -168,7 +166,7 @@ claq が「どの場面でどう動くか」を 5 ジャンル・20 のワーク
 | ジャンル | 収録ワークフロー |
 |---|---|
 | [実装](#実装) | 新機能開発 / バグ修正 / フルリファクタリング / コード単純化のみ / デッドコード掃除 / クイック往復モード / テストコード自動生成 / 依存更新 / 性能改善 |
-| [品質・セキュリティ](#品質セキュリティ) | セキュリティ重視の実装 / 品質管理サイクル / ハーネス定期メンテ / リリース前実起動検証 |
+| [品質・セキュリティ](#品質セキュリティ) | セキュリティ重視の実装 / 品質管理サイクル |
 | [スキル・知識管理](#スキル知識管理) | スキル新規作成・改善 / 知識蓄積サイクル / ループ収束品質診断 / 反復ループの中断復旧 |
 | [新規生成](#新規生成) | MCP サーバ新規構築 / shadcn/ui サイト・ダッシュボード新規作成 |
 | [自動化](#自動化) | Git ワークフロー支援 |
@@ -530,70 +528,6 @@ flowchart LR
 
 ---
 
-### ハーネス定期メンテ
-
-```mermaid
-flowchart LR
-  classDef agent  fill:#059669,stroke:#047857,color:#fff,rx:6
-  classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
-
-  U(["🛠️ ハーネス定期メンテ依頼"]) --> CM["/maintain"]:::skill
-
-  subgraph maintain["⚙️ maintain 内部（6ステップ）"]
-    direction TB
-    IN["入力収集<br/>baseline取得（pytest/ruff/audit）"] --> RV["✅ reviewer<br/>（注入経路に触れる回は 🛡️ security-auditor も）"]:::agent
-    RV --> CLS["種別分類<br/>バグ/強化/仕様変更"]
-    CLS --> FIX["🧪 tdd-writer 修正<br/>or 直接編集"]:::agent
-    FIX --> GATE{{"final gate<br/>pytest/ruff/validator/audit 非退行"}}
-    GATE -->|未達・3周まで| FIX
-    GATE -->|達成| REC["記録<br/>claq_mem_learn"]
-  end
-
-  CM --> maintain
-```
-
-**トリガー**: 「ハーネスをメンテ」「プラグイン全体を見直して直す」等
-**期待効果**: レビュー→修正→強化→検証→記録を1回で完遂。単発の1ファイル修正は `/review` `/bugfix` `/refactor`、audit スコア改善のみなら `/harness` と使い分ける
-
-**実行例**:
-
-```bash
-/maintain --scope=plugins/claq/hooks
-```
-
----
-
-### リリース前実起動検証
-
-```mermaid
-flowchart LR
-  classDef skill  fill:#7c3aed,stroke:#6d28d9,color:#fff,rx:4
-
-  U(["📦 リリース前検証依頼"]) --> RV["/release-verify"]:::skill
-
-  subgraph relver["⚙️ release-verify 内部（5ステップ）"]
-    direction TB
-    INV["インベントリ<br/>hooks/commands/skills/agents 列挙"] --> INVK["実起動<br/>実 payload で exit code 実測"]
-    INVK --> ADJ["実測による裁定<br/>scan_scaffold_drift 等"]
-    ADJ --> META["メタ認知ゲート<br/>指摘ごとに 修正/NO-FIX を人間と判定"]
-    META --> FIXC["修正サイクル<br/>回帰ゲート＋再実測ゲート"]
-  end
-
-  RV --> relver
-  relver --> OUT(["Gate: PASS / BLOCKED"])
-```
-
-**トリガー**: 「リリース前検証」「インストール済みビルドを実際に呼んで確認」等
-**期待効果**: 定義ファイルを読むだけでなく実起動で exit code を実測する。定義ファイルの drift 判定は `/maintain`、脆弱性レビューは `secure` スキル、収束品質の集計は `/loop-audit` と役割分担
-
-**実行例**:
-
-```bash
-/release-verify
-```
-
----
-
 ## スキル・知識管理
 
 スキルの作成・改善と、セッションをまたぐ知識・進捗の蓄積を扱うワークフロー群です。
@@ -642,7 +576,7 @@ flowchart LR
 
 ### 知識蓄積サイクル
 
-各コマンド末尾の「学びの記録」ステップ（`/review` `/refactor` `/bugfix` `maintain` 等）で
+各コマンド末尾の「学びの記録」ステップ（`/review` `/refactor` `/bugfix` 等）で
 command/skill が明示的に `claq_mem_learn` を呼ぶことで知識カードが増える。定期実行や無操作での
 自動蓄積はない。
 
@@ -716,7 +650,7 @@ flowchart LR
   SAVE -->|"中断後の再開"| RESUME(["進捗・残タスクを<br/>読み込んで再開"]):::auto
 ```
 
-**トリガー**: `loop-dev` / `maintain` 等の長い反復ループ内部から自動的に呼ばれる（ユーザーが直接呼ぶ運用は想定しない）
+**トリガー**: `loop-dev` 等の長い反復ループ内部から自動的に呼ばれる（ユーザーが直接呼ぶ運用は想定しない）
 **期待効果**: レート制限中断が多いセッションでも、完了済みステップ・残りステップ・ベースラインを保存し再開を高速化する
 
 **実行例**: 通常操作不要（対象スキル内部から自動的に保存・再開される）
@@ -834,7 +768,7 @@ flowchart TB
   subgraph internal["⚙️ Internal Layer"]
     direction LR
     AGT["Agents (9)<br/>reviewer / planner / code-refiner ..."]:::agent
-    SKL["Skills (21: fork 8 / inline 13)<br/>grillme / learn / secure ..."]:::skill
+    SKL["Skills (19: fork 7 / inline 12)<br/>grillme / learn / secure ..."]:::skill
   end
 
   subgraph persistence["💾 Persistence"]
@@ -864,4 +798,5 @@ flowchart TB
 | 場所 | 内容 |
 |---|---|
 | [`docs/adr/`](docs/adr/README.md) | 現在有効な設計判断の基準（フック失敗の倒し方・シェル解析の境界・定義文書とサブエージェントの設計など）。役割ごとに 1 ファイル |
+| [`.claude/skills/`](.claude/skills/) | claq 自身の開発用スキル（配布しない）。`maintain`（ハーネスの定期メンテ）と `release-verify`（配布ビルドを実起動するリリース前検証） |
 | [`docs/specs/`](docs/specs/multi-api-mcp-design.md) | 設計概要書。複数の複雑な API から読み取り専用でデータを取得する MCP サーバの設計方針（`mcp-gen` の上流 API ファサードの根拠） |

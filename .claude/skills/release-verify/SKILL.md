@@ -11,7 +11,7 @@ user-invocable: true
 - hooks へ実 payload を流し、commands / skills / agents を実際に起動して、exit code と出力を実測する
 - 実測していない挙動は、定義がどれだけ正しく見えても「動く」と判定しない
 
-drift の判定は `../maintain/SKILL.md`、脆弱性の観点は `../secure/SKILL.md` に従い、ここで定義し直さない。
+drift の判定は `../maintain/SKILL.md`、脆弱性の観点は `plugins/claq/skills/secure/SKILL.md` に従い、ここで定義し直さない。
 
 ## 停止点
 
@@ -26,7 +26,7 @@ drift の判定は `../maintain/SKILL.md`、脆弱性の観点は `../secure/SKI
     - クエリ例: `release verify smoke {コンポーネント名}` / `bypass 実測 exit code`
   - 本文が要る key だけ `claq_run claq.mem.cli show <key>`
   - root ポインタが未記録の文脈では `claq_run` が exit 127 で解決できないので、開発リポジトリの `.venv`（claq が入っている）で `python3 -m claq.mem.cli search "..."` を直接叩く
-- 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `../learn/SKILL.md` の「記録する / しない」
+- 記録: 再利用可能な学びだけ `claq_mem_learn` で登録する。基準は `plugins/claq/skills/learn/SKILL.md` の「記録する / しない」
 
 ## ステップ1: インベントリ
 

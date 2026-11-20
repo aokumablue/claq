@@ -8,12 +8,15 @@ docs/adr/code-simplicity-and-defense.md は、サブエージェントに参照�
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 _TARGET_DIRS = ("agents", "skills", "commands")
+# 配布しない claq 開発用のスキル（リポジトリ直下の .claude/skills）。
+_DEV_SKILLS = _ROOT.parent.parent / ".claude" / "skills"
 _CANONICAL = Path("agents") / "tdd-writer.md"
 _HEADING = "## 実装の手順"
 _COPIES = (
@@ -24,7 +27,7 @@ _COPIES = (
     Path("skills") / "quick-review" / "SKILL.md",
     Path("skills") / "mcp-gen" / "SKILL.md",
     Path("skills") / "html-gen" / "SKILL.md",
-    Path("skills") / "release-verify" / "SKILL.md",
+    Path("..", "..", ".claude", "skills", "release-verify", "SKILL.md"),
 )
 
 
@@ -60,5 +63,6 @@ def test_every_partial_copy_is_registered() -> None:
     """
     first_line = _canonical_block()[0]
     definitions = {path.relative_to(_ROOT) for dirname in _TARGET_DIRS for path in (_ROOT / dirname).rglob("*.md")}
+    definitions |= {Path(os.path.relpath(path, _ROOT)) for path in _DEV_SKILLS.rglob("*.md")}
     holders = {path for path in definitions if "assets" not in path.parts and first_line in _lines(path)}
     assert holders == {_CANONICAL, *_COPIES}
