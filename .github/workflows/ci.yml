@@ -17,8 +17,8 @@ jobs:
       matrix:
         python-version: ["3.12", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       # install-dev.sh は PATH 上で最も新しい Python を選ぶため、matrix の版で venv を直接作る
@@ -28,6 +28,7 @@ jobs:
           .venv/bin/python -m pip install --quiet -e "plugins/claq[dev]"
       - name: Lint
         run: .venv/bin/ruff check plugins/claq
+      # venv の python は絶対パスで呼ぶ（相対パスだと sys.prefix の不一致を site が警告する）
       - name: Test with coverage
         working-directory: plugins/claq
-        run: ../../.venv/bin/python -m pytest -q --cov
+        run: "$GITHUB_WORKSPACE/.venv/bin/python -m pytest -q --cov"
