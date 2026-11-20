@@ -473,6 +473,17 @@ def test_every_lintable_suffix_is_checked(suffix: str) -> None:
     assert not commit_quality_scanner.should_lint_file("src/app.txt")
 
 
+@pytest.mark.parametrize("suffix", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._JAVASCRIPT_SUFFIXES"]))
+def test_every_javascript_suffix_gets_the_statement_checks(suffix: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_JAVASCRIPT_SUFFIXES` の全要素でデバッガ文を検出し、Python では検出しないこと（層1・単体）。"""
+    monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "debugger")  # nosec
+    deadline = commit_quality_scanner.new_secret_scan_deadline()
+
+    issues = commit_quality_scanner.find_file_issues(f"src/app{suffix}", deadline=deadline)
+    assert [issue["type"] for issue in issues] == ["debugger"]  # nosec
+    assert commit_quality_scanner.find_file_issues("src/app.py", deadline=deadline) == []
+
+
 @pytest.mark.parametrize(
     "name", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES"])
 )
@@ -509,6 +520,7 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
         "shell_tokens.WRITE_REDIRECT_OPERATORS",
         "heredoc._HEREDOC_CONTINUATION_SUFFIXES",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
+        "commit_quality_scanner._JAVASCRIPT_SUFFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",
         "commit_message._OTHER_SHORT_OPTIONS_WITH_VALUE",
