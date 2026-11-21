@@ -25,10 +25,18 @@ from claq.lib.stdin_io import MAX_STDIN_BYTES
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
 # サブセクションも拾うため prefix 一致にする。`[testenv` は tox.ini の
 # `[testenv]` / `[testenv:py312]` 等のサブ環境セクションを両方カバーする。
+# 同じツールの設定は置き場所ごとに見出しが違うため、各置き場所の形を並べる
+# （mypy は pyproject の `[tool.mypy` と setup.cfg の `[mypy]`、coverage は
+# `[tool.coverage` と setup.cfg / tox.ini の `[coverage:`、pytest は `[tool.pytest` と
+# setup.cfg の `[tool:pytest]`、tox.ini の `[pytest]`）。
 _LINT_SECTION_HEADERS = (
     "[tool.ruff",
     "[tool.coverage",
+    "[coverage:",
     "[tool.pytest",
+    "[tool:pytest]",
+    "[pytest]",
+    "[tool.mypy",
     "[flake8]",
     "[mypy]",
     "[pycodestyle]",

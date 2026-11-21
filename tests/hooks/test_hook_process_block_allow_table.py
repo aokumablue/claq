@@ -74,7 +74,7 @@ _BLOCK_ALLOW_TABLE: tuple[tuple[str, str, dict, int], ...] = (
     # 陰性対照: 非実行位置の言及は allow のまま。
     _bash("claq.hooks.bash_config_protection", "対 echo での言及", "echo tee pyproject.toml", ALLOW),
     # --- 保護語彙の代表確認 ---
-    # 全 36 件の網羅は test_protection_bypass_regressions.py の parametrize が担う。
+    # 全件の網羅は test_protection_bypass_regressions.py の parametrize が担う。
     # ここはプロセス起動経路での代表確認に絞る。
     _write("claq.hooks.config_protection", ".shellcheckrc", ".shellcheckrc", DENY),
     _write("claq.hooks.config_protection", ".markdownlintrc", ".markdownlintrc", DENY),
