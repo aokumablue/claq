@@ -450,6 +450,35 @@ class TestTranscriptSummary:
         entries = [_user("実依頼"), {**_user("This session is being continued from a previous conversation."), flag: True}]
         assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- 実依頼"
 
+    @pytest.mark.parametrize(
+        "output",
+        [
+            {"type": "user", "message": {"role": "user", "content": "<local-command-stdout>Set model</local-command-stdout>"}},
+            {"type": "system", "subtype": "local_command", "content": "<local-command-stdout></local-command-stdout>"},
+            {"type": "user", "message": {"role": "user", "content": "<local-command-stderr>error</local-command-stderr>"}},
+        ],
+    )
+    def test_local_command_with_output_is_not_a_request(self, tmp_path: Path, output: dict) -> None:
+        """出力エントリが続いたローカルコマンド（``/model`` 等）は依頼にせず、手前の実依頼を押し出さないこと。
+
+        出力エントリが起動エントリを親に持つときだけ外す。親が別のエントリなら起動は依頼として残る。
+        """
+        entries = [
+            {**_user("依頼A"), "uuid": "a"},
+            {**_user("依頼B"), "uuid": "b"},
+            {**_user(_command("model", "claude-sonnet-5-5")), "uuid": "c", "parentUuid": "b"},
+            {**output, "uuid": "d", "parentUuid": "c"},
+            {**_user(_command("bugfix", "x")), "uuid": "e", "parentUuid": "d"},
+            {**_user("<local-command-stdout>無関係</local-command-stdout>"), "uuid": "f", "parentUuid": "b"},
+        ]
+        assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- 依頼A\n- 依頼B\n- /bugfix x"
+
+    def test_local_command_output_with_block_content_keeps_the_invocation(self, tmp_path: Path) -> None:
+        """出力の本文がブロック列なら出力と判定せず、起動は依頼として残ること。"""
+        output = {**_user_blocks({"type": "text", "text": "<local-command-stdout>x</local-command-stdout>"}), "parentUuid": "c"}
+        entries = [{**_user(_command("goal", "y")), "uuid": "c"}, output]
+        assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- /goal y"
+
     def test_api_request_blob_is_not_a_request(self, tmp_path: Path) -> None:
         """API 送信内容の控え（type が api-request-blob）は message.role が user でも依頼にしないこと。"""
         blob = {"type": "api-request-blob", "message": {"role": "user", "content": "古い依頼の再送"}}

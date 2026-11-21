@@ -81,6 +81,14 @@ _HOST_META_FLAGS: tuple[str, ...] = ("isMeta", "isCompactSummary")
 除去では落とせない。印の付いたエントリは依頼として引き継がない。
 """
 
+_LOCAL_COMMAND_OUTPUT_RE = re.compile(r"\s*<local-command-(?:stdout|stderr)[\s>]")
+"""ローカルコマンド（``/model`` ``/clear`` 等）の出力エントリの書き出し。
+
+host はローカルコマンドの起動をスラッシュコマンドと同じ形で記録し、その出力を起動エントリを親に持つ
+エントリ（``user`` 型または ``system`` 型）として続ける。host 自身の注意書きのとおり依頼ではないため、
+出力が続いた起動は依頼から外す。
+"""
+
 _PATH_SEPARATOR_RE = re.compile(r"[/\\]")
 """パス区切り（POSIX の ``/`` と Windows の ``\\``）。"""
 
@@ -318,6 +326,8 @@ def _scan(text: str, deadline: float, work_tree: str) -> tuple[list[str], list[s
     messages: list[str] = []
     files: set[str] = set()
     tools: set[str] = set()
+    # 直前に依頼として採ったエントリの uuid。続く出力エントリがこれを親に持てば、その起動はローカルコマンド。
+    last_message_uuid: object = None
 
     for line in text.splitlines():
         if len(line) > _MAX_TRANSCRIPT_LINE_CHARS:
@@ -330,9 +340,14 @@ def _scan(text: str, deadline: float, work_tree: str) -> tuple[list[str], list[s
         entry = parse_entry(line)
         if entry is None:
             continue
+        if last_message_uuid is not None and entry.get("parentUuid") == last_message_uuid and _is_local_command_output(entry):
+            messages.pop()
+            last_message_uuid = None
+            continue
         message = _user_message(entry)
         if message:
             messages.append(message)
+            last_message_uuid = entry.get("uuid")
         _collect_tools(entry, tools, files, work_tree)
 
     return (
@@ -340,6 +355,19 @@ def _scan(text: str, deadline: float, work_tree: str) -> tuple[list[str], list[s
         sorted(files)[:_FILE_LIST_LIMIT],
         sorted(tools)[:_TOOL_LIST_LIMIT],
     )
+
+
+def _is_local_command_output(entry: dict[str, Any]) -> bool:
+    """エントリがローカルコマンドの出力（``<local-command-stdout>`` 等）かを判定する。
+
+    Args:
+        entry: トランスクリプトの 1 エントリ。
+
+    Returns:
+        本文が文字列で、ローカルコマンドの出力タグで始まれば True。
+    """
+    content = _message_of(entry).get("content") or entry.get("content")
+    return isinstance(content, str) and _LOCAL_COMMAND_OUTPUT_RE.match(content) is not None
 
 
 def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
