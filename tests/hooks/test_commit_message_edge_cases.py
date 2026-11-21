@@ -33,6 +33,12 @@ _LONG_UNCONVENTIONAL = "bad message with no conventional format and a very long 
         ("git commit -- -m x", None),
         ("git commit -am", None),
         ('git commit -m ""', None),
+        ('git commit -m "Merge branch \'feature\' into main"', ("Merge branch 'feature' into main", [])),
+        ("git commit -m 'Revert \"feat: add x.\"'", ('Revert "feat: add x."', [])),
+        ('git commit -m "fixup! feat: add app"', ("fixup! feat: add app", [])),
+        ('git commit -m "squash! fixup! feat: add app"', ("squash! fixup! feat: add app", [])),
+        ('git commit -m "amend! Feat: Bad."', ("amend! Feat: Bad.", ["format", "punctuation"])),
+        ('git commit -m "Merge the two parsers"', ("Merge the two parsers", ["format"])),
     ],
     ids=[
         "not-a-commit",
@@ -56,6 +62,12 @@ _LONG_UNCONVENTIONAL = "bad message with no conventional format and a very long 
         "after-end-of-options",
         "missing-value",
         "empty-message",
+        "git-generated-merge",
+        "git-generated-revert",
+        "autosquash-fixup",
+        "autosquash-stacked",
+        "autosquash-checks-the-subject-behind-the-marker",
+        "hand-written-merge-wording",
     ],
 )
 def test_validate_commit_message(command: str, expected: tuple[str, list[str]] | None) -> None:
@@ -65,6 +77,7 @@ def test_validate_commit_message(command: str, expected: tuple[str, list[str]] |
     長さや本文末尾の句点で件名を咎めない）。メッセージはトークン化した引数から読み、結合短形式（`-am`）・
     値の結合（`-mmsg`）・二重引用符の中の `'` も値どおりに読む。コマンド置換は本文が実行時に
     しか決まらず、字面（`$(cat <<`）を本文として検査すると毎回の commit で形式違反の警告が出る。
+    git が生成する件名（`Merge branch …` / `Revert "…"`）は咎めず、autosquash の印は外して後ろの件名を見る。
     """
     result = commit_message.validate_commit_message(command)
 
