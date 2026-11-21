@@ -516,6 +516,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     # --- commit_quality_scanner ---
     "commit_quality_scanner._LINTABLE_SUFFIXES": {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"},
     "commit_quality_scanner._JAVASCRIPT_SUFFIXES": {".js", ".jsx", ".ts", ".tsx"},
+    "commit_quality_scanner._JS_COMMENT_LINE_PREFIXES": ("//", "*", "/*"),
     "commit_quality_scanner._MINIFIED_SUFFIXES": (".min.js", ".min.css"),
     "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES": {
         "Cargo.lock",

@@ -75,6 +75,11 @@ _LINTABLE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"}
 # この 2 つは JavaScript / TypeScript の構文で、Python・Go・Rust ではコメント・docstring・識別子に
 # 現れた語にすぎない。拾うとデバッガ文（error）が正当な commit を止める。
 _JAVASCRIPT_SUFFIXES = {".js", ".jsx", ".ts", ".tsx"}
+# JS / TS のコメント行の先頭（`//`・JSDoc の `*`・`/*`）。この行のログ出力呼び出しとデバッガ文は実行されない。
+_JS_COMMENT_LINE_PREFIXES = ("//", "*", "/*")
+# デバッガ文だけを拾う。プロパティ（`chrome.` の後・オブジェクトのキー）と引用符の中の語（ESLint のルール名・
+# バンドラの除去指定）は文ではなく、拾うと設定ファイルの commit を止める。
+_DEBUGGER_STATEMENT_RE = re.compile(r"(?<![\w.$'\"`-])debugger(?![\w$'\"`-]|\s*:)")  # nosec
 _MINIFIED_SUFFIXES = (".min.js", ".min.css")
 _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "package-lock.json",
@@ -89,32 +94,35 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     # ベンダ prefix の集合は `claq.lib.redaction._PATTERNS` と揃える（記録時はマスクするが
     # commit 時は検出しない秘密を作らないため）。
     #
+    # ベンダの鍵は大小が固定で単語の境界から始まるので、redaction と同じく大小を区別し `\b` を付ける。
+    # 大小無視や境界なしでは、`task-queue-…` や `fantasiaGame…` のような識別子で commit を止める。
+    #
     # `sk-` の文字クラスに `-` を含めるのは、OpenAI の現行形式がハイフンを含むため。
     # `(?!ant-)` は Anthropic 形と 1 行から 2 件の issue が出る二重計上を避けるため。
-    (r"sk-(?!ant-)[a-zA-Z0-9_-]{20,}", "OpenAI API key"),
-    (r"sk-ant-[a-zA-Z0-9_-]{20,}", "Anthropic API key"),
-    (r"gh[pors]_[a-zA-Z0-9]{36,}", "GitHub PAT"),
-    (r"github_pat_[a-zA-Z0-9_]{59,}", "GitHub fine-grained PAT"),
-    (r"xox[bpoa]-[a-zA-Z0-9-]{10,}", "Slack token"),
-    (r"AIza[a-zA-Z0-9_-]{35}", "Google API key"),
-    (r"(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}", "AWS Access Key"),
+    (r"\bsk-(?!ant-)[a-zA-Z0-9_-]{20,}", "OpenAI API key"),
+    (r"\bsk-ant-[a-zA-Z0-9_-]{20,}", "Anthropic API key"),
+    (r"\bgh[pors]_[a-zA-Z0-9]{36,}", "GitHub PAT"),
+    (r"\bgithub_pat_[a-zA-Z0-9_]{59,}", "GitHub fine-grained PAT"),
+    (r"\bxox[bpoa]-[a-zA-Z0-9-]{10,}", "Slack token"),
+    (r"\bAIza[a-zA-Z0-9_-]{35}", "Google API key"),
+    (r"\b(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}", "AWS Access Key"),
     # `eyJ` の直前に base64url 文字を許さない lookbehind と所有的量指定子で、`eyJeyJ…` の入力でも
     # 走査を線形に保つ（二次オーダーだと hook timeout を超える）。
     (r"(?<![a-zA-Z0-9_-])eyJ[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]++\.[a-zA-Z0-9_-]*+", "JWT"),
     # 認証情報の代入。クォートを任意にすると `token = segment[index]` のような通常の
     # コード代入まで拾い、commit をブロックするフックの可用性を壊す。そのため
     # 「クォート付き」「区切りの前後に空白が無い env/ini 形」「行頭キーの YAML 形」の
-    # 3 形に限定し、値の文字集合も ASCII の秘密様文字へ絞る。
+    # 3 形に限定し、値の文字集合も ASCII の秘密様文字へ絞る。キー名は大小を問わない（`API_KEY=`）。
     (
-        r"(?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*['\"][^'\"\s]+['\"]",
+        r"(?i)(?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*['\"][^'\"\s]+['\"]",
         "credential assignment",
     ),
     (
-        r"(?:password|passwd|secret|token|api[-_]?key)[=:][A-Za-z0-9_\-./+]{8,}",
+        r"(?i)(?:password|passwd|secret|token|api[-_]?key)[=:][A-Za-z0-9_\-./+]{8,}",
         "credential assignment",
     ),
     (
-        r"^\s*[a-z0-9_]*(?:password|passwd|secret|token|api[-_]?key)\s*:\s+[A-Za-z0-9_\-./+]{8,}\s*$",
+        r"(?i)^\s*[a-z0-9_]*(?:password|passwd|secret|token|api[-_]?key)\s*:\s+[A-Za-z0-9_\-./+]{8,}\s*$",
         "credential assignment",
     ),
     # PEM / OpenSSH / PGP 秘密鍵ブロックのヘッダ行。鍵種別は列挙で固定し、走査を二次
@@ -125,16 +133,16 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     # 行自身がパターンへ一致し、本モジュールの自己走査テストが落ちる。同じ理由で、この
     # 付近のコメントにも完成形のヘッダを書かない。
     (
-        r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |ENCRYPTED |PGP |SSH2 |SSH2 ENCRYPTED )?"
+        r"(?i)-----BEGIN (?:RSA |DSA |EC |OPENSSH |ENCRYPTED |PGP |SSH2 |SSH2 ENCRYPTED )?"
         r"PRIVATE KEY(?: BLOCK)?[-]{5}",
         "private key",
     ),
     # ssh.com / Tectia 形式。デリミタが 4 ハイフンで、ヘッダ語との間に空白が入る
     # ため上の交替では拾えない。
-    (r"[-]{4} BEGIN SSH2 (?:ENCRYPTED )?PRIVATE KEY [-]{4}", "SSH2 private key"),
+    (r"(?i)[-]{4} BEGIN SSH2 (?:ENCRYPTED )?PRIVATE KEY [-]{4}", "SSH2 private key"),
     # PuTTY の .ppk。版番号を文字クラスにするのは v3 を拾うためと、この行自身が
     # 自分のパターンに一致しないようにするため（上のコメントと同じ理由）。
-    (r"PuTTY-User-Key-File-[0-9]", "PuTTY private key"),
+    (r"(?i)PuTTY-User-Key-File-[0-9]", "PuTTY private key"),
 )
 
 
@@ -464,7 +472,8 @@ def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) ->
 
     `# nosec` を含む行は検出器自身のテストフィクスチャ等、意図的にパターンを含む行と
     みなして抑制します。secret scan と同じ 1 本の実時間予算に載せます。ログ出力呼び出しと
-    デバッガ文は JavaScript / TypeScript のファイルでだけ検出します（`_JAVASCRIPT_SUFFIXES`）。
+    デバッガ文は JavaScript / TypeScript のファイルでだけ検出し、コメント行（`_JS_COMMENT_LINE_PREFIXES`）
+    と、デバッガ文でない語（`_DEBUGGER_STATEMENT_RE` が外すプロパティ・引用符の中）は除きます。
 
     Args:
         lines: 検査対象のデコード済みファイル内容を改行で分割した行リストです。
@@ -487,11 +496,12 @@ def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) ->
         if "# nosec" in line:
             continue
 
-        if javascript and "console.log" in line and not line.strip().startswith(("//", "*")):  # nosec
+        comment_line = line.strip().startswith(_JS_COMMENT_LINE_PREFIXES)
+        if javascript and "console.log" in line and not comment_line:  # nosec
             message = f"console.log found at line {line_num}"  # nosec
             issues.append(_issue("console.log", message, line=line_num, severity="warning"))  # nosec
 
-        if javascript and re.search(r"\bdebugger\b", line) and not line.strip().startswith("//"):
+        if javascript and _DEBUGGER_STATEMENT_RE.search(line) and not comment_line:
             message = f"debugger statement at line {line_num}"  # nosec
             issues.append(_issue("debugger", message, line=line_num, severity="error"))  # nosec
 
@@ -534,7 +544,7 @@ def _scan_secret_issues(lines: list[str], *, deadline: float, report_lines: bool
         location = f"at line {line_num}" if report_lines else "in extracted binary content"
         for pattern, name in _SECRET_PATTERNS:
             budget.check(len(line), f"line {index + 1}")
-            if re.search(pattern, line, re.IGNORECASE):
+            if re.search(pattern, line):
                 issues.append(_issue("secret", f"Potential {name} exposed {location}", line=line_num, severity="error"))
 
     return issues

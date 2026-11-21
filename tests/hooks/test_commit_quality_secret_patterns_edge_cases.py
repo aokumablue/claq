@@ -67,6 +67,9 @@ def _scan_line(line: str) -> list[tuple[str, int, str, str]]:
         ("eyJ" + "abc.def.ghi", ["JWT"]),
         ("Authorization: Bearer " + "eyJ" + "hbGciOiJSUzI1NiJ9." + "eyJ" + "zdWIiOiIxIn0.sig", ["JWT"]),
         ('token = "' + "eyJ" + 'a.b.c"', ["JWT", "credential assignment"]),
+        # 区切り（`=` や空白）の直後に現れる鍵は従来どおり検出する。
+        ("OPENAI" + "_API_KEY=" + "sk-" + "proj-" + "A" * 40, ["OpenAI API key", "credential assignment"]),
+        ("aws_access_key_id = " + "AKIA" + "IOSFODNN7EXAMPLE", ["AWS Access Key"]),
         ("API" + "_KEY=abcdef123456", ["credential assignment"]),
         ("  api" + "_key: abcdef123456", ["credential assignment"]),
         ("password" + "=hunter2hunter2", ["credential assignment"]),
@@ -94,6 +97,14 @@ def test_scan_secret_issues_detects_secret_line(line: str, names: list[str]) -> 
         'outside_secret = tmp_path / "outside_secret.txt"',
         "const apiKey = JSON.parse(secret.SecretString).key;",
         '"token=" + "value"',
+        # 単語の途中の `sk-` と、識別子の途中の大小違いのベンダ prefix。実物の鍵は大小が固定で、
+        # 単語の境界から始まる（`claq.lib.redaction` と同じ）。大小無視・境界なしで照合する
+        # スキャナにもこのファイル自身を一致させないよう、連結で組み立てる。
+        "name: task-" + "queue-processing-worker",
+        "TASK-" + "1234-ABCD-EFGH-IJKL-MNOP",
+        "License: Asterisk-" + "linking-protocols-exception",
+        "fantasia" + "GameEngineConfig = {}",
+        "class Aphasia" + "AssessmentResultView:",
     ],
 )
 def test_scan_secret_issues_ignores_non_secret_line(line: str) -> None:

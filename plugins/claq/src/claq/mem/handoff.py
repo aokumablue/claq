@@ -321,7 +321,8 @@ def _scan(text: str, deadline: float, work_tree: str) -> tuple[list[str], list[s
 
     for line in text.splitlines():
         if len(line) > _MAX_TRANSCRIPT_LINE_CHARS:
-            log.warning("トランスクリプトの 1 行が上限を超えました: その行を捨てます")
+            # 画像・巨大なツール結果の行で、捨てても引き継ぎは欠けない。WARNING は bg ログ経由で次の SessionStart に失敗として出る。
+            log.info("トランスクリプトの 1 行が上限を超えました: その行を捨てます")
             continue
         if time.monotonic() >= deadline:
             log.warning("トランスクリプト走査がタイムアウトしました: 残りの行を捨てます")
