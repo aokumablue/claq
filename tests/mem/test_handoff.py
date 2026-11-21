@@ -473,6 +473,12 @@ class TestTranscriptSummary:
         ]
         assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- 依頼A\n- 依頼B\n- /bugfix x"
 
+    def test_forked_skill_invoked_by_slash_stays_a_request(self, tmp_path: Path) -> None:
+        """fork スキルの slash 起動は結果が出力エントリとして続いても、平文で記録された依頼として残ること。"""
+        output = {"type": "system", "subtype": "local_command", "content": "<local-command-stdout>Done.</local-command-stdout>"}
+        entries = [{**_user("/skill-tune 差分を直せ"), "uuid": "c"}, {**output, "parentUuid": "c"}]
+        assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- /skill-tune 差分を直せ"
+
     def test_local_command_output_with_block_content_keeps_the_invocation(self, tmp_path: Path) -> None:
         """出力の本文がブロック列なら出力と判定せず、起動は依頼として残ること。"""
         output = {**_user_blocks({"type": "text", "text": "<local-command-stdout>x</local-command-stdout>"}), "parentUuid": "c"}
