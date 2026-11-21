@@ -16,6 +16,10 @@ _CONVENTIONAL_COMMIT = re.compile(
     r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?!?:\s*.+"
 )
 _MAX_SUBJECT_CHARS = 72
+# git が件名を生成する形（`git merge` / `git revert` の既定）。利用者が書いた件名ではないので検査しない。
+_GIT_GENERATED_SUBJECT = re.compile(r'^(?:Merge (?:branch|remote-tracking branch|tag|pull request|commit) |Revert ")')
+# `git rebase --autosquash` が後で畳む印。印の後ろが本来の件名なので、印を外して検査する。
+_AUTOSQUASH_PREFIX = re.compile(r"^(?:(?:fixup|squash|amend)! )+")
 
 
 def _message_issue(kind: str, message: str, suggestion: str) -> dict:
@@ -35,12 +39,18 @@ def _message_issue(kind: str, message: str, suggestion: str) -> dict:
 def _commit_message_issues(subject: str) -> list[dict]:
     """コミットメッセージの件名行の形式問題を列挙する。
 
+    git が生成する件名（``Merge branch …`` ``Revert "…"``）は検査しない。autosquash の印
+    （``fixup!`` ``squash!`` ``amend!``）は外し、後ろの本来の件名を検査する。
+
     Args:
         subject: 抽出済みのコミットメッセージの 1 行目。
 
     Returns:
         問題辞書のリスト。問題がなければ空リスト。
     """
+    if _GIT_GENERATED_SUBJECT.match(subject):
+        return []
+    subject = _AUTOSQUASH_PREFIX.sub("", subject, count=1)
     issues: list[dict] = []
     conventional = _CONVENTIONAL_COMMIT.match(subject)
     if not conventional:

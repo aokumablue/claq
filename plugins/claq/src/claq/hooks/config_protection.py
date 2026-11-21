@@ -83,6 +83,14 @@ PROTECTED_FILES = frozenset({
     "biome.jsonc",
     ".ruff.toml",
     "ruff.toml",
+    # 下の 4 つは `conditional_protection._LINT_SECTION_HEADERS` が汎用設定の中で守る
+    # flake8 / mypy / coverage / pytest の専用ファイル。中身は同じ設定なので同じ重みで守る。
+    ".flake8",
+    "mypy.ini",
+    ".mypy.ini",
+    ".coveragerc",
+    "pytest.ini",
+    ".pytest.ini",
     ".shellcheckrc",
     ".stylelintrc",
     ".stylelintrc.json",

@@ -44,6 +44,22 @@ _CASES = [
     pytest.param(
         _write_content("setup.cfg", "[flake8]\nmax-line-length = 200"), None, 2, id="write-setup-cfg-flake8-section"
     ),
+    # 同じツールの設定は置き場所ごとに見出しが違う。どの置き場所の見出しでも拾う。
+    pytest.param(
+        _write_content("pyproject.toml", "[tool.mypy]\nstrict = false\n"), None, 2, id="write-pyproject-mypy-section"
+    ),
+    pytest.param(
+        _write_content("setup.cfg", "[coverage:run]\nomit = src/*\n"), None, 2, id="write-setup-cfg-coverage-section"
+    ),
+    pytest.param(
+        _write_content("setup.cfg", "[tool:pytest]\nfilterwarnings = ignore\n"),
+        None,
+        2,
+        id="write-setup-cfg-pytest-section",
+    ),
+    pytest.param(
+        _write_content("tox.ini", "[pytest]\nfilterwarnings = ignore\n"), None, 2, id="write-tox-ini-pytest-section"
+    ),
     pytest.param(
         _write_content("package.json", '{"eslintConfig": {"rules": {}}}'), None, 2, id="write-package-json-eslint-config"
     ),
