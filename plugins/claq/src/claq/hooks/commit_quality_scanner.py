@@ -113,8 +113,12 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     # コード代入まで拾い、commit をブロックするフックの可用性を壊す。そのため
     # 「クォート付き」「区切りの前後に空白が無い env/ini 形」「行頭キーの YAML 形」の
     # 3 形に限定し、値の文字集合も ASCII の秘密様文字へ絞る。キー名は大小を問わない（`API_KEY=`）。
+    # クォート付きの値が `$` `<` `{` `%` で始まるものは変数参照・テンプレート・プレースホルダ
+    # （`"${DB_PASSWORD}"` `"<your-key>"` `"{{secrets.X}}"` `"%(token)s"`）で、秘密の値そのものではない。
+    # 拾うと docker-compose や設定例の commit を止める。クォート無しの 2 形は値の文字集合がこれらの
+    # 記号を含まないため、もとから拾わない。
     (
-        r"(?i)(?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*['\"][^'\"\s]+['\"]",
+        r"(?i)(?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*['\"](?![$<{%])[^'\"\s]+['\"]",
         "credential assignment",
     ),
     (

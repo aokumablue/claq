@@ -73,6 +73,8 @@ def _scan_line(line: str) -> list[tuple[str, int, str, str]]:
         ("API" + "_KEY=abcdef123456", ["credential assignment"]),
         ("  api" + "_key: abcdef123456", ["credential assignment"]),
         ("password" + "=hunter2hunter2", ["credential assignment"]),
+        # 記号を含む値でも、先頭が変数参照・プレースホルダの記号でなければ検出する。
+        ("pass" + 'word = "hunter2$<{%"', ["credential assignment"]),
     ],
 )
 def test_scan_secret_issues_detects_secret_line(line: str, names: list[str]) -> None:
@@ -97,6 +99,14 @@ def test_scan_secret_issues_detects_secret_line(line: str, names: list[str]) -> 
         'outside_secret = tmp_path / "outside_secret.txt"',
         "const apiKey = JSON.parse(secret.SecretString).key;",
         '"token=" + "value"',
+        # クォート付きの値が変数参照・テンプレート・プレースホルダのもの。秘密の値そのものではなく、
+        # 拾うと docker-compose や設定例の commit を止める。
+        # 修正前のスキャナにこのファイル自身を一致させないよう、キーと値を連結で組み立てる。
+        "      POSTGRES_PASSWORD" + ': "${DB_PASSWORD}"',
+        "password" + " = '$DB_PASSWORD'",
+        "api_key" + ': "<your-key-here>"',
+        "token" + ': "{{secrets.TOKEN}}"',
+        "secret" + ' = "%(secret)s"',
         # 単語の途中の `sk-` と、識別子の途中の大小違いのベンダ prefix。実物の鍵は大小が固定で、
         # 単語の境界から始まる（`claq.lib.redaction` と同じ）。大小無視・境界なしで照合する
         # スキャナにもこのファイル自身を一致させないよう、連結で組み立てる。
