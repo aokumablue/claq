@@ -17,6 +17,7 @@ from claq.ci.harness_audit_utils import (
     safe_read,
 )
 from claq.hooks.shell_tokens import basename_any_separator
+from claq.lib.constants import HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD
 from claq_dev.ci_common import extract_frontmatter
 
 
@@ -25,7 +26,7 @@ def file_exists(root_dir: str | Path, relative_path: str) -> bool:
     return Path(root_dir, relative_path).exists()
 
 
-_HOOK_WRAPPER_BASENAMES = {"claq-hook", "claq-hook.cmd"}
+_HOOK_WRAPPER_BASENAMES = {HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD}
 
 
 def _hook_command_argv(command: str) -> tuple[str, ...] | None:

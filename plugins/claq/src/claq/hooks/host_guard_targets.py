@@ -47,13 +47,14 @@ from claq.hooks.hook_common import (
     normalize_protected_name,
     resolve_effective_target,
 )
+from claq.lib.constants import HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD
 from claq.lib.core_utils import get_home_dir, get_plugin_root
 
 _HOOKS_JSON_NAME = "hooks.json"
 
 # `cd` を含むコマンドで basename だけで塞ぐ、実行中のランタイムの起動ファイル（hooks.json が起動する）。
 # ``runtime`` 単独の basename までは広げない（一般的な名前で誤検出が過大になる）。
-_RUNTIME_ENTRYPOINT_NAMES = ("claq-hook", "claq-hook.cmd")
+_RUNTIME_ENTRYPOINT_NAMES = (HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD)
 _RUNTIME_DIR_DISPLAY = "runtime/"
 
 # ホスト設定の置き場（``.claude/`` 直下）と名前の構造一致。

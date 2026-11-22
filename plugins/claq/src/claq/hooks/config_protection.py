@@ -29,6 +29,7 @@ from claq.hooks.hook_common import (
     resolve_repo_root,
     scan_memo,
 )
+from claq.lib.constants import HOOK_ENTRYPOINT
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.harness import (
     extract_file_paths,
@@ -333,7 +334,7 @@ def _plugin_runtime_is_tracked(repo_root: Path, plugin_root: Path) -> bool:
     """
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / "runtime" / "claq-hook")],
+            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / "runtime" / HOOK_ENTRYPOINT)],
             capture_output=True,
             timeout=5,
             check=False,
