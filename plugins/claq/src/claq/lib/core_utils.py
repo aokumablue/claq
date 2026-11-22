@@ -79,24 +79,6 @@ def get_sessions_dir() -> Path:
     return get_claq_dir() / SESSION_DATA_DIR_NAME
 
 
-def ensure_dir(dir_path: str | Path) -> Path:
-    """ディレクトリを親ごと作成して Path を返す。
-
-    既にディレクトリ（ディレクトリへの symlink を含む）なら何もしない。他プロセスとの
-    作成競合は ``mkdir(exist_ok=True)`` が吸収する（競合に負けた側の
-    ``FileExistsError`` は、対象がディレクトリなら pathlib が握る）ので、ここでは扱わない。
-
-    Raises:
-        FileExistsError: ``dir_path`` が通常ファイル・ファイルへの symlink・壊れた symlink
-            など、ディレクトリ以外として存在する場合。
-        NotADirectoryError: 祖先が通常ファイルの場合。
-        OSError: ディレクトリを作成できない場合（例: 権限不足）
-    """
-    path = Path(dir_path)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def make_private_dirs(dir_path: str | Path) -> Path:
     """ディレクトリを欠けている祖先ごと作成し、パーミッションを 0700 に絞る。
 
@@ -123,8 +105,8 @@ def make_private_dirs(dir_path: str | Path) -> Path:
     Raises:
         FileExistsError: ``dir_path`` またはその祖先が通常ファイル・ファイルへの symlink・
             壊れた symlink など、ディレクトリ以外として存在する場合（``chmod`` しない）。
-            祖先も 1 段ずつ ``mkdir`` するため、``ensure_dir`` と違い祖先が
-            ファイルでも ``NotADirectoryError`` ではなくこちらになる。
+            祖先も 1 段ずつ ``mkdir`` するため、祖先がファイルでも
+            ``NotADirectoryError`` ではなくこちらになる。
         OSError: 作成も chmod もできない場合。
     """
     path = Path(dir_path)
@@ -180,9 +162,17 @@ def log(message: str) -> None:
 
 
 def append_file(file_path: str | Path, content: str) -> None:
-    """テキストファイルに追記する。"""
+    """テキストファイルに追記する。
+
+    親ディレクトリは `ensure_private_dir` で 0700 に作る。追記先は ``~/.claq`` 配下の記録で、
+    最初に ``~/.claq`` を作るのが追記になる場合も、他の OS ユーザーから読めるディレクトリにしない。
+
+    Args:
+        file_path: 追記先のファイルパス。
+        content: 追記する文字列。
+    """
     path = Path(file_path)
-    ensure_dir(path.parent)
+    ensure_private_dir(path.parent)
     with path.open("a", encoding="utf-8") as f:
         f.write(content)
 

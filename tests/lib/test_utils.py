@@ -10,7 +10,6 @@ import pytest
 from claq.lib import core_utils
 from claq.lib.core_utils import (
     append_file,
-    ensure_dir,
     ensure_private_dir,
     get_claq_dir,
     get_datetime_string,
@@ -87,30 +86,6 @@ def test_claq_and_sessions_dirs(home: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("relative", "error"),
-    [
-        ("new/nested/dir", None),
-        ("realdir", None),
-        ("dirlink", None),
-        ("file", FileExistsError),
-        ("filelink", FileExistsError),
-        ("dangling", FileExistsError),
-        ("file/sub", NotADirectoryError),
-    ],
-)
-def test_ensure_dir(home: Path, relative: str, error: type[OSError] | None) -> None:
-    """ディレクトリ（への symlink）は作成・既存とも成功し、ディレクトリ以外の場所はその例外を伝えて中身を変えない。"""
-    target = home / relative
-    if error is None:
-        assert ensure_dir(target) == target
-        assert target.is_dir()
-    else:
-        with pytest.raises(error):
-            ensure_dir(target)
-    assert (home / "file").read_text() == "data"
-
-
-@pytest.mark.parametrize(
     ("relative", "precreate_claq", "expected_modes"),
     [
         (".claq/nested", False, {".claq/nested": 0o700, ".claq": 0o700}),
@@ -174,12 +149,21 @@ def test_get_datetime_string_format() -> None:
     assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", get_datetime_string())
 
 
-def test_append_file_creates_parent_dirs_and_appends(tmp_path: Path) -> None:
-    """親ディレクトリを作り、既存内容の後ろへ追記する。"""
-    test_file = tmp_path / "a" / "b" / "append.txt"
-    append_file(test_file, "first")
-    append_file(test_file, "second")
+def test_append_file_creates_private_parent_dirs_and_appends(home: Path) -> None:
+    """umask 022 でも ~/.claq と親ディレクトリを 0700 で作り、既存内容の後ろへ追記する。"""
+    test_file = home / ".claq" / "session-data" / "append.txt"
+    old_umask = os.umask(0o022)
+    try:
+        append_file(test_file, "first")
+        append_file(test_file, "second")
+    finally:
+        os.umask(old_umask)
+
     assert test_file.read_text(encoding="utf-8") == "firstsecond"
+    assert {name: _mode(home / name) for name in (".claq", ".claq/session-data")} == {
+        ".claq": 0o700,
+        ".claq/session-data": 0o700,
+    }
 
 
 @pytest.mark.parametrize(
