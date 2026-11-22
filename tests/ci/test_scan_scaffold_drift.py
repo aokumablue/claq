@@ -278,11 +278,15 @@ class TestStripCodeSpans:
 
     @pytest.mark.parametrize("payload", ["```\n", "`"])
     def test_unterminated_spans_stay_linear(self, payload: str) -> None:
-        """終端の来ないコードスパンが並んでも予算内に完了する。"""
-        text = payload * 60_000
+        """終端の来ないコードスパンが並んでも予算内に完了する。
+
+        改行の無いバッククォートの列で開始の記号列を手放すと走査が長さの 2 乗になり、
+        24 万文字で十数秒かかる（線形なら数ミリ秒）。
+        """
+        text = payload * 240_000
 
         started = time.monotonic()
         scanner.strip_code_spans(text)
         elapsed = time.monotonic() - started
 
-        assert elapsed < 5.0, f"{len(text)} 文字で {elapsed:.2f} 秒（複雑度クラスの退行）"
+        assert elapsed < 1.0, f"{len(text)} 文字で {elapsed:.2f} 秒（複雑度クラスの退行）"

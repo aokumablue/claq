@@ -166,10 +166,19 @@ class TestArgvAndStdin:
         assert cli.main() == 0
         assert "CLI Commands for mem" in capsys.readouterr().out
 
-    def test_unknown_command_returns_2(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """未知のコマンドは exit_code=2。"""
-        _stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["nonexistent"])
+    def test_every_command_declares_its_arguments(self) -> None:
+        """実行できるコマンドはすべて引数の契約（位置引数の数と受理するオプション）を宣言していること。"""
+        assert cli._COMMAND_SPECS.keys() == cli._COMMAND_HANDLERS.keys()
+
+    @pytest.mark.parametrize("extra", [[], ["--kind", "pitfall"], ["--help"]], ids=["bare", "with-option", "with-help"])
+    def test_unknown_command_returns_2(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra: list[str]) -> None:
+        """未知のコマンドは、続く引数によらず不明なコマンドとして exit_code=2 で報告すること。
+
+        オプションの誤り（exit 1）として報告すると、``add --kind pitfall`` の誤りが ``learn`` の打ち間違いだと分からない。
+        """
+        _stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["nonexistent", *extra])
         assert exit_code == 2
+        assert "不明なコマンド: nonexistent" in stderr
 
     @pytest.mark.parametrize(
         ("raw", "expected"),

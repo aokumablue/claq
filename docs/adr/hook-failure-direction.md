@@ -84,6 +84,13 @@ SessionEnd の handoff で、ハーネスの hook timeout に阻まれず non-bl
   前日の 2 ファイルまでしか読まない。2 日以上前の失敗や次回 SessionStart 自体が走らないセッション
   での失敗は通知されず埋もれる）
 
+`/clear` だけは、消した会話の SessionEnd と新しい会話の SessionStart を host が続けて起動し、handoff の
+書込みと次回 SessionStart が同時に走る。SessionStart の context は payload の `source` が `clear` のとき
+だけ、直近数秒以内に終わった引き継ぎがリポジトリに現れるまで数秒を上限に待ってから引き継ぎを選ぶ。
+待たないと消した会話ではなく古い別セッションの引き継ぎを注入する。上限に達したら待たずに選ぶ
+（handoff を同期にする案は、host が SessionEnd を待つ時間に正しさを預けることになり、打ち切られると
+引き継ぎが丸ごと失われるため採らない）。
+
 起動 ID を発行してポーリング API で状態を問い合わせる方式は採らない。永続化するテーブルは
 `repos`/`knowledge`/`sessions` の 3 つだけという単純さを設計原則としており、非同期ジョブの状態
 管理を持ち込むと原則に反する。

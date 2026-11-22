@@ -375,9 +375,11 @@ class Database:
         )
 
     def get_latest_session(self, repo_id: str) -> Session | None:
-        """引き継ぎを持つ最新セッションを 1 件返す。
+        """引き継ぎを持つセッションのうち、終了が最も新しい 1 件を返す。
 
-        ``handoff`` が空の行は次セッションへ渡すものが無いため除外する。
+        ``handoff`` が空の行は次セッションへ渡すものが無いため除外する。並行セッションでは
+        開始順と終了順が食い違い、早く始まって遅く終わったセッションの引き継ぎが最新の作業を
+        表すため、終了時刻で選ぶ（注入の見出しに出す時刻も終了時刻）。
 
         Args:
             repo_id: 対象リポジトリの ``repos.id``。
@@ -388,7 +390,7 @@ class Database:
         row = self.conn.execute(
             """SELECT * FROM sessions
                WHERE repo_id = ? AND handoff != ''
-               ORDER BY started_at DESC, id DESC
+               ORDER BY ended_at DESC, id DESC
                LIMIT 1""",
             (repo_id,),
         ).fetchone()

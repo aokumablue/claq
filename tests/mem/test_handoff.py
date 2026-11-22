@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -495,6 +496,63 @@ class TestTranscriptSummary:
         monkeypatch.setattr(handoff_mod, "TRANSCRIPT_MAX_BYTES", 120)
 
         assert _from_transcript(tmp_path, [_user("先頭の依頼"), _user("末尾の依頼")]) == "直近の依頼:\n- 末尾の依頼"
+
+    def test_request_before_the_tail_window_is_found_by_reading_back(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """末尾の窓に依頼が無ければ前の窓へ遡り、窓の境界に掛かった依頼も行ごと読むこと。
+
+        1 つの依頼から長く自走したセッションでは、依頼が末尾の窓より前に押し出される。
+        変更ファイルと使用ツールは末尾の窓から集める。
+        """
+        monkeypatch.setattr(handoff_mod, "TRANSCRIPT_MAX_BYTES", 300)
+        work = [_assistant(_tool_use("Bash", {"command": f"echo {i}"})) for i in range(8)]
+        entries = [_user("古い依頼"), _user("境界に掛かる依頼" + "x" * 40), *work]
+
+        assert _from_transcript(tmp_path, entries) == (
+            "直近の依頼:\n- 古い依頼\n- 境界に掛かる依頼" + "x" * 40 + "\n使用ツール: Bash"
+        )
+
+    @pytest.mark.parametrize("filler_end", ["", "\n"], ids=["no-newline", "newline-at-window-end"])
+    def test_line_longer_than_a_window_is_skipped_while_reading_back(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, filler_end: str
+    ) -> None:
+        """窓より長い行は読まずに、その前の窓の依頼へ遡ること。"""
+        monkeypatch.setattr(handoff_mod, "TRANSCRIPT_MAX_BYTES", 200)
+        giant = json.dumps(_assistant({"type": "text", "text": "y" * 600}))
+        path = Path(_write_transcript(tmp_path, [_user("前の依頼"), giant]))
+        if filler_end:
+            # 末尾の窓が「行の断片 + 改行」だけになる形（改行が窓の最後のバイト）。
+            path.write_bytes(path.read_bytes() + filler_end.encode())
+
+        assert build_handoff({"transcript_path": str(path)}) == "直近の依頼:\n- 前の依頼"
+
+    def test_reading_back_stops_at_the_hard_timeout(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """前の窓へ遡る途中でハードタイムアウトを超えたら、依頼なしで打ち切ること。"""
+        monkeypatch.setattr(handoff_mod, "TRANSCRIPT_MAX_BYTES", 150)
+        # 末尾の窓を走査し終えた時点で期限切れにする（time.monotonic は subprocess も使うので差し替えない）。
+        real_scan = handoff_mod._scan
+
+        def scan_then_expire(text: str, deadline: float, work_tree: str) -> tuple[list[str], list[str], list[str]]:
+            """走査のあと、期限を過去へずらす。"""
+            result = real_scan(text, deadline, work_tree)
+            monkeypatch.setattr(handoff_mod, "_scan", real_scan)
+            monkeypatch.setattr(handoff_mod, "time", SimpleNamespace(monotonic=lambda: deadline + 1))
+            return result
+
+        entries = [_user("遠い依頼"), _assistant(_tool_use("Bash", {"command": "ls"}))]
+        assert _from_transcript(tmp_path, entries) == "直近の依頼:\n- 遠い依頼\n使用ツール: Bash"
+
+        monkeypatch.setattr(handoff_mod, "_scan", scan_then_expire)
+        # 使用ツールだけでは引き継ぐ材料にならないため、遡りを打ち切ると何も残らない。
+        assert _from_transcript(tmp_path, entries) == ""
+
+    def test_empty_transcript_yields_nothing(self, tmp_path: Path) -> None:
+        """空のトランスクリプトからは何も組み立てないこと。"""
+        path = tmp_path / "transcript.jsonl"
+        path.write_bytes(b"")
+
+        assert build_handoff({"transcript_path": str(path)}) == ""
 
     def test_scan_stops_at_the_hard_timeout(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """走査がハードタイムアウトを超えたら残りの行を捨てる。"""
