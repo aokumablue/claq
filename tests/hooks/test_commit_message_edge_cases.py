@@ -39,6 +39,10 @@ _LONG_UNCONVENTIONAL = "bad message with no conventional format and a very long 
         ('git commit -m "squash! fixup! feat: add app"', ("squash! fixup! feat: add app", [])),
         ('git commit -m "amend! Feat: Bad."', ("amend! Feat: Bad.", ["format", "punctuation"])),
         ('git commit -m "Merge the two parsers"', ("Merge the two parsers", ["format"])),
+        ('git commit -m "fix: API key parsing"', ("fix: API key parsing", [])),
+        ('git commit -m "docs: GitHub link"', ("docs: GitHub link", [])),
+        ('git commit -m "fix(mem): Windows の repo root を直す"', ("fix(mem): Windows の repo root を直す", [])),
+        ('git commit -m "fix: 3 files"', ("fix: 3 files", [])),
     ],
     ids=[
         "not-a-commit",
@@ -68,6 +72,10 @@ _LONG_UNCONVENTIONAL = "bad message with no conventional format and a very long 
         "autosquash-stacked",
         "autosquash-checks-the-subject-behind-the-marker",
         "hand-written-merge-wording",
+        "acronym-cannot-be-lowercased",
+        "name-with-inner-capital",
+        "leading-name-in-japanese-subject",
+        "leading-number",
     ],
 )
 def test_validate_commit_message(command: str, expected: tuple[str, list[str]] | None) -> None:
@@ -78,6 +86,8 @@ def test_validate_commit_message(command: str, expected: tuple[str, list[str]] |
     値の結合（`-mmsg`）・二重引用符の中の `'` も値どおりに読む。コマンド置換は本文が実行時に
     しか決まらず、字面（`$(cat <<`）を本文として検査すると毎回の commit で形式違反の警告が出る。
     git が生成する件名（`Merge branch …` / `Revert "…"`）は咎めず、autosquash の印は外して後ろの件名を見る。
+    大文字始まりは英語だけの説明部の先頭語が `Add` の形のときだけ咎め、略語（`API`）・内に大文字を含む
+    名前（`GitHub`）・日本語の件名の先頭の英単語（`Windows の…`）は咎めない。
     """
     result = commit_message.validate_commit_message(command)
 

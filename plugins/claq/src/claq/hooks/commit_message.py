@@ -21,6 +21,10 @@ _GIT_GENERATED_SUBJECT = re.compile(r'^(?:Merge (?:branch|remote-tracking branch
 # `git rebase --autosquash` が後で畳む印。印の後ろが本来の件名なので、印を外して検査する。
 _AUTOSQUASH_PREFIX = re.compile(r"^(?:(?:fixup|squash|amend)! )+")
 
+# 説明部の先頭語（英数字の連なり）と、それが大文字 1 字＋小文字だけの語（``Add``）か。
+_LEADING_WORD = re.compile(r"[A-Za-z0-9]+")
+_SENTENCE_CASE_WORD = re.compile(r"[A-Z][a-z]*")
+
 
 def _message_issue(kind: str, message: str, suggestion: str) -> dict:
     """コミットメッセージの問題 1 件を表す辞書を作る。
@@ -34,6 +38,24 @@ def _message_issue(kind: str, message: str, suggestion: str) -> dict:
         type / message / suggestion を持つ辞書。
     """
     return {"type": kind, "message": message, "suggestion": suggestion}
+
+
+def _is_capitalized_description(description: str) -> bool:
+    """件名の説明部が、小文字で始めるべき英語の語を大文字で始めているかを返す。
+
+    小文字始まりは英語の件名の慣習なので、英語（ASCII）だけの説明部の先頭語が ``Add`` のように
+    大文字 1 字＋小文字の形のときだけ真にする。略語（``API``）や大文字を内に含む名前（``GitHub``）は
+    小文字にできない。日本語の件名の先頭に置いた英単語（``Windows の…``）は固有名か識別子で、
+    小文字にすると誤記になる。
+
+    Args:
+        description: conventional 形式の ``type(scope):`` より後ろの、前後の空白を除いた説明部。
+
+    Returns:
+        大文字始まりを咎めるべきなら True。
+    """
+    first_word = _LEADING_WORD.match(description)
+    return description.isascii() and first_word is not None and _SENTENCE_CASE_WORD.fullmatch(first_word[0]) is not None
 
 
 def _commit_message_issues(subject: str) -> list[dict]:
@@ -69,7 +91,7 @@ def _commit_message_issues(subject: str) -> list[dict]:
                 f"Keep the first line under {_MAX_SUBJECT_CHARS} characters",
             )
         )
-    if conventional and re.match(r"^[A-Z]", subject.split(":", 1)[1].strip()):
+    if conventional and _is_capitalized_description(subject.split(":", 1)[1].strip()):
         issues.append(
             _message_issue(
                 "capitalization",
