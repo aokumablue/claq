@@ -186,9 +186,7 @@ def _check_positional_arity(command: str, args: CommandArgs) -> None:
     Raises:
         CommandError: 契約に反する個数の位置引数が指定された場合。
     """
-    spec = _COMMAND_SPECS.get(command)
-    if spec is None:
-        return
+    spec = _COMMAND_SPECS[command]
     if spec.arity == 0 and args.positionals:
         raise CommandError(f"{command} は位置引数を取りません: {' '.join(args.positionals)!r}")
     if spec.arity == 1:
@@ -235,9 +233,7 @@ def _check_supported_options(command: str, args: CommandArgs) -> None:
     Raises:
         CommandError: 未対応のオプション、または排他オプションの同時指定。
     """
-    spec = _COMMAND_SPECS.get(command)
-    if spec is None:
-        return
+    spec = _COMMAND_SPECS[command]
     used = set(args.flags) | set(args.values)
     unsupported = sorted(used - spec.options)
     if unsupported:
@@ -292,8 +288,13 @@ def main() -> int:
         return 0
 
     command = sys.argv[1]
+    handler = _COMMAND_HANDLERS.get(command)
     try:
-        settings, args = _prepare_command(command, sys.argv[2:])
+        # 不明なコマンドの引数は解析しない。オプションの誤りとして報告すると、コマンド名の誤りに気づけない。
+        if handler is None:
+            settings, args = _load_settings_or_raise(), CommandArgs()
+        else:
+            settings, args = _prepare_command(command, sys.argv[2:])
     except CommandError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -301,8 +302,7 @@ def main() -> int:
         print(f"設定/ログ初期化失敗: {e}", file=sys.stderr)
         return 1
 
-    # 不明なコマンドの報告はファイルへも残すので、logger の初期化後に判定する。
-    handler = _COMMAND_HANDLERS.get(command)
+    # 不明なコマンドの報告はファイルへも残すので、logger の初期化後に出す。
     if handler is None:
         log.error("不明なコマンド: %s", command)
         return 2
