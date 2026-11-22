@@ -404,7 +404,8 @@ def conditional_block_reason(tool_name: str, container: Any, file_path: str, fil
 
     ホスト設定は `_settings_block_reason` で全文を比べる。それ以外は主（ディスク上の
     セクション解決）・副（テキスト照合）の和集合で行い、内容が一切取得できない場合は
-    fail-closed で deny する。
+    fail-closed で deny する。Write はディスク上の現在の内容に保護対象があれば deny する
+    （全文の置き換えで、content に現れない保護対象を消すため）。
 
     Args:
         tool_name: 正規化前の生ツール名。
@@ -424,7 +425,38 @@ def conditional_block_reason(tool_name: str, container: Any, file_path: str, fil
     in_lint_section = any(_resolve_lint_section_from_disk(file_path, snippet) is True for snippet in snippets)
     if in_lint_section or _text_has_protected_signal("\n".join(snippets), file_name):
         return _conditional_blocked_message(file_name)
+    if _is_write(tool_name) and _current_text_has_protected_signal(file_path, file_name):
+        return _conditional_blocked_message(file_name)
     return None
+
+
+def _is_write(tool_name: str) -> bool:
+    """ファイル全体を content で置き換える Write 系ツールかを返す。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+
+    Returns:
+        Write 系なら True（apply_patch は Edit へ正規化されるので含まない）。
+    """
+    return normalize_tool_name(tool_name).lower() == "write"
+
+
+def _current_text_has_protected_signal(file_path: str, file_name: str) -> bool:
+    """ディスク上の現在の内容に、保護対象の設定（lint 系の見出し・キー）があるかを返す。
+
+    Write は全文を置き換えるので、content に保護対象が現れなくても、今ある保護対象を消す。content に
+    保護対象が残る Write は副判定で既に止まるため、ここで真になるのは保護対象を消す Write である。
+
+    Args:
+        file_path: 対象ファイルパス。
+        file_name: 対象ファイルの basename。
+
+    Returns:
+        現在の内容に保護対象の兆候があれば True。読めない・存在しないなら False（新規作成と同じ）。
+    """
+    section_index = _read_section_index(file_path)
+    return section_index is not None and _text_has_protected_signal(section_index[0], file_name)
 
 
 def _git_config_blocked_message(display_name: str) -> str:

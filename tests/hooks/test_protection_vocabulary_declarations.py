@@ -22,6 +22,7 @@ import pytest
 import claq.hooks
 from claq.hooks import (
     bash_config_protection,
+    commit_message,
     commit_quality_scanner,
     commit_risk,
     heredoc,
@@ -465,6 +466,14 @@ def test_every_heredoc_continuation_suffix_keeps_the_body(suffix: str) -> None:
     assert heredoc.strip_data_heredoc_bodies(stripped) != stripped
 
 
+@pytest.mark.parametrize("terminator", _EXPECTED_VOCABULARIES["commit_message._SUBJECT_TERMINATORS"])
+def test_every_subject_terminator_is_reported(terminator: str) -> None:
+    """`_SUBJECT_TERMINATORS` の全要素で終わる件名を末尾句点として咎めること（層1・単体）。"""
+    issues = commit_message._commit_message_issues(f"fix: done{terminator}")
+    assert [issue["type"] for issue in issues] == ["punctuation"]
+    assert commit_message._commit_message_issues("fix: done") == []
+
+
 @pytest.mark.parametrize("suffix", sorted(_EXPECTED_VOCABULARIES["commit_quality_scanner._LINTABLE_SUFFIXES"]))
 def test_every_lintable_suffix_is_checked(suffix: str) -> None:
     """`_LINTABLE_SUFFIXES` の全要素が lint 検査対象になること（層1・単体）。"""
@@ -530,6 +539,7 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
     unit_covered = {
         "shell_tokens.WRITE_REDIRECT_OPERATORS",
         "heredoc._HEREDOC_CONTINUATION_SUFFIXES",
+        "commit_message._SUBJECT_TERMINATORS",
         "commit_quality_scanner._LINTABLE_SUFFIXES",
         "commit_quality_scanner._JAVASCRIPT_SUFFIXES",
         "commit_quality_scanner._JS_COMMENT_LINE_PREFIXES",

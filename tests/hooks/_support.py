@@ -523,9 +523,13 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     ),
     "block_no_verify._GIT_CONFIG_NEW_READ_OPS": frozenset({"get", "list"}),
     "block_no_verify._GIT_CONFIG_NEW_WRITE_OPS": frozenset({"add", "set", "unset"}),
+    # --- commit_message ---
+    "commit_message._SUBJECT_TERMINATORS": (".", "。", "．"),
     # --- commit_quality_scanner ---
-    "commit_quality_scanner._LINTABLE_SUFFIXES": {".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs"},
-    "commit_quality_scanner._JAVASCRIPT_SUFFIXES": {".js", ".jsx", ".ts", ".tsx"},
+    "commit_quality_scanner._LINTABLE_SUFFIXES": {
+        ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".py", ".go", ".rs"
+    },
+    "commit_quality_scanner._JAVASCRIPT_SUFFIXES": {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"},
     "commit_quality_scanner._JS_COMMENT_LINE_PREFIXES": ("//", "*", "/*"),
     "commit_quality_scanner._MINIFIED_SUFFIXES": (".min.js", ".min.css"),
     "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES": {
