@@ -7,8 +7,8 @@
    使用ツールから機械的に組み立てた要約。SessionEnd のペイロードには
    引き継ぎ本文そのものは来ないため、こちらが既定の経路になる。
 
-トランスクリプトは数十 MB に育ちうるため、読み取りバイト上限と走査の
-ハードタイムアウトを持つ。引き継ぎは best-effort であり、フックを遅延
+トランスクリプトは数十 MB に育ちうるため、末尾から上限バイトずつの窓で読み、
+走査のハードタイムアウトを持つ。引き継ぎは best-effort であり、フックを遅延
 させてまで完全性を追わない。出力は ``mem context`` の注入予算
 （``CONTEXT_HANDOFF_CHAR_BUDGET``）に収まるよう書き込み時点で切り詰め、
 DB に読み出されないデータを溜めない。
@@ -16,14 +16,16 @@ DB に読み出されないデータを溜めない。
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from claq.lib.core_utils import get_home_dir, read_tail_text, strip_ansi
+from claq.lib.core_utils import get_home_dir, strip_ansi
 from claq.lib.harness import (
     extract_file_paths,
     extract_raw_tool_name,
@@ -45,7 +47,11 @@ TRANSCRIPT_TIMEOUT_SEC = 2.0
 """トランスクリプト走査のハードタイムアウト（秒）。超過分は捨てる。"""
 
 TRANSCRIPT_MAX_BYTES = 2 * 1024 * 1024
-"""トランスクリプトから読む末尾バイト数の上限。直近の作業ほど引き継ぎ価値が高い。"""
+"""トランスクリプトを末尾から読む 1 窓のバイト数。直近の作業ほど引き継ぎ価値が高い。
+
+変更ファイルと使用ツールは末尾の窓だけから集める。直近の依頼は、末尾の窓に無ければ
+見つかるまで前の窓へ遡る（1 つの依頼から長く自走したセッションでは、依頼が末尾の窓より前にある）。
+"""
 
 _TRANSCRIPT_ROOTS_ENV = "CLAQ_TRANSCRIPT_ROOTS"
 """追加の trusted transcript root を ``os.pathsep`` 区切りで指定する環境変数。"""
@@ -253,10 +259,48 @@ def _summarize_transcript(transcript_path: str, cwd: str | None) -> str:
     path = Path(transcript_path)
     if not is_trusted_transcript(path):
         return ""
-    tail = read_tail_text(path, TRANSCRIPT_MAX_BYTES)
     work_tree = find_work_tree_root(cwd)
-    messages, files, tools = _scan(tail, time.monotonic() + TRANSCRIPT_TIMEOUT_SEC, work_tree)
+    deadline = time.monotonic() + TRANSCRIPT_TIMEOUT_SEC
+    with contextlib.closing(_windows_newest_first(path, TRANSCRIPT_MAX_BYTES)) as windows:
+        messages, files, tools = _scan(next(windows, ""), deadline, work_tree)
+        while not messages and time.monotonic() < deadline and (window := next(windows, None)) is not None:
+            messages = _scan(window, deadline, work_tree)[0]
     return _compose(messages, files, tools)
+
+
+def _windows_newest_first(path: Path, size: int) -> Iterator[str]:
+    """ファイルを末尾から ``size`` バイトずつの窓で読み、新しい窓から順に返す。
+
+    窓の先頭に掛かった行の断片は捨て、次の（前の）窓をその行の終わりまで伸ばして行ごと読む。
+    窓より長い行は、どの窓でも断片になるため読まない（走査が 1 行の上限で捨てる規模の行）。
+    不正な UTF-8 は置換文字にする。
+
+    Args:
+        path: 読み取り対象のファイル。
+        size: 1 窓のバイト数。
+
+    Yields:
+        完全な行だけからなる窓のテキスト。窓全体が 1 行の断片なら空文字列。
+
+    Raises:
+        OSError: ファイルを開けない・読めない場合（扱いは呼び出し側が決める）。
+    """
+    with path.open("rb") as stream:
+        end = stream.seek(0, os.SEEK_END)
+        while end > 0:
+            start = max(0, end - size)
+            stream.seek(start)
+            data = stream.read(end - start)
+            if start == 0:
+                yield data.decode("utf-8", errors="replace")
+                return
+            newline = data.find(b"\n")
+            if 0 <= newline < len(data) - 1:
+                yield data[newline + 1 :].decode("utf-8", errors="replace")
+                end = start + newline + 1
+            else:
+                yield ""
+                end = start
 
 
 def trusted_transcript_roots() -> tuple[Path, ...]:
