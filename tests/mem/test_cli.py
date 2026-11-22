@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import runpy
 import sys
 from pathlib import Path
 
@@ -62,7 +63,7 @@ class TestFailurePaths:
         if target == "settings":
             monkeypatch.setattr(cli, "_load_settings_or_raise", stub)
         elif target == "handler":
-            monkeypatch.setitem(cli._COMMAND_HANDLERS, command, stub)
+            monkeypatch.setitem(cli._COMMANDS, command, cli._COMMANDS[command]._replace(handler=stub))
 
         stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, [command, *extra])
 
@@ -166,9 +167,14 @@ class TestArgvAndStdin:
         assert cli.main() == 0
         assert "CLI Commands for mem" in capsys.readouterr().out
 
-    def test_every_command_declares_its_arguments(self) -> None:
-        """実行できるコマンドはすべて引数の契約（位置引数の数と受理するオプション）を宣言していること。"""
-        assert cli._COMMAND_SPECS.keys() == cli._COMMAND_HANDLERS.keys()
+    def test_module_entrypoint_exits_with_main_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``-m`` 実行（launcher の runpy 経路）が main の終了コードで SystemExit すること。"""
+        monkeypatch.setattr(sys, "argv", ["claq.mem.cli", "--help"])
+
+        with pytest.raises(SystemExit) as excinfo:
+            runpy.run_module("claq.mem.cli", run_name="__main__")
+
+        assert excinfo.value.code == 0
 
     @pytest.mark.parametrize("extra", [[], ["--kind", "pitfall"], ["--help"]], ids=["bare", "with-option", "with-help"])
     def test_unknown_command_returns_2(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra: list[str]) -> None:

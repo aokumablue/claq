@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from claq.mem.cli import _COMMAND_HANDLERS
+from claq.mem.cli import _COMMANDS
 from claq_dev import validate_hooks
 from claq_dev.ci_common import PLUGIN_ROOT
 from claq_dev.validate_hooks import REQUIRED_EVENTS, REQUIRED_HOOKS_VERSION
@@ -360,7 +360,7 @@ class TestRepoHooksJsonStaticChecks:
         mem_cli_argv = [argv for argv in _repo_hook_argv() if argv[0] == "claq.mem.cli"]
         assert mem_cli_argv
         for argv in mem_cli_argv:
-            assert argv[1] in _COMMAND_HANDLERS, f"未定義のサブコマンド: {argv[1]}"
+            assert argv[1] in _COMMANDS, f"未定義のサブコマンド: {argv[1]}"
 
 
 class TestRepoHooksJsonPowerShellParity:
