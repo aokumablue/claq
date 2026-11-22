@@ -232,7 +232,7 @@ def _load_settings_or_raise() -> Settings:
         初期化済みの Settings。
     """
     settings = Settings()
-    mem_logger.setup(settings.log_dir, settings.log_level)
+    mem_logger.setup(settings.log_dir)
     return settings
 
 

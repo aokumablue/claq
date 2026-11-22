@@ -6,7 +6,6 @@ import contextlib
 import logging
 import os
 import sys
-import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -41,7 +40,6 @@ FILE_ONLY = {_FILE_ONLY_ATTR: True}
 """
 
 _initialized = False
-_lock = threading.Lock()
 
 
 def _file_handler(log_dir: Path) -> logging.Handler:
@@ -61,10 +59,9 @@ def _file_handler(log_dir: Path) -> logging.Handler:
     """
     ensure_private_dir(log_dir)
     log_path = log_dir / f"mem-{datetime.now():%Y-%m-%d}.log"
-    if not log_path.exists():
-        # 競合しても片方が勝てばよい。既存なら下の chmod で mode を揃える。
-        with contextlib.suppress(FileExistsError):
-            os.close(os.open(log_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+    # 既存なら（競合で片方が負けた場合も）下の chmod で mode を揃える。
+    with contextlib.suppress(FileExistsError):
+        os.close(os.open(log_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
     handler = logging.FileHandler(log_path, encoding="utf-8")
     log_path.chmod(0o600)
     handler.setFormatter(_FORMATTER)
@@ -80,8 +77,8 @@ def _stderr_handler() -> logging.Handler:
     return handler
 
 
-def setup(log_dir: Path, level: str) -> None:
-    """ロガーを初期化する。アプリケーション起動時に1度だけ呼ぶ。
+def setup(log_dir: Path) -> None:
+    """ロガーを INFO レベルで初期化する。アプリケーション起動時に1度だけ呼ぶ。
 
     `_initialized` はハンドラの構築と追加が成功した後にだけ立てる。先に立てると、
     `_file_handler` がディスク不調・権限エラー等で例外を投げた場合に「初期化済み
@@ -90,20 +87,18 @@ def setup(log_dir: Path, level: str) -> None:
 
     Args:
         log_dir: 日次ログファイルを置くディレクトリ。
-        level: ``logging`` のレベル名（大文字小文字は問わない）。
     """
     global _initialized
-    with _lock:
-        if _initialized:
-            return
+    if _initialized:
+        return
 
-        package_logger = logging.getLogger(_PACKAGE_LOGGER_NAME)
-        file_handler = _file_handler(log_dir)
-        stderr_handler = _stderr_handler()
-        package_logger.setLevel(getattr(logging, level.upper()))
-        package_logger.addHandler(file_handler)
-        package_logger.addHandler(stderr_handler)
-        _initialized = True
+    package_logger = logging.getLogger(_PACKAGE_LOGGER_NAME)
+    file_handler = _file_handler(log_dir)
+    stderr_handler = _stderr_handler()
+    package_logger.setLevel(logging.INFO)
+    package_logger.addHandler(file_handler)
+    package_logger.addHandler(stderr_handler)
+    _initialized = True
 
 
 def get(component: str) -> logging.Logger:
