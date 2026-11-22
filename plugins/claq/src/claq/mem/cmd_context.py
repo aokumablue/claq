@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+import time
+from datetime import UTC, datetime, timedelta
 
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.detach import recent_bg_failure_notice
@@ -30,6 +31,24 @@ from claq.mem.settings import (
 )
 
 # --- SessionStart への知識注入 ---
+
+CLEAR_HANDOFF_WAIT_SEC = 3.0
+"""``/clear`` 直後の SessionStart が、消した会話の引き継ぎの書込みを待つ上限（秒）。
+
+host は ``/clear`` で SessionEnd と SessionStart を続けて起動し、SessionEnd の handoff は ``--bg`` で
+切り離して走るため、待たないと書込みより先に引き継ぎを選び、消した会話ではなく古い別セッションの
+引き継ぎを注入する。handoff は数十 MB の transcript でも 1 秒未満で書き終わる。上限に達したら
+待たずに選ぶ（消した会話が引き継ぎを書かなかったときだけ上限まで待つ）。
+"""
+
+_CLEAR_HANDOFF_POLL_SEC = 0.1
+"""``/clear`` 直後に引き継ぎの書込みを確かめる間隔（秒）。"""
+
+_CLEAR_HANDOFF_RECENT_SEC = 5
+"""SessionStart の開始からこの秒数前までに終わった引き継ぎを、消した会話の引き継ぎとみなす。
+
+handoff が SessionStart より先に書き終わった場合も、待たずに選べるようにする幅。
+"""
 
 
 def _one_line(text: str) -> str:
@@ -169,6 +188,25 @@ def _handoff_section(db: Database, repo_id: str) -> str:
 _BG_NOTICE_LINE_BREAKS = re.compile(r"\n+")
 
 
+def _await_cleared_handoff(db: Database, repo_id: str) -> None:
+    """``/clear`` で消した会話の引き継ぎが書き込まれるまで、``CLEAR_HANDOFF_WAIT_SEC`` を上限に待つ。
+
+    直近 ``_CLEAR_HANDOFF_RECENT_SEC`` 秒以内に終わった引き継ぎがリポジトリにあれば待ち終える。
+    並行セッションがあっても、待つのは新しい引き継ぎが現れるまでなので延びない。
+
+    Args:
+        db: 参照する mem データベース。
+        repo_id: 対象リポジトリの ``repos.id``。
+    """
+    since = (datetime.now(UTC) - timedelta(seconds=_CLEAR_HANDOFF_RECENT_SEC)).replace(microsecond=0).isoformat()
+    deadline = time.monotonic() + CLEAR_HANDOFF_WAIT_SEC
+    while True:
+        latest = db.get_latest_session(repo_id)
+        if (latest is not None and latest.ended_at >= since) or time.monotonic() >= deadline:
+            return
+        time.sleep(_CLEAR_HANDOFF_POLL_SEC)
+
+
 def _bg_failure_section() -> str:
     """前回セッションの detach 起動（``--bg``）失敗痕跡があれば 1 行の節にする。
 
@@ -226,7 +264,9 @@ def handle_context(settings: Settings, args: CommandArgs) -> str:
 
     共通知識とリポジトリ知識（いずれも ``status='active'`` に限る。``pending`` は
     昇格レビュー前の下書きでノイズになる）と、前回の引き継ぎを集める。加えて
-    detach 起動の失敗通知と、Windows 向けの呼び出し方を節として足す。失敗はそのまま
+    detach 起動の失敗通知と、Windows 向けの呼び出し方を節として足す。``/clear`` 直後
+    （payload の ``source`` が ``clear``）は、消した会話の引き継ぎの書込みを上限付きで待ってから
+    引き継ぎを選ぶ。失敗はそのまま
     `cli.main` へ伝え、exit 1 と stderr で利用者に通知させる。
 
     Args:
@@ -243,6 +283,8 @@ def handle_context(settings: Settings, args: CommandArgs) -> str:
         # 更新する。session_uid は NOT NULL UNIQUE なので空文字では作らない。
         if session_uid := session_uid_of(payload):
             db.start_session(Session(session_uid=session_uid, repo_id=repo.id))
+        if payload.get("source") == "clear":
+            _await_cleared_handoff(db, repo.id)
         sections = [
             _knowledge_section(
                 "共通知識",

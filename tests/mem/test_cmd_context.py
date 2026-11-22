@@ -7,13 +7,14 @@ import os
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from claq.lib.core_utils import get_plugin_root
 from claq.mem import cmd_context, handoff
 from claq.mem.database import Database
-from claq.mem.models import Repo, Session
+from claq.mem.models import Repo, Session, utc_now_iso
 from claq.mem.settings import (
     CONTEXT_GLOBAL_CHAR_BUDGET,
     CONTEXT_HANDOFF_CHAR_BUDGET,
@@ -387,6 +388,73 @@ class TestContext:
         self._seed_session(tmp_path, "other", handoff="別リポジトリの続き")
 
         assert _inject(monkeypatch, tmp_path) == ""
+
+    @staticmethod
+    def _fake_clock(monkeypatch: pytest.MonkeyPatch, on_sleep: Callable[[int], None] = lambda _calls: None) -> list[float]:
+        """cmd_context の待ちの時計を差し替え、sleep のたびに on_sleep（何回目か）を呼んで時計を進める。
+
+        Returns:
+            sleep に渡された秒数の記録。
+        """
+        now = [0.0]
+        slept: list[float] = []
+
+        def sleep(seconds: float) -> None:
+            """待ったことを記録し、時計を進めてから on_sleep を呼ぶ。"""
+            slept.append(seconds)
+            now[0] += seconds
+            on_sleep(len(slept))
+
+        monkeypatch.setattr(cmd_context, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=sleep))
+        return slept
+
+    def test_clear_waits_for_the_handoff_of_the_cleared_session(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """/clear 直後は、消した会話の引き継ぎが書き込まれるのを待ってから注入すること。
+
+        SessionEnd の handoff は切り離して走るため、待たないと古い別セッションの引き継ぎを注入する。
+        """
+        repo_id = _repo_id(tmp_path)
+        self._seed_session(tmp_path, repo_id, handoff="古い別セッションの続き")
+
+        def cleared_session_finishes(calls: int) -> None:
+            """3 回目の待ちの間に、消した会話の handoff が書き込まれる。"""
+            if calls == 3:
+                self._seed_session(
+                    tmp_path, repo_id, session_uid="cleared", handoff="消した会話の続き", ended_at=utc_now_iso()
+                )
+
+        slept = self._fake_clock(monkeypatch, cleared_session_finishes)
+        injected = _inject(monkeypatch, tmp_path, {"session_id": "new", "source": "clear"})
+
+        assert injected.endswith("\n消した会話の続き\n</claq-memory>")
+        assert len(slept) == 3
+
+    def test_clear_stops_waiting_at_the_limit(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """消した会話が引き継ぎを書かなければ、上限まで待ってから既存の引き継ぎを注入すること。"""
+        self._seed_session(tmp_path, _repo_id(tmp_path))
+        slept = self._fake_clock(monkeypatch)
+
+        assert _inject(monkeypatch, tmp_path, {"source": "clear"}) == _envelope(
+            "## 前回の続き (2026-08-09 14:03)\n前回の作業内容"
+        )
+        assert sum(slept) == pytest.approx(cmd_context.CLEAR_HANDOFF_WAIT_SEC)
+
+    @pytest.mark.parametrize(
+        ("source", "ended_at"),
+        [("startup", "2026-08-09T14:03:22+00:00"), ("resume", "2026-08-09T14:03:22+00:00"), ("clear", None)],
+        ids=["startup", "resume", "clear-handoff-already-written"],
+    )
+    def test_no_wait_unless_clear_handoff_is_missing(
+        self, source: str, ended_at: str | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """/clear 以外と、消した会話の引き継ぎが既に書かれた /clear は待たないこと。"""
+        self._seed_session(tmp_path, _repo_id(tmp_path), ended_at=ended_at or utc_now_iso())
+        slept = self._fake_clock(monkeypatch)
+
+        assert "前回の作業内容" in _inject(monkeypatch, tmp_path, {"source": source})
+        assert slept == []
 
     def test_records_session_row(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """hook の session_id で sessions 行を作る。"""
