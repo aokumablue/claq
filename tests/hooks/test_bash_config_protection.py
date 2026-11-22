@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from claq.hooks import bash_config_protection
+from claq.hooks import bash_config_protection, hook_common
 
 from ._support import _bash
 from ._support import _home_outside_repo as _home_outside_repo
@@ -406,6 +406,6 @@ class TestHomeLogDirectoryProtection:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """`resolve_effective_target` が None を返す場合も生トークンで判定できること。"""
-        monkeypatch.setattr(bash_config_protection, "resolve_effective_target", lambda _t: None)
+        monkeypatch.setattr(hook_common, "resolve_effective_target", lambda _t: None)
 
         assert bash_config_protection._find_home_log_directory_match(".claq/logs/bg-1.log") == "~/.claq/logs"
