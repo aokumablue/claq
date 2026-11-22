@@ -40,7 +40,28 @@ _VERSION_EDIT = {"old_string": 'version = "0.9.31"', "new_string": 'version = "0
 _CASES = [
     # --- Write（新規全内容） ---
     pytest.param(_write_content("pyproject.toml", "[tool.ruff]\nignore=[]"), None, 2, id="write-lint-section-header"),
-    pytest.param(_write_content("pyproject.toml", '[project]\nversion="0.9.32"'), None, 0, id="write-version-bump-only"),
+    pytest.param(
+        _write_content("pyproject.toml", '[project]\nversion="0.9.32"'),
+        '[project]\nversion="0.9.31"\n',
+        0,
+        id="write-version-bump-only",
+    ),
+    # Write は全文の置き換えなので、content に現れない今の lint 節を消す。消す Write も止める。
+    pytest.param(
+        _write_content("pyproject.toml", '[project]\nversion="0.9.32"'),
+        '[project]\nversion="0.9.31"\n\n[tool.coverage.report]\nfail_under = 100\n',
+        2,
+        id="write-drops-lint-section-on-disk",
+    ),
+    pytest.param(
+        _write_content("package.json", '{"name": "x"}'),
+        '{"name": "x", "eslintConfig": {"rules": {}}}',
+        2,
+        id="write-drops-package-json-eslint-config-on-disk",
+    ),
+    pytest.param(
+        _write_content("setup.cfg", "[metadata]\nname = x\n"), "", 0, id="write-over-file-without-lint-section"
+    ),
     pytest.param(
         _write_content("setup.cfg", "[flake8]\nmax-line-length = 200"), None, 2, id="write-setup-cfg-flake8-section"
     ),
