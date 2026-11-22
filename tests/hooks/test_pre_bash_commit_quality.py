@@ -15,7 +15,6 @@ import pytest
 
 from claq.hooks import block_no_verify, commit_risk
 from claq.hooks import pre_bash_commit_quality as pbcq
-from claq.lib import stdin_io
 
 from ._support import _bash
 
@@ -60,11 +59,6 @@ class TestShellSeparatorTokenization:
         assert block_no_verify.has_bypass_flag(quoted) is False
 
 
-def _unreadable_stdin() -> tuple[str, bool]:
-    """stdin を読めない状態（`StdinUnavailableError`）を再現する。"""
-    raise stdin_io.StdinUnavailableError("boom")
-
-
 # (stdin の読み取り, deny 理由)。main() で deny が決まる経路。
 _DENIED_READS = [
     pytest.param(lambda: ("{not-even-json", True), pbcq._TRUNCATED_INPUT_MESSAGE, id="truncated"),
@@ -73,12 +67,6 @@ _DENIED_READS = [
         lambda: ("not-json but has git commit in it", False), pbcq._MALFORMED_COMMIT_MESSAGE, id="commit-confirmed"
     ),
 ]
-# 「読めない」を「入力なし」へ正規化して exit 0 にすると、Windows のパイプで allow と deny が同じ exit 0 になる
-# （docs/adr/hook-failure-direction.md）。この経路の main() の出力は test_stdin_unavailable_fail_closed.py が
-# 4 hook 揃えて固定するので、ここでは deny 確定後の出力層の失敗だけを見る。
-_UNREADABLE_READ = pytest.param(
-    _unreadable_stdin, stdin_io.stdin_unreadable_message("pre:bash-commit-quality", "boom"), id="stdin-unreadable"
-)
 
 
 class TestMainStdinBoundary:

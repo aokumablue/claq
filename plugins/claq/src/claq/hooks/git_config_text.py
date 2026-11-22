@@ -1,7 +1,7 @@
 """git config の本文を最小限に解析し、フック実行を左右する key の変更を判定する。
 
 `conditional_protection` が ``.git/config`` や ``~/.gitconfig`` への Edit/Write の「置換前の全文」と
-「置換後の全文」を比べるために使う。key の危険判定は呼び出し側が関数で渡し、パスの解決と
+「置換後の全文」を比べるために使う。key の危険判定（`is_sensitive_config_key`）もここに置き、パスの解決と
 畳み込みだけを ``hook_common`` から借りる。ホーム側の git config の判定もここに置く。
 
 解析は git 本体の字句規則（``config.c`` の ``git_parse_source``）に合わせる。本体と読み方が

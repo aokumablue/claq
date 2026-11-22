@@ -111,7 +111,7 @@ class TestUnsupportedPythonExitCode:
         """3.12.0 なら何も書かず None を返す。"""
         monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
 
-        assert launcher._unsupported_python_exit_code() is None
+        assert launcher._python_is_unsupported() is False
         assert capsys.readouterr().err == ""
 
     @pytest.mark.parametrize("version", [(3, 9, 6), (3, 11, 9)])
@@ -126,7 +126,7 @@ class TestUnsupportedPythonExitCode:
         monkeypatch.setattr(launcher.sys, "version_info", version)
         displayed = ".".join(str(part) for part in version)
 
-        assert launcher._unsupported_python_exit_code() == 0
+        assert launcher._python_is_unsupported() is True
         lines = capsys.readouterr().err.splitlines()
         assert lines[0] == (
             f"ERROR: claq requires Python 3.12+; {launcher.sys.executable} is {displayed}. "

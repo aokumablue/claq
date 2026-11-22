@@ -70,12 +70,13 @@ _SCAN_BUDGET_CHECK_BYTES = 256 * 1024
 # 停止までの超過量を「1 パターン × 1 行の線形走査 1 回」に抑える。全パターンが線形で
 # あること（JWT の lookbehind と所有量指定子）がこの上界の前提。
 
-_LINTABLE_SUFFIXES = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".py", ".go", ".rs"}
 # lint 対象のうち、ログ出力呼び出しとデバッガ文（`_scan_lint_issues` の JS 専用の 2 検査）を検出する拡張子。
 # この 2 つは JavaScript / TypeScript の構文で、Python・Go・Rust ではコメント・docstring・識別子に
 # 現れた語にすぎない。拾うとデバッガ文（error）が正当な commit を止める。
 # ES モジュール（`.mjs` / `.mts`）と CommonJS（`.cjs` / `.cts`）の明示拡張子も同じ構文のファイルである。
 _JAVASCRIPT_SUFFIXES = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}
+# lint 対象の拡張子。JS / TS に Python・Go・Rust を足したもの。
+_LINTABLE_SUFFIXES = _JAVASCRIPT_SUFFIXES | {".py", ".go", ".rs"}
 # JS / TS のコメント行の先頭（`//`・JSDoc の `*`・`/*`）。この行のログ出力呼び出しとデバッガ文は実行されない。
 _JS_COMMENT_LINE_PREFIXES = ("//", "*", "/*")
 # デバッガ文だけを拾う。プロパティ（`chrome.` の後・オブジェクトのキー）と引用符の中の語（ESLint のルール名・

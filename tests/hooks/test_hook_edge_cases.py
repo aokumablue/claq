@@ -42,7 +42,6 @@ def _summary(total: int, errors: int, warnings: int, infos: int) -> str:
             ["\n[FILE] src/app.js", "  WARNING Line 1: warn", "  INFO Line 2: info", _summary(2, 0, 1, 1), _WARNED_LOG],
             id="warning-and-info-pass",
         ),
-        # 未知の severity は黙って見逃さず、安全側の error として数える（表示ラベルは INFO）。
         # コミットメッセージの問題は warning として数え（commit は止めない）、suggestion があるときだけ TIP を出す。
         pytest.param(
             [],
