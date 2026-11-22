@@ -351,12 +351,15 @@ class TestSessions:
         """未登録の session_uid では False。"""
         assert db.finish_session("unknown", "引き継ぎ", "2026-01-02T00:00:00+00:00") is False
 
-    def test_get_latest_session_returns_newest_with_handoff(self, db: Database) -> None:
-        """handoff が空のセッションは対象外で、引き継ぎを持つ中で開始の最も新しい 1 件を返す。"""
+    def test_get_latest_session_returns_latest_ended_with_handoff(self, db: Database) -> None:
+        """handoff が空のセッションは対象外で、引き継ぎを持つ中で終了の最も新しい 1 件を返す。
+
+        並行セッションでは、早く始まって遅く終わったセッションの引き継ぎが最新の作業を表す。
+        """
         db.upsert_repo(_repo())
         db.start_session(Session(session_uid="uid-empty", repo_id="claq-dev", started_at="2026-04-01T00:00:00+00:00"))
         assert db.get_latest_session("claq-dev") is None
-        for uid, month in (("uid-1", "01"), ("uid-2", "03"), ("uid-3", "02")):
-            db.start_session(Session(session_uid=uid, repo_id="claq-dev", started_at=f"2026-{month}-01T00:00:00+00:00"))
-            db.finish_session(uid, f"handoff for {uid}", "2026-04-01T00:00:00+00:00")
-        assert db.get_latest_session("claq-dev").session_uid == "uid-2"
+        for uid, started, ended in (("uid-1", "01", "05"), ("uid-2", "03", "04"), ("uid-3", "02", "03")):
+            db.start_session(Session(session_uid=uid, repo_id="claq-dev", started_at=f"2026-{started}-01T00:00:00+00:00"))
+            db.finish_session(uid, f"handoff for {uid}", f"2026-{ended}-01T00:00:00+00:00")
+        assert db.get_latest_session("claq-dev").session_uid == "uid-1"
