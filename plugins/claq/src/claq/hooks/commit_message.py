@@ -16,6 +16,8 @@ _CONVENTIONAL_COMMIT = re.compile(
     r"^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?!?:\s*.+"
 )
 _MAX_SUBJECT_CHARS = 72
+# 件名の末尾に置かない文の終わりの記号。日本語の件名は句点（`。`）と全角ピリオド（`．`）で文を終える。
+_SUBJECT_TERMINATORS = (".", "。", "．")
 # git が件名を生成する形（`git merge` / `git revert` の既定）。利用者が書いた件名ではないので検査しない。
 _GIT_GENERATED_SUBJECT = re.compile(r'^(?:Merge (?:branch|remote-tracking branch|tag|pull request|commit) |Revert ")')
 # `git rebase --autosquash` が後で畳む印。印の後ろが本来の件名なので、印を外して検査する。
@@ -99,7 +101,7 @@ def _commit_message_issues(subject: str) -> list[dict]:
                 "Use lowercase for the first letter of the subject",
             )
         )
-    if subject.endswith("."):
+    if subject.endswith(_SUBJECT_TERMINATORS):
         issues.append(
             _message_issue(
                 "punctuation",
