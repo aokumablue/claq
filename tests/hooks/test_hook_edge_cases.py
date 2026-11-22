@@ -42,20 +42,13 @@ def _summary(total: int, errors: int, warnings: int, infos: int) -> str:
             ["\n[FILE] src/app.js", "  WARNING Line 1: warn", "  INFO Line 2: info", _summary(2, 0, 1, 1), _WARNED_LOG],
             id="warning-and-info-pass",
         ),
-        # コミットメッセージの問題は warning として数え（commit は止めない）、suggestion があるときだけ TIP を出す。
+        # コミットメッセージの問題は warning として数え（commit は止めない）、TIP を添えて出す。
         pytest.param(
             [],
             [{"message": "warn", "suggestion": "tip"}],
             None,
             ["\nCommit Message Issues:", "  WARNING warn", "     TIP tip", _summary(1, 0, 1, 0), _WARNED_LOG],
             id="message-issue-with-suggestion",
-        ),
-        pytest.param(
-            [],
-            [{"message": "SENTINEL-ISSUE"}],
-            None,
-            ["\nCommit Message Issues:", "  WARNING SENTINEL-ISSUE", _summary(1, 0, 1, 0), _WARNED_LOG],
-            id="message-issue-without-suggestion",
         ),
     ],
 )

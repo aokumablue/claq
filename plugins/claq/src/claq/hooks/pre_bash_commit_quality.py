@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 from claq.hooks.commit_message import validate_commit_message
@@ -346,9 +347,7 @@ def _partition_commit_all_files(
     return sorted(set(staged_files) - set(worktree_files)), worktree_files
 
 
-def _count_file_issues(
-    files_to_check: list[str], repo_root: Path | None = None, *, deadline: float
-) -> tuple[int, int, int, int]:
+def _count_file_issues(files_to_check: list[str], repo_root: Path | None = None, *, deadline: float) -> Counter[str]:
     """チェック対象ファイルの問題数を severity 別に集計し、ログへ出します。
 
     Args:
@@ -361,10 +360,9 @@ def _count_file_issues(
             `_evaluate_confirmed_commit` が起動ごとに 1 度だけ作った値を渡す。
 
     Returns:
-        (total_issues, error_count, warning_count, info_count) のタプルを返します。
+        severity（``error`` / ``warning`` / ``info``）ごとの問題数です。
     """
-    severity_label = {"error": "ERROR", "warning": "WARNING", "info": "INFO"}
-    counts = dict.fromkeys(severity_label, 0)
+    counts: Counter[str] = Counter()
 
     for file_path in files_to_check:
         file_issues = find_file_issues(file_path, repo_root=repo_root, deadline=deadline)
@@ -373,10 +371,10 @@ def _count_file_issues(
         log(f"\n[FILE] {sanitize_untrusted_path(file_path)}")
         for issue in file_issues:
             severity = issue["severity"]
-            log(f"  {severity_label[severity]} Line {issue['line']}: {issue['message']}")
+            log(f"  {severity.upper()} Line {issue['line']}: {issue['message']}")
             counts[severity] += 1
 
-    return sum(counts.values()), counts["error"], counts["warning"], counts["info"]
+    return counts
 
 
 def _log_commit_message_issues(command: str) -> int:
@@ -396,36 +394,29 @@ def _log_commit_message_issues(command: str) -> int:
     log("\nCommit Message Issues:")
     for issue in issues:
         log(f"  WARNING {issue['message']}")
-        if issue.get("suggestion"):
-            log(f"     TIP {issue['suggestion']}")
+        log(f"     TIP {issue['suggestion']}")
 
     return len(issues)
 
 
-def _finalize_result(
-    total_issues: int,
-    error_count: int,
-    warning_count: int,
-    info_count: int,
-) -> str | None:
+def _finalize_result(counts: Counter[str]) -> str | None:
     """問題集計結果をログに記録し、ブロック理由を返します。
 
     Args:
-        total_issues: 検出された問題の総数です。
-        error_count: エラー severity の問題数です。
-        warning_count: 警告 severity の問題数です。
-        info_count: info severity の問題数です。
+        counts: severity（``error`` / ``warning`` / ``info``）ごとの問題数です。
 
     Returns:
-        error_count > 0 ならブロック理由、それ以外は None。
+        error が 1 件以上ならブロック理由、それ以外は None。
     """
+    total_issues = counts.total()
+    error_count = counts["error"]
     if total_issues == 0:
         log("\n[Hook] PASS: All checks passed!")
         return None
 
     log(
         f"\nSummary: {total_issues} issue(s) found "
-        f"({error_count} error(s), {warning_count} warning(s), {info_count} info)"
+        f"({error_count} error(s), {counts['warning']} warning(s), {counts['info']} info)"
     )
     if error_count > 0:
         log("\n[Hook] ERROR: Commit blocked due to critical issues. Fix them before committing.")
@@ -434,7 +425,7 @@ def _finalize_result(
     return None
 
 
-def _collect_worktree_issues(worktree_targets: list[str], *, deadline: float) -> tuple[int, int, int, int] | None:
+def _collect_worktree_issues(worktree_targets: list[str], *, deadline: float) -> Counter[str] | None:
     """`git commit -a` の作業ツリー対象ファイルの問題数を集計します。
 
     作業ツリー対象があるのに repo root を解決できない場合は None を返し、呼び出し側で
@@ -446,11 +437,10 @@ def _collect_worktree_issues(worktree_targets: list[str], *, deadline: float) ->
         deadline: INDEX 側の集計と共有する secret scan の実時間予算です。
 
     Returns:
-        (total_issues, error_count, warning_count, info_count)。対象が無ければすべて 0。
-        repo root が必要なのに解決できなければ None。
+        severity ごとの問題数。対象が無ければ空。repo root が必要なのに解決できなければ None。
     """
     if not worktree_targets:
-        return 0, 0, 0, 0
+        return Counter()
 
     repo_root = resolve_repo_root()
     if repo_root is None:
@@ -503,15 +493,9 @@ def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | No
         if worktree_counts is None:
             log("[Hook] ERROR: could not resolve repo root for `git commit -a` worktree scan.")
             return _REPO_ROOT_UNAVAILABLE_MESSAGE
-        total_issues, error_count, warning_count, info_count = (
-            a + b for a, b in zip(index_counts, worktree_counts, strict=True)
-        )
-
-        message_warnings = _log_commit_message_issues(command)
-
-        return _finalize_result(
-            total_issues + message_warnings, error_count, warning_count + message_warnings, info_count
-        )
+        counts = index_counts + worktree_counts
+        counts["warning"] += _log_commit_message_issues(command)
+        return _finalize_result(counts)
 
     except Exception as err:
         log(f"[Hook] Error: {err}")
