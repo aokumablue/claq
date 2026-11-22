@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -100,3 +100,22 @@ def extract_frontmatter(content: str) -> dict[str, object] | None:
     except FrontmatterError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def frontmatter_spelling_errors(label: str, frontmatter: dict[str, object], known_fields: frozenset[str]) -> Iterator[str]:
+    """frontmatter のキーのうち、既知フィールドのハイフン／アンダースコア取り違えを返す。
+
+    自前パーサは綴り違いを「別のキー」として黙って受理するため、現実的な誤りであるこの形だけを名指しする。
+
+    Args:
+        label: メッセージの先頭に付ける対象名。
+        frontmatter: 解析済みの frontmatter。
+        known_fields: ハイフン区切りで書かれた既知フィールド名。
+
+    Yields:
+        綴り違い 1 件ごとのエラーメッセージ。
+    """
+    for key in frontmatter:
+        swapped = key.replace("_", "-")
+        if swapped != key and swapped in known_fields:
+            yield f"{label} - frontmatter の {key} は {swapped} の綴り違い（黙って無視される）"
