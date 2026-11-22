@@ -40,13 +40,15 @@ rem
 rem Structural rules this file must keep (a regression test asserts them):
 rem
 rem 1. No interpreter is launched inside a parenthesized block, and the exit
-rem    is a BARE `exit /b`. cmd expands %VAR% inside `if (...)` blocks at PARSE
-rem    time, so `... & exit /b %ERRORLEVEL%` there returns the errorlevel from
-rem    BEFORE the interpreter ran -- a deny (exit 2) would have been reported to
-rem    the host as 0, silently allowing every blocked tool call on Windows.
-rem    Bare `exit /b` leaves the current errorlevel untouched. The `if errorlevel
-rem    N` BUILTIN is fine and is how the probe reads its result: it is compared
-rem    at run time, unlike a %ERRORLEVEL% percent-expansion.
+rem    is `exit /b %ERRORLEVEL%` ALONE on the line after the launch. cmd expands
+rem    %VAR% when it parses a line (a whole `if (...)` block, or a whole
+rem    `a & b` chain, is one line), so `%ERRORLEVEL%` on the launch line or in
+rem    the same block returns the errorlevel from BEFORE the interpreter ran.
+rem    On its own line it is parsed after the interpreter exits. A BARE
+rem    `exit /b` is not enough: the errorlevel survives inside cmd, but the
+rem    cmd.exe process started by `cmd /c` or PowerShell's `&` exits 0, so a
+rem    deny (exit 2) reaches the host as allow. The `if errorlevel N` BUILTIN
+rem    is how the probe reads its result: it is compared at run time.
 rem 2. The WindowsApps filter lives in the `where` pipeline, never in a
 rem    per-iteration `echo ... | findstr` inside the for-block: after a for
 rem    variable is expanded, the resulting line is re-parsed, so a real install
@@ -183,7 +185,7 @@ exit /b 0
 
 :claq_exec
 "%CLAQ_PY%" %CLAQ_PYARGS% "%CLAQ_LAUNCHER%" %*
-exit /b
+exit /b %ERRORLEVEL%
 
 :claq_pick
 rem %1 = executable base name, %2 = the argument it must be exec'd with (if any).
