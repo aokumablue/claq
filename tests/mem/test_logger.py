@@ -8,13 +8,15 @@ import pytest
 
 import claq.mem.logger as logger
 
+from ._support import reset_mem_logger
+
 
 @pytest.fixture(autouse=True)
 def _reset_logger() -> Iterator[None]:
     """各テストの前後でロガーの初期化状態とハンドラを消す。"""
-    logger.reset()
+    reset_mem_logger()
     yield
-    logger.reset()
+    reset_mem_logger()
 
 
 def _mem_root() -> logging.Logger:
@@ -40,15 +42,12 @@ def test_setup_adds_file_and_stderr_handlers_with_level(tmp_path: Path, level: s
     assert _mem_root().level == expected
 
 
-def test_setup_is_idempotent_and_reset_clears_state(tmp_path: Path) -> None:
-    """2 回目の setup は無視され（ハンドラもレベルも変わらない）、reset でハンドラと初期化済みフラグが消える。"""
+def test_setup_is_idempotent(tmp_path: Path) -> None:
+    """2 回目の setup は無視され、ハンドラもレベルも変わらない。"""
     logger.setup(tmp_path, level="info")
     logger.setup(tmp_path, level="debug")
     assert len(_mem_root().handlers) == 2
     assert _mem_root().level == logging.INFO
-    logger.reset()
-    assert _mem_root().handlers == []
-    assert logger._initialized is False
 
 
 def test_setup_closes_dirs_and_reuses_log_file(tmp_path: Path) -> None:
@@ -69,7 +68,7 @@ def test_setup_closes_dirs_and_reuses_log_file(tmp_path: Path) -> None:
     assert logs.stat().st_mode & 0o777 == 0o700
     assert existing[0].stat().st_mode & 0o777 == 0o600
 
-    logger.reset()
+    reset_mem_logger()
     logger.setup(logs, level="info")
     assert sorted(logs.glob("mem-*.log")) == existing
     assert existing[0].stat().st_mode & 0o777 == 0o600

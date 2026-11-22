@@ -106,14 +106,6 @@ def setup(log_dir: Path, level: str) -> None:
         _initialized = True
 
 
-def reset() -> None:
-    """テスト用: ロガーをリセットする。"""
-    global _initialized
-    with _lock:
-        _initialized = False
-    logging.getLogger(_PACKAGE_LOGGER_NAME).handlers.clear()
-
-
 def get(component: str) -> logging.Logger:
     """コンポーネント名でロガーを取得する。"""
     return logging.getLogger(f"{_PACKAGE_LOGGER_NAME}.{component}")
