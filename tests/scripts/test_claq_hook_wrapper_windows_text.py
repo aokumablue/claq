@@ -232,17 +232,18 @@ def test_windows_wrapper_probes_python3_as_well() -> None:
     ]
 
 
-def test_windows_wrapper_never_expands_errorlevel_after_running_python() -> None:
-    """`%ERRORLEVEL%` を展開せず、launcher 起動行の直後が素の `exit /b` であること。
+def test_windows_wrapper_returns_errorlevel_on_the_line_after_running_python() -> None:
+    """`%ERRORLEVEL%` は launcher 起動行の直後の `exit /b %ERRORLEVEL%` 1 行にだけ現れること。
 
-    cmd は `if (...)` ブロック内の `%VAR%` をパース時に展開するので、`exit /b %ERRORLEVEL%` は起動前の値を
-    返し、保護 hook の exit 2 が 0 として報告される。`if errorlevel N` は実行時比較なので対象外。
+    cmd は行（`if (...)` ブロック・`&` で繋いだ列を含む）をパースする時に `%VAR%` を展開するので、起動行や
+    同じブロックで展開すると起動前の値を返す。素の `exit /b` は cmd 内の errorlevel を残すが、`cmd /c` や
+    PowerShell の `&` が起動した cmd.exe は 0 で終わり、保護 hook の exit 2 が許可として報告される。
     コメントは対象外（この落とし穴の説明そのものが本文に書いてある）。
     """
     exec_index = _at(lambda line: line.startswith('"%CLAQ_PY%"') and "%CLAQ_LAUNCHER%" in line)
 
-    assert not any("%ERRORLEVEL%" in line.upper() for line in _LINES)
-    assert _LINES[exec_index + 1] == "exit /b"
+    assert [index for index, line in enumerate(_LINES) if "%ERRORLEVEL%" in line.upper()] == [exec_index + 1]
+    assert _LINES[exec_index + 1] == "exit /b %ERRORLEVEL%"
 
 
 def test_windows_wrapper_launches_python_outside_any_block() -> None:
