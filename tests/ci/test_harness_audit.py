@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from claq.ci import harness_audit
 from claq.ci.harness_audit_utils import make_check
+from claq_dev import harness_repo_checks
 
 from ._support import _exit_code_as_main, _write_files
 from ._support import _isolate_home as _isolate_home
@@ -176,16 +179,17 @@ def test_build_report_top_actions_pick_highest_failing_points(monkeypatch: pytes
     assert (report["overall_score"], report["max_score"]) == (5, 16)
 
 
-def test_summarize_self_check_detects_broken_aggregation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """カテゴリ earned_points の合計が overall_score と一致しなければ落とす（取りこぼし・二重計上の検出）。"""
-    zero = {"earned_points": 0, "max_points": 0, "normalized_score": 0}
-    monkeypatch.setattr(
-        harness_audit, "summarize_category_scores", lambda _checks: dict.fromkeys(harness_audit.CATEGORIES, zero)
-    )
-    _write_files(tmp_path, {".gitignore": ".env\n"})
-
-    with pytest.raises(AssertionError, match="一致しません"):
-        harness_audit.build_report("repo", root_dir=tmp_path)
+@pytest.mark.parametrize(
+    "get_checks",
+    [
+        lambda root: harness_audit.get_consumer_checks(root, None),
+        harness_repo_checks.get_repo_checks,
+    ],
+    ids=["consumer", "repo"],
+)
+def test_check_categories_are_declared(get_checks: Callable[[Path], list[dict[str, Any]]], tmp_path: Path) -> None:
+    """全チェックのカテゴリが CATEGORIES に載る（カテゴリ集計が取りこぼさず、合計が overall_score と一致する前提）。"""
+    assert {check["category"] for check in get_checks(tmp_path)} <= set(harness_audit.CATEGORIES)
 
 
 _CHECKS_WITH_FAILURE = [

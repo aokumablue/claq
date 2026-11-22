@@ -356,22 +356,11 @@ def assemble_report(
         root_dir: 監査対象のルート（解決済み）。
         target_mode: レポートに記す採点モード（``"consumer"`` / ``"repo"``）。
         checks_source: 採点モードのチェック定義。
-
-    Raises:
-        AssertionError: カテゴリの獲得点の合計が全体の獲得点と一致しない場合。
     """
     checks = [check for check in checks_source if scope in check["scopes"]]
     category_scores = summarize_category_scores(checks)
     max_score = sum(check["points"] for check in checks)
     overall_score = sum(check["points"] for check in checks if check["pass"])
-
-    # 単位を分けた以上、合計が一致することは機械的に保証できる。集計経路が
-    # 壊れたら（カテゴリの取りこぼし・二重計上）ここで落とす。
-    category_total = sum(category_score["earned_points"] for category_score in category_scores.values())
-    if category_total != overall_score:
-        raise AssertionError(
-            f"カテゴリ earned_points の合計 {category_total} が overall_score {overall_score} と一致しません"
-        )
 
     failed_checks = sorted((check for check in checks if not check["pass"]), key=lambda c: c["points"], reverse=True)
     return {

@@ -23,7 +23,7 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 _USAGE = "Usage: runtime/claq-hook [--bg] <module> [args...]"
 # 落ちると保護が外れる PreToolUse の保護フック（hooks.json の matcher 付きエントリ）。
-_PROTECTION_HOOKS = frozenset(
+PROTECTION_HOOKS = frozenset(
     {
         "claq.hooks.block_no_verify",
         "claq.hooks.pre_bash_commit_quality",
@@ -146,7 +146,7 @@ def _run_module_in_process(target: str, target_args: list[str]) -> int:
         # （`launcher.py` 冒頭の fail-open と同じ理由）。代わりに保護フックでは、他の無効化経路と
         # 同じ `claqProtectionDisabled` マーカーを出して**保護喪失を可視化**する。
         sys.stderr.write(f"ERROR: {target}: {exc}\n")
-        if target in _PROTECTION_HOOKS:
+        if target in PROTECTION_HOOKS:
             marker = {"claqProtectionDisabled": True, "reason": "hook_raised", "module": target}
             sys.stderr.write(json.dumps(marker) + "\n")
         return 1
