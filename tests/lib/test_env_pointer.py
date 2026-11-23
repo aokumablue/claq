@@ -77,7 +77,7 @@ class TestWriteEnvPointer:
         """
         called: list[int] = []
         monkeypatch.setattr(mod, "ancestor_pointers_supported", lambda: False)
-        monkeypatch.setattr(mod, "_resolve_ancestor_chain", lambda depth: called.append(depth) or [])
+        monkeypatch.setattr(mod, "_resolve_ancestor_chain", lambda: called.append(1) or [])
 
         mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
 
@@ -106,20 +106,18 @@ class TestWriteEnvPointer:
         """解決したチェーンの全要素が、正しい内容で ``roots/<pid>`` に書かれること。
 
         合成した 2 要素チェーンで、ファイル名の集合と各ファイルの中身まで見る（``chain[:1]``
-        への退行も、同じ pid を 2 回書く実装も捕まえる）。探索段数には ``_MAX_ANCESTOR_DEPTH``
-        そのものが渡され、その定数は 2 以上（直接 PPID だけでは足りないという仕様）であること。
+        への退行も、同じ pid を 2 回書く実装も捕まえる）。探索段数の定数 ``_MAX_ANCESTOR_DEPTH``
+        は 2 以上（直接 PPID だけでは足りないという仕様）であること。
         実チェーンの段数は環境依存で下限を表明できないため、定数側を固定して退行を止める。
         """
         chain = [(4242, "Mon Jan  1 00:00:00 2035"), (4243, "Tue Jan  2 00:00:00 2035")]
-        depths: list[int] = []
-        monkeypatch.setattr(mod, "_resolve_ancestor_chain", lambda depth: depths.append(depth) or list(chain))
+        monkeypatch.setattr(mod, "_resolve_ancestor_chain", lambda: list(chain))
         plugin_root = _make_plugin_root(tmp_path / "plugin")
 
         mod.write_env_pointer(plugin_root)
 
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
         assert mod._MAX_ANCESTOR_DEPTH == 2
-        assert depths == [mod._MAX_ANCESTOR_DEPTH]
         assert _pid_entries(roots_dir) == {"4242", "4243"}
         for pid, lstart in chain:
             assert (roots_dir / str(pid)).read_text(encoding="utf-8") == f"{plugin_root}\n{lstart}\n"
@@ -477,7 +475,7 @@ class TestResolveAncestorChain:
 
     def test_real_chain_includes_own_ppid(self) -> None:
         """モックなしの実行で、チェーンの先頭が os.getppid() と一致すること。"""
-        chain = mod._resolve_ancestor_chain(mod._MAX_ANCESTOR_DEPTH)
+        chain = mod._resolve_ancestor_chain()
         assert chain
         assert chain[0][0] == os.getppid()
         assert chain[0][1] != ""
@@ -490,7 +488,7 @@ class TestResolveAncestorChain:
     def test_empty_when_ps_cannot_run(self, monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
         """`ps` の起動失敗・タイムアウトは空チェーン（fail-open）。"""
         monkeypatch.setattr(mod.subprocess, "run", _raise(exc))
-        assert mod._resolve_ancestor_chain(4) == []
+        assert mod._resolve_ancestor_chain() == []
 
     @pytest.mark.parametrize(
         ("returncode", "table", "depth", "expected"),
@@ -545,8 +543,9 @@ class TestResolveAncestorChain:
             return _PsResult(returncode, row) if row is not None else _PsResult(1, "")
 
         monkeypatch.setattr(mod.subprocess, "run", _ps)
+        monkeypatch.setattr(mod, "_MAX_ANCESTOR_DEPTH", depth)
 
-        chain = mod._resolve_ancestor_chain(depth)
+        chain = mod._resolve_ancestor_chain()
 
         assert chain == [(own_ppid if pid == "{ppid}" else pid, lstart) for pid, lstart in expected]
 
@@ -562,8 +561,9 @@ class TestResolveAncestorChain:
 
         monkeypatch.setattr(mod.time, "monotonic", lambda: next(clock))
         monkeypatch.setattr(mod.subprocess, "run", _ps)
+        monkeypatch.setattr(mod, "_MAX_ANCESTOR_DEPTH", 4)
 
-        assert mod._resolve_ancestor_chain(4) == [(os.getppid(), "t0")]
+        assert mod._resolve_ancestor_chain() == [(os.getppid(), "t0")]
         assert timeouts == [mod._PS_TIMEOUT_SECONDS - 1.0]
 
 
