@@ -99,8 +99,8 @@ def extract_shell_wrapper_call(segment: list[str]) -> ShellWrapperCall | None:
     """セグメント内の既知シェル ``-c`` 呼び出しを取り出す。
 
     既知シェルのトークンに続く ``-c`` を含む短フラグを探し、その次のトークンをコマンドとする。
-    `block_no_verify` と `bash_config_protection` が共有する。片方だけがラッパー再帰を
-    持つと、同じコマンドが片方のフックだけを素通りする。再帰の段数は呼び出し側が
+    `block_no_verify`・`bash_config_protection`・`commit_risk` が共有する。1 つだけがラッパー再帰を
+    持たないと、同じコマンドがそのフックだけを素通りする。再帰の段数は呼び出し側が
     決める（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。
 
     Args:

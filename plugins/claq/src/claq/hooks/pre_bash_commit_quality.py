@@ -5,7 +5,8 @@ pre:bash で `git commit` を検出したときだけ、lint や簡易静的チ�
 
 commit 検出と複合コマンドの判定は `commit_risk`、メッセージ検証は `commit_message` が持ち、
 検出は `block_no_verify` と共有する区切り記号対応トークナイザ
-（`shell_tokens.tokenize` / `split_segments`）で行い、`git` のグローバルオプションは
+（`shell_tokens.tokenize` / `split_segments`）で行い（既知シェルの ``-c`` 文字列は
+`commit_risk.analysis_segments` が 1 段だけ展開する）、`git` のグローバルオプションは
 値の有無・既知/未知を問わず読み飛ばします。`git commit -a` / `--all` / 結合短形式
 （`-am`）では、未ステージ変更ファイルを**作業ツリーから**読んでスキャン対象へ
 加えます（`-a` は作業ツリーの内容をコミットするため）。ステージ済みファイルは
@@ -51,6 +52,7 @@ from claq.hooks.commit_quality_scanner import (
 from claq.hooks.commit_risk import (
     MULTIPLE_COMMITS_MESSAGE,
     RAW_GIT_COMMIT_RE,
+    analysis_segments,
     compound_commit_risk,
     find_git_commit_args_in_segment,
     is_commit_all_flag,
@@ -67,8 +69,6 @@ from claq.hooks.shell_tokens import (
     command_exceeds_scan_budget,
     normalize_executable_name,
     scan_budget_message,
-    split_segments,
-    tokenize,
 )
 from claq.lib.core_utils import log
 from claq.lib.harness import iter_bash_command_groups
@@ -188,7 +188,7 @@ def _commit_target_risk(command: str) -> str | None:
     Returns:
         deny すべき場合は `_COMMIT_TARGET_UNVERIFIABLE_MESSAGE`、問題なければ None を返します。
     """
-    for segment in split_segments(tokenize(command)):
+    for segment in analysis_segments(command)[0]:
         commit_args = find_git_commit_args_in_segment(segment)
         if commit_args is None:
             if any(
@@ -510,7 +510,7 @@ def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]]
     見え、そのまま数えると 1 回の commit が「複数 commit」になる。要素側の検出が 2 件以上
     （``["git commit -m a", "git commit -m b"]`` のようなコマンド文字列の配列）なら別々の
     commit なので要素をそのまま数える。結合候補が検出しない場合も要素をそのまま数える
-    （``["bash", "-lc", "git commit -m x"]`` の commit は要素側でしか見えない）。
+    （``["git commit -m a", "echo done"]`` の結合は各要素を 1 語に引用するため commit が見えない）。
 
     Args:
         group: ``iter_bash_command_groups`` が返すグループの各候補から、heredoc のデータ本文を

@@ -492,6 +492,9 @@ class TestCommitAgainstAnotherIndex:
             "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=../other git commit -am x",
             "GIT_CONFIG_PARAMETERS=x git commit -am x",
             "git config core.worktree ../other && git commit -am x",
+            # 既知シェルの `-c` の内側でも、シェル起動より前の代入と内側の `cd` を読む。
+            "GIT_INDEX_FILE=/tmp/i bash -c 'git commit -m x'",
+            "bash -c 'cd ../other && git commit -am x'",
         ],
     )
     def test_commit_against_another_index_is_denied(self, command: str) -> None:
