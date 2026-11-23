@@ -14,29 +14,6 @@ from __future__ import annotations
 import json
 
 
-def adapt_context_output(event_name: str, additional_context: str) -> str:
-    """コンテキスト注入出力を host 非依存の合併 JSON として生成する。
-
-    Args:
-        event_name: hookEventName に設定するイベント名。
-        additional_context: コンテキストに注入する追加文字列。
-
-    Returns:
-        additionalContext（トップレベル）と hookSpecificOutput を同時に
-        含む合併 JSON 文字列。
-    """
-    return json.dumps(
-        {
-            "additionalContext": additional_context,
-            "hookSpecificOutput": {
-                "hookEventName": event_name,
-                "additionalContext": additional_context,
-            },
-        },
-        ensure_ascii=False,
-    )
-
-
 def adapt_deny_output(reason: str) -> str:
     """ツール実行ブロックの stdout 出力（Copilot CLI が読む permissionDecision JSON）を生成する。
 
@@ -56,7 +33,9 @@ def adapt_deny_output(reason: str) -> str:
 
 
 def print_session_start_output(additional_context: str) -> None:
-    """SessionStart 用のフック出力を stdout に書き出す。
+    """SessionStart のコンテキスト注入出力を host 非依存の合併 JSON として stdout に書き出す。
+
+    additionalContext（トップレベル）と hookSpecificOutput を同時に含める。
 
     Args:
         additional_context: コンテキストに注入する追加文字列。
@@ -65,4 +44,8 @@ def print_session_start_output(additional_context: str) -> None:
         OSError: パイプが閉じている場合（BrokenPipeError を含む）。
         UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
     """
-    print(adapt_context_output("SessionStart", additional_context))
+    payload = {
+        "additionalContext": additional_context,
+        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": additional_context},
+    }
+    print(json.dumps(payload, ensure_ascii=False))

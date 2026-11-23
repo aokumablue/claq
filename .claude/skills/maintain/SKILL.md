@@ -16,7 +16,7 @@ commands/skills/agents/hooks をレビューし、実害を直し、効いてい
 3. 既存の文言を再利用する: 新しい表現を発明せず、tdd-writer / reviewer / feat-dev / loop-dev の既存の文言を使う（トークンと表現の揺れを増やさないため）
    - 禁止事項を列挙するより、肯定形の原則で書く
 4. 両ハーネス互換: プラグインは Claude Code（主）と GitHub Copilot CLI（副）の両方で動く
-   - ハーネスに依存する入出力は、既存の関門に集める: `stdin_io`（stdin の読み取り）/ `hook_common` / `output_adapter`（`emit_block_output` / `adapt_context_output` 等）
+   - ハーネスに依存する入出力は、既存の関門に集める: `stdin_io`（stdin の読み取り）/ `hook_common` / `output_adapter`（`emit_block_output` / `print_session_start_output` 等）
    - Copilot で実現できない機能には同等の代替を実装する。無理なら、安全側に倒した明示的なスキップにする
    - Claude Code 側の処理経路は変えない
    - ハーネスの判定やプロトコルの分岐をフック内に直書きした実装は、レビューで指摘して直す
@@ -100,7 +100,7 @@ baseline を取る（リポジトリ直下の `.venv` を有効化する）。
 hooks / `src/claq/hooks/` を含む回は、両ハーネス互換（原則4）を必須の観点にする。
 
 - ブロック系の出力は `emit_block_output` 経由か
-- コンテキスト注入は `adapt_context_output` 経由か
+- コンテキスト注入は `print_session_start_output` 経由か
 - Copilot CLI が対応しないイベント・機能に代替（または安全側のスキップ）があるか
 - Claude Code の経路に影響が無いか
 

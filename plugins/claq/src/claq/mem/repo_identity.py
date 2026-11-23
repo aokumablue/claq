@@ -36,7 +36,8 @@ _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*)://(.*)$", re.DOTALL)
 _PORT_RE = re.compile(r":\d+$")
 _QUERY_OR_FRAGMENT_RE = re.compile(r"[?#]")
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]+")
-_PATH_SEPARATOR_RE = re.compile(r"[/\\]")
+PATH_SEPARATOR_RE = re.compile(r"[/\\]")
+"""パス区切り（POSIX の ``/`` と Windows の ``\\``）。"""
 
 
 def _run_git(cwd: str, *args: str) -> str | None:
@@ -311,7 +312,7 @@ def base_slug(identity: RepoIdentity) -> str:
     Returns:
         スラッグ化した文字列。
     """
-    return slugify(_PATH_SEPARATOR_RE.split(identity.identity_key)[-1])
+    return slugify(PATH_SEPARATOR_RE.split(identity.identity_key)[-1])
 
 
 def allocate_repo_slug(identity: RepoIdentity, db: Database) -> str:

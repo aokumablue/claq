@@ -38,7 +38,7 @@ from claq.lib.slim_text import TRUNCATION_MARKER, compact_line
 from claq.lib.tag_stripping import keep_allowed_chars, strip_tags
 from claq.mem.knowledge_input import optional_str
 from claq.mem.logger import get as _get_logger
-from claq.mem.repo_identity import find_work_tree_root
+from claq.mem.repo_identity import PATH_SEPARATOR_RE, find_work_tree_root
 from claq.mem.settings import CONTEXT_HANDOFF_CHAR_BUDGET
 
 log = _get_logger("HANDOFF")
@@ -95,9 +95,6 @@ host はローカルコマンドの起動を ``<command-name>`` タグ付きで�
 
 _COMMAND_NAME_TAG = "<command-name>"
 """スラッシュコマンド起動をタグ付きで記録したエントリの印。"""
-
-_PATH_SEPARATOR_RE = re.compile(r"[/\\]")
-"""パス区切り（POSIX の ``/`` と Windows の ``\\``）。"""
 
 _PATH_SEGMENT_LIMIT = 3
 """引き継ぎに載せるファイルパスの末尾セグメント数。絶対パス全体は予算の無駄。"""
@@ -724,7 +721,7 @@ def _shorten_path(path: str) -> str:
     Returns:
         末尾 ``_PATH_SEGMENT_LIMIT`` セグメント。省略した場合は ``…/`` を付ける。
     """
-    segments = [segment for segment in _PATH_SEPARATOR_RE.split(path) if segment]
+    segments = [segment for segment in PATH_SEPARATOR_RE.split(path) if segment]
     if len(segments) <= _PATH_SEGMENT_LIMIT:
         return path
     return "…/" + "/".join(segments[-_PATH_SEGMENT_LIMIT:])
