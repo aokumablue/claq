@@ -187,9 +187,15 @@ def test_build_report_top_actions_pick_highest_failing_points(monkeypatch: pytes
     ],
     ids=["consumer", "repo"],
 )
-def test_check_categories_are_declared(get_checks: Callable[[Path], list[dict[str, Any]]], tmp_path: Path) -> None:
-    """全チェックのカテゴリが CATEGORIES に載る（カテゴリ集計が取りこぼさず、合計が overall_score と一致する前提）。"""
-    assert {check["category"] for check in get_checks(tmp_path)} <= set(harness_audit.CATEGORIES)
+def test_check_categories_and_scopes_are_declared(get_checks: Callable[[Path], list[dict[str, Any]]], tmp_path: Path) -> None:
+    """全チェックのカテゴリが CATEGORIES に、スコープが VALID_SCOPES に載る。
+
+    カテゴリ集計が取りこぼさず合計が overall_score と一致する前提と、スコープの綴り違い（``"skill"``）で
+    その項目が黙って採点から消えないことの両方を固定する。
+    """
+    checks = get_checks(tmp_path)
+    assert {check["category"] for check in checks} <= set(harness_audit.CATEGORIES)
+    assert {scope for check in checks for scope in check["scopes"]} <= harness_audit.VALID_SCOPES
 
 
 _CHECKS_WITH_FAILURE = [

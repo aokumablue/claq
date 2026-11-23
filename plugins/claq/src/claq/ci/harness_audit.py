@@ -177,7 +177,7 @@ def _consumer_tool_checks(root_dir: str | Path) -> list[dict[str, Any]]:
         ),
         make_check(
             check_id="consumer-project-overrides", category=category, points=3,
-            scopes=["repo", "hooks", "skills", "commands", "agents"],
+            scopes=sorted(VALID_SCOPES),
             path=".claude/",
             description="プロジェクト固有のハーネスオーバーライドが .claude/ 配下に存在する",
             passed=count_files(root_dir, ".claude/agents", ".md") > 0

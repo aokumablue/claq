@@ -30,14 +30,14 @@ import sys
 import time
 from pathlib import Path
 
-from claq.lib.constants import BASE_DIR_NAME
+from claq.lib.constants import BASE_DIR_NAME, RUNTIME_DIR_NAME
 from claq.lib.core_utils import make_private_dirs, unlink_stale_entries
 from claq.lib.subprocess_utils import run_text
 
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
 _ENV_TMP_PREFIX = f"{_ENV_FILENAME}.tmp."
-_ENV_TEMPLATE_RELATIVE = Path("runtime") / "env-template.sh"
+_ENV_TEMPLATE_RELATIVE = Path(RUNTIME_DIR_NAME) / "env-template.sh"
 
 _MAX_ANCESTOR_DEPTH = 2
 """writer が祖先 PID へポインタを書く最大段数。resolver の祖先 walk と同じ深さに揃える。"""

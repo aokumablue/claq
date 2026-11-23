@@ -104,6 +104,7 @@ from claq.hooks.shell_tokens import (
     split_segments,
     tokenize,
 )
+from claq.lib.constants import BASE_DIR_NAME, LOG_DIR_NAME
 from claq.lib.harness import (
     extract_raw_tool_name,
     is_known_tool_outside,
@@ -161,7 +162,7 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 # がログ末尾行を次回 SessionStart のコンテキストへ注入するため、自由な追記はプロンプト
 # 注入の永続化経路になる。保護の範囲を「Bash からの直接追記の拒否」に限るため、
 # `config_protection` の保護 path（Edit/Write にも効く）へは足さず本モジュールに閉じる。
-_HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
+_HOME_LOG_PATH_SEGMENTS = ((BASE_DIR_NAME, LOG_DIR_NAME),)
 
 # 未展開のまま ``~/.gitconfig`` 等を指せる、書込み先トークン先頭の ``$HOME`` / ``$XDG_CONFIG_HOME``（``{}`` 付き可）。
 _HOME_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{HOME\}|HOME)(?=/|$)")

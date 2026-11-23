@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from claq.lib.constants import LOG_DIR_NAME
 from claq.lib.core_utils import ensure_private_dir, get_claq_dir, read_tail_text, unlink_stale_entries
 
 # detach 起動した子の実行時間上限（秒）。detach 後の子はハーネスの timeout の
@@ -125,7 +126,7 @@ def _bg_log_path(day: datetime) -> Path:
     Raises:
         OSError: ホームディレクトリを決められない場合（``get_claq_dir`` 由来）。
     """
-    return get_claq_dir() / "logs" / f"bg-{day:%Y-%m-%d}.log"
+    return get_claq_dir() / LOG_DIR_NAME / f"bg-{day:%Y-%m-%d}.log"
 
 
 def _detach_log_path() -> Path:

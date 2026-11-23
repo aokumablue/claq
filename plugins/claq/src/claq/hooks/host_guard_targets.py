@@ -34,6 +34,7 @@ import os
 from pathlib import Path
 
 from claq.hooks.config_protection import (
+    PLUGIN_HOOKS_JSON_NAME,
     PLUGIN_HOOKS_JSON_SEGMENT,
     RUNNING_PLUGIN_RUNTIME_DISPLAY,
     protected_path_segment,
@@ -51,8 +52,6 @@ from claq.hooks.hook_common import (
 )
 from claq.lib.constants import HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD
 from claq.lib.core_utils import get_home_dir, get_plugin_root
-
-_HOOKS_JSON_NAME = "hooks.json"
 
 # `cd` を含むコマンドで basename だけで塞ぐ、実行中のランタイムの起動ファイル（hooks.json が起動する）。
 # ``runtime`` 単独の basename までは広げない（一般的な名前で誤検出が過大になる）。
@@ -80,7 +79,7 @@ def _guarded_locations() -> list[tuple[tuple[str, ...], str]]:
         ``(解決済みの実体 path を畳んだ要素列, 表示名)`` のリスト。
     """
     # ホームの決定や ``~user`` の展開自体も失敗しうるので、組み立てを遅らせて下の try で 1 か所ずつ受ける。
-    candidates = [(lambda: get_plugin_root() / "hooks" / _HOOKS_JSON_NAME, PLUGIN_HOOKS_JSON_SEGMENT)]
+    candidates = [(lambda: get_plugin_root() / PLUGIN_HOOKS_JSON_SEGMENT, PLUGIN_HOOKS_JSON_SEGMENT)]
     configured = os.environ.get("CLAUDE_CONFIG_DIR")
     config_dirs = [lambda: get_home_dir() / ".claude"]
     if configured:
@@ -116,7 +115,7 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
         return PLUGIN_HOOKS_JSON_SEGMENT
     if not scope_certain:
         name = normalize_protected_name(basename(token))
-        if name == _HOOKS_JSON_NAME:
+        if name == PLUGIN_HOOKS_JSON_NAME:
             return PLUGIN_HOOKS_JSON_SEGMENT
         if name in _RUNTIME_ENTRYPOINT_NAMES and running_plugin_root_is_guarded():
             return RUNNING_PLUGIN_RUNTIME_DISPLAY

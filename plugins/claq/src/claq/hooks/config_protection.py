@@ -30,7 +30,7 @@ from claq.hooks.hook_common import (
     resolve_repo_root,
     scan_memo,
 )
-from claq.lib.constants import HOOK_ENTRYPOINT
+from claq.lib.constants import HOOK_ENTRYPOINT, RUNTIME_DIR_NAME
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.harness import (
     extract_file_paths,
@@ -117,10 +117,13 @@ PROTECTED_FILES = frozenset({
 # Edit で全部を無効化できる。片側だけ塞ぐと、塞いだ経路の存在が誤った安心になる。
 # basename ``hooks.json`` では判定しない（consumer 側の ``.claude/hooks.json`` は
 # `/harness --apply` が正当に書き込む先）。
-_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
+_PLUGIN_HOOKS_DIR_NAME = "hooks"
+PLUGIN_HOOKS_JSON_NAME = "hooks.json"
+_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), (_PLUGIN_HOOKS_DIR_NAME, PLUGIN_HOOKS_JSON_NAME))
 
 # 保護 path のうちファイルのもの。表示名に末尾の ``/`` を付けない（`protected_path_display_name`）。
-PLUGIN_HOOKS_JSON_SEGMENT = "hooks/hooks.json"
+# `host_guard_targets` は plugin root に連ねた実体パスにも使う。
+PLUGIN_HOOKS_JSON_SEGMENT = f"{_PLUGIN_HOOKS_DIR_NAME}/{PLUGIN_HOOKS_JSON_NAME}"
 
 # 内容次第で保護する git config のパス。remote / branch / user の通常編集が正当にあるため
 # 無条件では塞がず、置換後の全文を解析して ``core.hooksPath`` / ``include`` / ``alias`` のように
@@ -164,13 +167,12 @@ CONDITIONALLY_PROTECTED_FILES_FOLDED = frozenset(
 
 # 実行中の plugin root から見て守るディレクトリ。`runtime/` は hooks.json が起動する
 # `claq-hook`、`src/claq/` はフック本体で、書き換えると次のツール呼び出しから全保護フックが外れる。
-_RUNNING_PLUGIN_RUNTIME_DIR_NAME = "runtime"
-_RUNNING_PLUGIN_GUARDED_DIRS = ((_RUNNING_PLUGIN_RUNTIME_DIR_NAME,), ("src", "claq"))
+_RUNNING_PLUGIN_GUARDED_DIRS = ((RUNTIME_DIR_NAME,), ("src", "claq"))
 
 # 上の表示名。`blocked_message_for_file` がブロック文言を選ぶ鍵（Edit/Write と Bash で共有）。
 RUNNING_PLUGIN_DISPLAY_NAMES = frozenset("/".join(segments) + "/" for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
 # `cd` を含むコマンドで起動ファイルの basename に当たったときの表示名（`host_guard_targets` が返す）。
-RUNNING_PLUGIN_RUNTIME_DISPLAY = f"{_RUNNING_PLUGIN_RUNTIME_DIR_NAME}/"
+RUNNING_PLUGIN_RUNTIME_DISPLAY = f"{RUNTIME_DIR_NAME}/"
 
 
 def protected_path_segment(file_path: str) -> str | None:
@@ -318,7 +320,7 @@ def _plugin_runtime_is_tracked(repo_root: Path, plugin_root: Path) -> bool:
     """
     try:
         result = run_text(
-            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / "runtime" / HOOK_ENTRYPOINT)],
+            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / RUNTIME_DIR_NAME / HOOK_ENTRYPOINT)],
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):

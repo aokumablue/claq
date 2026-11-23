@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from claq.lib.constants import LOG_DIR_NAME
 from claq.lib.core_utils import get_claq_dir
 
 
@@ -65,4 +66,4 @@ class Settings:
     @property
     def log_dir(self) -> Path:
         """ログディレクトリの絶対パスを返す。"""
-        return self.data_path / "logs"
+        return self.data_path / LOG_DIR_NAME
