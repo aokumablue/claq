@@ -162,7 +162,7 @@ class TestExplicitHandoff:
 
         明示経路だけが ``strip_tags(redact(...))`` になると、分断された秘密が ``redact`` を
         すり抜けたあと ``strip_tags`` で再結合し、未マスクのまま ``sessions.handoff`` へ
-        永続化される。両経路が ``_sanitize_freeform`` を共有することを結果側から押さえる。
+        永続化される。両経路が ``sanitize_freeform`` を共有することを結果側から押さえる。
         """
         explicit = build_handoff({"handoff": _TAG_SPLIT_PAYLOAD})
         transcript = _from_transcript(tmp_path, [_user(_TAG_SPLIT_PAYLOAD)])

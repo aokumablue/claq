@@ -144,6 +144,17 @@ class TestContext:
 
         assert injected == _envelope("## 共通知識\n- [fact] t", f"## 前回セッションの通知\n{expected}")
 
+    def test_bg_failure_notice_with_tag_split_secret_is_dropped(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """孤立タグで分断した鍵を含む通知は、handoff の自由文と同じく節ごと捨て、破棄を WARNING で知らせること（細工の痕跡は注入しない）。"""
+        _seed(tmp_path, scope="global", key="k", title="t")
+        notice = "痕跡: " + "sk-" + "ant-" + "<private>" + "api03-" + "A" * 30
+
+        stdout, stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["context"], {}, bg_failure_notice=notice)
+
+        assert exit_code == 0
+        assert json.loads(stdout)["hookSpecificOutput"]["additionalContext"] == _envelope("## 共通知識\n- [fact] t")
+        assert "タグで分断されたシークレットを検出しました: 本文を破棄します" in stderr
+
     @pytest.mark.parametrize(
         ("title", "body", "expected"),
         [

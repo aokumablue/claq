@@ -111,7 +111,7 @@ _MAX_TRANSCRIPT_LINE_CHARS = 1_000_000
 def _neutralize(text: str) -> str:
     """``keep_allowed_chars`` → ``normalize_user_message`` → ``strip_tags`` の 3 段で無害化する。
 
-    ``redact`` の前までの合成で、順序の理由は ``_sanitize_freeform`` を参照。
+    ``redact`` の前までの合成で、順序の理由は ``sanitize_freeform`` を参照。
 
     Args:
         text: 無害化前の文字列。
@@ -122,8 +122,8 @@ def _neutralize(text: str) -> str:
     return strip_tags(normalize_user_message(keep_allowed_chars(text)))
 
 
-def _sanitize_freeform(text: str) -> str:
-    """自由文（明示 handoff・ユーザー発話）を引き継ぎへ載せる前に無害化する。
+def sanitize_freeform(text: str) -> str:
+    """自由文（明示 handoff・ユーザー発話・detach 失敗通知）を注入枠へ載せる前に無害化する。
 
     順序は ``keep_allowed_chars`` → ``normalize_user_message`` → ``strip_tags`` →
     ``redact`` で固定する。
@@ -162,7 +162,7 @@ def _sanitize_freeform(text: str) -> str:
     """
     stripped = _neutralize(text)
     if stripped == PLACEHOLDER:
-        log.warning("タグで分断されたシークレットを検出しました: 引き継ぎ本文を破棄します")
+        log.warning("タグで分断されたシークレットを検出しました: 本文を破棄します")
         return ""
     return redact(stripped)
 
@@ -210,7 +210,7 @@ def build_handoff(payload: dict[str, Any]) -> str:
     """
     explicit = str(payload.get("handoff") or "").strip()
     if explicit:
-        return truncate_handoff(_sanitize_freeform(explicit))
+        return truncate_handoff(sanitize_freeform(explicit))
     transcript_path = str(payload.get("transcript_path") or "")
     return truncate_handoff(_summarize_transcript(transcript_path, optional_str(payload.get("cwd"))))
 
@@ -572,7 +572,7 @@ def _user_message(entry: dict[str, Any]) -> str:
 
     注入済みの ``<claq-memory>`` 等のタグは ``strip_tags`` で落とす。
     落とさないと前セッションへ注入した記憶をそのまま引き継ぎとして
-    記録し直すエコーが起きる。無害化の合成と順序は ``_sanitize_freeform``
+    記録し直すエコーが起きる。無害化の合成と順序は ``sanitize_freeform``
     が単一の情報源で、明示 handoff 経路と共有する。
 
     圧縮は無害化の**後**に掛ける。前に掛けると ``redact`` より先に 200 文字で切って
@@ -594,7 +594,7 @@ def _user_message(entry: dict[str, Any]) -> str:
         return ""
 
     raw = strip_ansi(_text_content(content))
-    return compact_line(_sanitize_freeform(raw))
+    return compact_line(sanitize_freeform(raw))
 
 
 def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str], work_tree: str) -> None:
