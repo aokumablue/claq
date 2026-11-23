@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from claq.hooks.commit_risk import parse_git_commit_command, short_option_flags
+from claq.hooks.commit_risk import short_option_flags
 
 # Conventional Commits 1.0.0: type・任意の scope・破壊的変更を表す任意の `!`・コロン。
 _CONVENTIONAL_COMMIT = re.compile(
@@ -155,25 +155,24 @@ def _message_from_args(commit_args: list[str]) -> str | None:
     return None
 
 
-def validate_commit_message(command: str) -> dict | None:
-    """コミットメッセージの件名行の形式を検証します。
+def validate_commit_message(commit_args: list[str]) -> list[dict]:
+    """コミットメッセージの件名行の形式を検証し、問題の一覧を返します。
 
     メッセージはシェルのトークン化を通した commit 引数から読む（引用符の中の ``'``・結合短形式の
     ``-am`` も値どおりに読める）。検査は件名行（1 行目）だけに当てる。本文の長さや本文末尾の句点は
     件名の形式とは関係が無い。
 
     Args:
-        command: `git commit` コマンド文字列です。
+        commit_args: `parse_git_commit_command` が返した commit の引数トークン列です。
 
     Returns:
-        メッセージと問題一覧を含む辞書、またはメッセージがない・本文が実行時にしか決まらない場合は
-        None を返します。
+        問題の一覧。メッセージがない・本文が実行時にしか決まらない場合は空リストを返します。
     """
-    message = _message_from_args(parse_git_commit_command(command)[1])
+    message = _message_from_args(commit_args)
     if not message:
-        return None
+        return []
     # `-m "$(cat <<'EOF' ...)"` のようなコマンド置換は、本文が実行時にしか決まらない。字面を本文として
     # 検査すると置換の書き出し（`$(cat <<`）を本文と取り違え、毎回の commit で形式違反を警告する。
     if message.startswith(("$(", "`")):
-        return None
-    return {"message": message, "issues": _commit_message_issues(message.splitlines()[0])}
+        return []
+    return _commit_message_issues(message.splitlines()[0])

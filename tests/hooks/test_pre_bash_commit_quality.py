@@ -268,13 +268,13 @@ class TestArgvGroupCommitCounting:
     """argv 配列は 1 本のコマンドとして数え、要素と結合の二重計上で誤拒否しない。"""
 
     @staticmethod
-    def _run(command: object, monkeypatch: pytest.MonkeyPatch) -> tuple[str | None, list[str]]:
-        """品質スキャンを stub に差し替えて ``evaluate`` を実行し、スキャンに渡った command を返す。"""
-        scanned: list[str] = []
+    def _run(command: object, monkeypatch: pytest.MonkeyPatch) -> tuple[str | None, list[list[str]]]:
+        """品質スキャンを stub に差し替えて ``evaluate`` を実行し、スキャンに渡った commit 引数を返す。"""
+        scanned: list[list[str]] = []
 
-        def _stub(command: str, commit_args: list[str]) -> None:
-            """スキャンに渡った command を記録し、問題なしで通す。"""
-            scanned.append(command)
+        def _stub(commit_args: list[str]) -> None:
+            """スキャンに渡った commit 引数を記録し、問題なしで通す。"""
+            scanned.append(commit_args)
 
         monkeypatch.setattr(pbcq, "_evaluate_confirmed_commit", _stub)
         return pbcq.evaluate(json.dumps(_bash(command))), scanned
@@ -327,7 +327,7 @@ class TestArgvGroupCommitCounting:
 
         assert (0 if result is None else 2) == expected_exit
         assert result == expected_reason
-        assert scanned == expected_scanned
+        assert scanned == [commit_risk.parse_git_commit_command(scanned_command)[1] for scanned_command in expected_scanned]
 
     def test_oversized_element_in_argv_group_is_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """グループ内の候補が走査予算を超えれば block する（候補単位の予算は維持）。"""
@@ -354,7 +354,7 @@ class TestArgvGroupCommitCounting:
         result, scanned = self._run(["boom", "git commit -m a"], monkeypatch)
 
         assert result is None
-        assert scanned == ["git commit -m a"]
+        assert scanned == [["-m", "a"]]
 
 
 class TestWorktreeEnumerationFailClosed:

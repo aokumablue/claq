@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
+from claq.hooks import commit_quality_scanner, commit_risk, pre_bash_commit_quality
 
 from ._support import _scan_deadline
 
@@ -61,12 +61,12 @@ def test_evaluate_counts_issues_by_severity(
 ) -> None:
     """staged 1 件の issue とメッセージの問題を severity 別に数えてログへ出し、error があるときだけ deny すること。"""
     logs: list[str] = []
-    validated: list[str] = []
+    validated: list[list[str]] = []
 
-    def _validate(command: str) -> dict | None:
-        """受け取ったコマンドを記録し、指定のメッセージ問題を返す（None は問題なし）。"""
-        validated.append(command)
-        return None if message_issues is None else {"message": "feat(core): add", "issues": message_issues}
+    def _validate(commit_args: list[str]) -> list[dict]:
+        """受け取った commit 引数を記録し、指定のメッセージ問題を返す（None は問題なし）。"""
+        validated.append(commit_args)
+        return message_issues or []
 
     monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
     monkeypatch.setattr(pre_bash_commit_quality, "parse_json_object", lambda raw: {"tool_input": {"command": _COMMIT}})
@@ -78,7 +78,7 @@ def test_evaluate_counts_issues_by_severity(
 
     assert result == expected_reason
     assert logs == ["[Hook] Checking 1 staged file(s)...", *expected_logs]
-    assert validated == [_COMMIT]
+    assert validated == [commit_risk.parse_git_commit_command(_COMMIT)[1]]
 
 
 _COMMIT_PAYLOAD = json.dumps({"tool_input": {"command": "git commit -m 'feat: x'"}})

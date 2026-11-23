@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from claq.hooks import commit_message
+from claq.hooks import commit_message, commit_risk
 
 _LONG_UNCONVENTIONAL = "bad message with no conventional format and a very long subject line that keeps going."
 
@@ -83,7 +83,7 @@ _LONG_UNCONVENTIONAL = "bad message with no conventional format and a very long 
     ],
 )
 def test_validate_commit_message(command: str, expected: tuple[str, list[str]] | None) -> None:
-    """commit 以外とコマンド置換の本文は None、commit はメッセージと件名行への指摘種別を返すこと。
+    """commit 以外・メッセージ無し・コマンド置換の本文は指摘なし、commit はメッセージを読み件名行への指摘種別を返すこと。
 
     指摘種別は conventional 形式・72 文字超・大文字始まり・末尾のピリオドと句点（`.` `。` `．`）で、どれも 1 行目だけを見る（本文の
     長さや本文末尾の句点で件名を咎めない）。メッセージはトークン化した引数から読み、結合短形式（`-am`）・
@@ -93,7 +93,10 @@ def test_validate_commit_message(command: str, expected: tuple[str, list[str]] |
     大文字始まりは英語だけの説明部の先頭語が `Add` の形のときだけ咎め、略語（`API`）・内に大文字を含む
     名前（`GitHub`）・日本語の件名の先頭の英単語（`Windows の…`）は咎めない。
     """
-    result = commit_message.validate_commit_message(command)
+    commit_args = commit_risk.parse_git_commit_command(command)[1]
 
-    summary = None if result is None else (result["message"], [issue["type"] for issue in result["issues"]])
-    assert summary == expected
+    issues = commit_message.validate_commit_message(commit_args)
+
+    assert [issue["type"] for issue in issues] == ([] if expected is None else expected[1])
+    if expected is not None:
+        assert commit_message._message_from_args(commit_args) == expected[0]

@@ -377,20 +377,19 @@ def _count_file_issues(files_to_check: list[str], repo_root: Path | None = None,
     return counts
 
 
-def _log_commit_message_issues(command: str) -> int:
+def _log_commit_message_issues(commit_args: list[str]) -> int:
     """コミットメッセージの問題を検証してログへ出し、その件数を返します。
 
     Args:
-        command: `git commit` コマンド文字列です。
+        commit_args: `git commit` の引数トークン列です。
 
     Returns:
         メッセージの問題の件数を返します。すべて警告として数える件数です。
     """
-    message_validation = validate_commit_message(command)
-    if not (message_validation and message_validation["issues"]):
+    issues = validate_commit_message(commit_args)
+    if not issues:
         return 0
 
-    issues = message_validation["issues"]
     log("\nCommit Message Issues:")
     for issue in issues:
         log(f"  WARNING {issue['message']}")
@@ -448,7 +447,7 @@ def _collect_worktree_issues(worktree_targets: list[str], *, deadline: float) ->
     return _count_file_issues(worktree_targets, repo_root=repo_root, deadline=deadline)
 
 
-def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | None:
+def _evaluate_confirmed_commit(commit_args: list[str]) -> str | None:
     """`git commit` と判定済みの入力を検査し、ブロック理由を返します。
 
     commit であることは確定しているため、想定外の例外が起きても非ブロッキングへは
@@ -456,7 +455,6 @@ def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | No
     secret 検査を無言で迂回できてしまう。
 
     Args:
-        command: `git commit` を含む bash コマンド文字列です。
         commit_args: commit 呼び出しの引数トークン列です。
 
     Returns:
@@ -494,7 +492,7 @@ def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | No
             log("[Hook] ERROR: could not resolve repo root for `git commit -a` worktree scan.")
             return _REPO_ROOT_UNAVAILABLE_MESSAGE
         counts = index_counts + worktree_counts
-        counts["warning"] += _log_commit_message_issues(command)
+        counts["warning"] += _log_commit_message_issues(commit_args)
         return _finalize_result(counts)
 
     except Exception as err:
@@ -612,7 +610,7 @@ def evaluate(raw_input: str) -> str | None:
             log("[Hook] ERROR: the commit may record an index other than the one scanned.")
             return target_risk
 
-        return _evaluate_confirmed_commit(command, commit_args)
+        return _evaluate_confirmed_commit(commit_args)
 
     except Exception as err:
         # commit と確定する前の例外は非ブロッキング。確定後の例外は

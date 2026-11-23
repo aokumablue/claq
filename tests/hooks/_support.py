@@ -31,6 +31,7 @@ from claq.hooks import (
     bash_config_protection,
     block_no_verify,
     commit_quality_scanner,
+    commit_risk,
     config_protection,
     hook_common,
     pre_bash_commit_quality,
@@ -40,18 +41,19 @@ from claq.hooks import (
 _SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
 
 
-def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """`validate_commit_message` を「問題なし」(None) を返すスパイに替え、受け取ったコマンドの記録を返す。
+def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """`validate_commit_message` を「問題なし」(空リスト) を返すスパイに替え、受け取った commit 引数の記録を返す。
 
-    コミットメッセージ検証を無関係な観点のテストから切り離すためのスタブ。None を返すだけだと、
-    パッチが外れても本物が None を返す場面では結果が変わらず、差し替えが `evaluate` の経路へ
+    コミットメッセージ検証を無関係な観点のテストから切り離すためのスタブ。空リストを返すだけだと、
+    パッチが外れても本物が空リストを返す場面では結果が変わらず、差し替えが `evaluate` の経路へ
     届いたかを判別できない。呼び出しの記録を assert すれば、スタブが実際に検証段へ入ったことが固定される。
     """
-    validated: list[str] = []
+    validated: list[list[str]] = []
 
-    def _spy(command: str) -> None:
-        """受け取ったコマンドを記録し、検証結果なし(None)を返す。"""
-        validated.append(command)
+    def _spy(commit_args: list[str]) -> list[dict]:
+        """受け取った commit 引数を記録し、問題なし(空リスト)を返す。"""
+        validated.append(commit_args)
+        return []
 
     monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", _spy)
     return validated
@@ -103,7 +105,7 @@ def _evaluate_in_repo(command: str, repo: Path, monkeypatch: pytest.MonkeyPatch)
     validated = _spy_commit_message_validation(monkeypatch)
     try:
         result = pre_bash_commit_quality.evaluate("payload")
-        assert validated == [command]
+        assert validated == [commit_risk.parse_git_commit_command(command)[1]]
         return result
     finally:
         hook_common.resolve_repo_root.cache_clear()
