@@ -61,6 +61,7 @@ from claq.hooks.commit_risk import (
 from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
+    WRAPPER_CHDIR_OPTION_RE,
     emit_block_output,
     resolve_repo_root,
     scan_memo,
@@ -150,11 +151,11 @@ _REPOSITORY_ENV_RE = re.compile(
 )
 
 # 別のリポジトリ・作業ツリーへ移る git のグローバルオプション（``-C <dir>`` /
-# ``--git-dir[=]<dir>`` / ``--work-tree[=]<dir>``）と、wrapper の作業ディレクトリ指定
-# （``env -C`` / ``env --chdir`` / ``sudo -D`` / ``sudo --chdir``）。commit セグメントの commit より
-# 前だけで照合する（commit 自身の ``-C <commit>`` はメッセージの再利用で、対象 index を変えない）。
+# ``--git-dir[=]<dir>`` / ``--work-tree[=]<dir>``）。wrapper の作業ディレクトリ指定
+# （`hook_common.WRAPPER_CHDIR_OPTION_RE`）と合わせ、commit セグメントの commit より前だけで照合する
+# （commit 自身の ``-C <commit>`` はメッセージの再利用で、対象 index を変えない）。
 # 大小を区別する（``git -c`` は設定の指定で、別に ``core.worktree`` だけを見る）。
-_REPOSITORY_OPTION_RE = re.compile(r"^(?:-C|-D|--chdir(?:=|$)|--git-dir(?:=|$)|--work-tree(?:=|$))")
+_GIT_REPOSITORY_OPTION_RE = re.compile(r"^(?:-C|--git-dir(?:=|$)|--work-tree(?:=|$))")
 
 # ``--work-tree`` と同じ効果を持つ設定 key。``git -c`` / ``--config-env`` の値や ``git config`` の
 # 引数として現れる。git の key は大小無視なので畳んでから部分一致で見る。
@@ -199,7 +200,10 @@ def _commit_target_risk(command: str) -> str | None:
                 return _COMMIT_TARGET_UNVERIFIABLE_MESSAGE
             continue
         before_commit = segment[: len(segment) - len(commit_args) - 1]
-        if any(_points_git_elsewhere(token) or _REPOSITORY_OPTION_RE.match(token) for token in before_commit):
+        if any(
+            _points_git_elsewhere(token) or _GIT_REPOSITORY_OPTION_RE.match(token) or WRAPPER_CHDIR_OPTION_RE.match(token)
+            for token in before_commit
+        ):
             return _COMMIT_TARGET_UNVERIFIABLE_MESSAGE
         return None
     return None

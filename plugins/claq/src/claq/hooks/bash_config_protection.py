@@ -77,6 +77,7 @@ from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
     INPLACE_EDIT_EXECUTABLES,
     WINDOWS_WRITE_COMMAND_ALIASES,
+    WRAPPER_CHDIR_OPTION_RE,
     basename,
     effective_basename,
     emit_block_output,
@@ -246,8 +247,9 @@ _COMMAND_POSITION_WRAPPERS = frozenset(
     }
 )
 
-# wrapper 自身が値を取る short オプション（`env -u NAME` / `sudo -u user`）。
-_WRAPPER_VALUE_SHORT_OPTIONS = frozenset({"-u"})
+# wrapper 自身が値を取るオプション（`env -u NAME` / `sudo -u user`、作業ディレクトリ指定の
+# `env -C dir` / `env --chdir dir` / `sudo -D dir`）。値をコマンド名と取り違えない。
+_WRAPPER_VALUE_SHORT_OPTIONS = frozenset({"-u", "-C", "-D", "--chdir"})
 
 # wrapper がコマンド名より前に取る positional 引数（``timeout 5 rm`` の秒数、
 # ``chrt 99 rm`` の優先度、``taskset 0x3 rm`` のマスク）。いずれも数字で始まり、実行
@@ -445,9 +447,12 @@ def _changes_working_directory(segment: list[str]) -> bool:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        実行位置のコマンド（`_command_index`）が `DIRECTORY_CHANGE_COMMANDS` に属するなら True。
+        実行位置のコマンド（`_command_index`）が `DIRECTORY_CHANGE_COMMANDS` に属するか、その前の
+        wrapper が作業ディレクトリを指定する（`WRAPPER_CHDIR_OPTION_RE`）なら True。
     """
     index = _command_index(segment)
+    if any(WRAPPER_CHDIR_OPTION_RE.match(token) for token in segment[: len(segment) if index is None else index]):
+        return True
     return index is not None and normalize_executable_name(segment[index]) in DIRECTORY_CHANGE_COMMANDS
 
 

@@ -413,7 +413,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "xargs",
         }
     ),
-    "bash_config_protection._WRAPPER_VALUE_SHORT_OPTIONS": frozenset({"-u"}),
+    "bash_config_protection._WRAPPER_VALUE_SHORT_OPTIONS": frozenset({"-u", "-C", "-D", "--chdir"}),
     "bash_config_protection._HOME_LOG_PATH_SEGMENTS": ((".claq", "logs"),),
     "host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS": (
         (".claude", "settings.json"),

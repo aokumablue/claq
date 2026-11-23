@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
@@ -290,6 +291,12 @@ def write_command_name(token: str) -> str:
 DIRECTORY_CHANGE_COMMANDS = frozenset(
     {"cd", "pushd", "popd", "chdir", "set-location", "sl", "push-location", "pop-location"}
 )
+
+# wrapper の作業ディレクトリ指定（``env -C <dir>`` / ``env --chdir[=]<dir>`` / ``sudo -D <dir>`` /
+# ``sudo --chdir[=]<dir>``）。`DIRECTORY_CHANGE_COMMANDS` と同じく cwd を動かす。
+# `bash_config_protection`（cwd 基準の解決を信用するか）と `pre_bash_commit_quality`（commit の対象
+# index）が共有する。片方だけが知っていると、``env -C plugins rm ../ruff.toml`` が片方を素通りする。
+WRAPPER_CHDIR_OPTION_RE = re.compile(r"^(?:-C|-D|--chdir(?:=|$))")
 
 # sed の GNU 長形式 in-place フラグの名前（長形式の短縮は意図して組み立てる回避形なので見ない）。
 _LONG_INPLACE_OPTION_NAME = "in-place"
