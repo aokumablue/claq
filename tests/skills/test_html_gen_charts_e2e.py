@@ -361,6 +361,8 @@ def test_stretched_svg_with_text_is_reported() -> None:
     """潰し描画の SVG が文字を持つと違反になる（縦横独立に伸びて歪む）。"""
     assert check_site._validate_stretched_svg_text('<svg preserveAspectRatio="none"><text>1月</text></svg>') != []
     assert check_site._validate_stretched_svg_text('<svg preserveAspectRatio="none"></svg>') == []
+    # 子要素（image・marker）の preserveAspectRatio は図全体の潰し描画ではない
+    assert check_site._validate_stretched_svg_text('<svg><image preserveAspectRatio="none"/><text>1月</text></svg>') == []
 
 
 @pytest.mark.parametrize(
@@ -407,6 +409,19 @@ _AXIS_CSS = ".axis-text{font-size:15px}.chart{min-inline-size:600px}"
         pytest.param('<svg class="chart" viewBox="0 0 720 250">axis-text</svg>', ".axis-text{font-size:15px}", None, id="no-min-width"),
         # viewBox を狭く書いて最小幅で描くと、文字が大きく伸びる
         pytest.param('<svg class="chart" viewBox="0 0 400 200">axis-text</svg>', ".chart{min-inline-size:600px}.axis-text{font-size:15px}", "伸びる", id="too-large"),
+        # class と viewBox はルートの svg からだけ読む。子要素（目盛り文字・marker）の値で計算しない
+        pytest.param(
+            '<svg viewBox="0 0 400 200"><text class="chart axis-text">1</text></svg>',
+            ".chart{min-inline-size:600px}.axis-text{font-size:15px}",
+            None,
+            id="class-only-on-child",
+        ),
+        pytest.param(
+            '<svg class="chart"><marker viewBox="0 0 400 200"/>axis-text</svg>',
+            ".chart{min-inline-size:600px}.axis-text{font-size:15px}",
+            None,
+            id="viewbox-only-on-child",
+        ),
     ],
 )
 def test_axis_text_rendered_scale_is_checked(svg: str, css: str, needle: str | None) -> None:
