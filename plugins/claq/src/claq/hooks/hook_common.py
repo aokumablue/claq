@@ -179,6 +179,19 @@ def is_path_prefix(prefix: tuple[str, ...], parts: tuple[str, ...]) -> bool:
     return parts[: len(prefix)] == prefix
 
 
+@functools.cache
+def _folded_candidates(candidates: tuple[tuple[str, ...], ...]) -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
+    """定数の候補表を (畳む前, 畳んだ後) の組にして返す（候補表はモジュール定数なのでプロセス内で 1 回だけ畳む）。
+
+    Args:
+        candidates: `match_folded_path_window` に渡す候補表。
+
+    Returns:
+        候補ごとの (畳む前の綴り, 畳んだ要素列)。
+    """
+    return tuple((segments, fold_path_parts(segments)) for segments in candidates)
+
+
 def match_folded_path_window(
     parts: tuple[str, ...], candidates: tuple[tuple[str, ...], ...]
 ) -> tuple[str, ...] | None:
@@ -194,8 +207,7 @@ def match_folded_path_window(
         一致した候補（畳む前の綴り）。一致しなければ None。
     """
     folded_parts = fold_path_parts(parts)
-    for segments in candidates:
-        folded_segments = fold_path_parts(segments)
+    for segments, folded_segments in _folded_candidates(candidates):
         width = len(folded_segments)
         for index in range(len(folded_parts) - width + 1):
             window = folded_parts[index : index + width]

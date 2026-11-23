@@ -399,8 +399,18 @@ def global_git_config_path(file_path: str) -> str | None:
     if resolved is None:
         return None
     target = fold_path_parts(resolved.parts)
-    for path, display_name in _global_git_config_candidates():
-        real = resolve_effective_target(str(path))
-        if real is not None and fold_path_parts(real.parts) == target:
-            return display_name
-    return None
+    return next((name for location, name in _folded_global_git_config_locations() if location == target), None)
+
+
+@memoized_in_scan
+def _folded_global_git_config_locations() -> tuple[tuple[tuple[str, ...], str], ...]:
+    """ホーム側の git config の実体パスを畳んだ要素列と表示名の組を返す。
+
+    書込み先トークンごとに同じ候補を解決し直さないよう、`scan_memo` の間は 1 回だけ作る
+    （1 回の判定の間はホームも環境変数も変わらない）。
+
+    Returns:
+        解決できた候補ごとの (畳んだ実体パス, 表示名)。
+    """
+    resolved = ((resolve_effective_target(str(path)), name) for path, name in _global_git_config_candidates())
+    return tuple((fold_path_parts(real.parts), name) for real, name in resolved if real is not None)

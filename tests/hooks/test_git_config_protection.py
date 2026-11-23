@@ -412,6 +412,12 @@ class TestProtectedPaths:
         """解決できないパスはホーム側の設定ではない。"""
         assert config_protection.global_git_config_path("bad\x00path") is None
 
+    def test_unresolvable_candidate_is_skipped(self, monkeypatch: pytest.MonkeyPatch, _isolated_home: Path) -> None:
+        """解決できない候補（NUL を含むパス）は読み飛ばし、残りの候補で判定する。"""
+        candidates = ((Path("bad\x00xdg"), "xdg"), (_isolated_home / ".gitconfig", "~/.gitconfig"))
+        monkeypatch.setattr(git_config_text, "_global_git_config_candidates", lambda: candidates)
+        assert config_protection.global_git_config_path("~/.gitconfig") == "~/.gitconfig"
+
     def test_unknown_home_means_no_global_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ホームを決められなければ、ホーム側の設定は候補なし。"""
         for name in ("CLAQ_HOME", "HOME", "USERPROFILE"):
