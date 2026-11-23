@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from claq.mem import cli, cmd_context
-from claq.mem import logger as mem_logger
 from claq.mem import settings as settings_mod
 from claq.mem.database import Database
 from claq.mem.models import Knowledge
@@ -21,8 +20,7 @@ from claq.mem.repo_identity import resolve_repo
 
 
 def reset_mem_logger() -> None:
-    """claq.mem のロガーを未初期化に戻し、付いているハンドラを外す。"""
-    mem_logger._initialized = False
+    """claq.mem のロガーに付いているハンドラを外す（`setup` 前の状態へ戻す）。"""
     logging.getLogger("claq.mem").handlers.clear()
 
 

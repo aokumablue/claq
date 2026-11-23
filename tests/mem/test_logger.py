@@ -13,7 +13,7 @@ from ._support import reset_mem_logger
 
 @pytest.fixture(autouse=True)
 def _reset_logger() -> Iterator[None]:
-    """各テストの前後でロガーの初期化状態とハンドラを消す。"""
+    """各テストの前後でロガーのハンドラを外す。"""
     reset_mem_logger()
     yield
     reset_mem_logger()
@@ -31,9 +31,8 @@ def test_get_returns_child_logger() -> None:
     assert log.name == "claq.mem.TEST"
 
 
-def test_setup_adds_two_handlers_at_info_once(tmp_path: Path) -> None:
-    """ファイル出力と stderr の 2 ハンドラを INFO で付け、2 回目の setup は何も足さない。"""
-    logger.setup(tmp_path)
+def test_setup_adds_two_handlers_at_info(tmp_path: Path) -> None:
+    """ファイル出力と stderr の 2 ハンドラを INFO で付ける。"""
     logger.setup(tmp_path)
     assert len(_mem_root().handlers) == 2
     assert _mem_root().level == logging.INFO
@@ -95,28 +94,3 @@ def test_file_only_records_skip_stderr_but_reach_file(tmp_path: Path, capsys: py
     assert "shared failure" in content
     assert "file only failure" not in stderr
     assert "shared failure" in stderr
-
-
-def test_setup_can_retry_after_handler_construction_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """ハンドラ構築が失敗しても初期化済みフラグが立たず、次の setup で復帰できる。
-
-    `_initialized = True` を構築前に立てると、一度でも失敗したとき
-    「初期化済みだがハンドラが空」という復帰不能な状態がプロセス内に残る。
-    """
-    real_file_handler = logger._file_handler
-    failures = [OSError("disk full")]
-
-    def flaky_file_handler(log_dir: Path) -> logging.Handler:
-        """初回だけ OSError を送出し、以降は本物のハンドラを返す。"""
-        if failures:
-            raise failures.pop()
-        return real_file_handler(log_dir)
-
-    monkeypatch.setattr(logger, "_file_handler", flaky_file_handler)
-
-    with pytest.raises(OSError, match="disk full"):
-        logger.setup(tmp_path)
-    assert logger._initialized is False
-
-    logger.setup(tmp_path)
-    assert _mem_root().handlers
