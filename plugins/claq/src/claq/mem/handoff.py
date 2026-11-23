@@ -59,8 +59,6 @@ _TRANSCRIPT_ROOTS_ENV = "CLAQ_TRANSCRIPT_ROOTS"
 _USER_MESSAGE_COUNT = 3
 """引き継ぎに載せる直近ユーザー依頼の件数。"""
 
-_USER_MESSAGE_CHAR_LIMIT = 200
-"""ユーザー依頼 1 件を圧縮する上限文字数。"""
 
 _FILE_LIST_LIMIT = 8
 """引き継ぎに載せる変更ファイルの件数。"""
@@ -255,15 +253,15 @@ def _summarize_transcript(transcript_path: str, cwd: str | None) -> str:
         return ""
     work_tree = find_work_tree_root(cwd)
     deadline = time.monotonic() + TRANSCRIPT_TIMEOUT_SEC
-    with contextlib.closing(_windows_newest_first(path, TRANSCRIPT_MAX_BYTES)) as windows:
+    with contextlib.closing(_windows_newest_first(path)) as windows:
         messages, files, tools = _scan(next(windows, ""), deadline, work_tree)
         while not messages and time.monotonic() < deadline and (window := next(windows, None)) is not None:
             messages = _scan(window, deadline, work_tree)[0]
     return _compose(messages, files, tools)
 
 
-def _windows_newest_first(path: Path, size: int) -> Iterator[str]:
-    """ファイルを末尾から ``size`` バイトずつの窓で読み、新しい窓から順に返す。
+def _windows_newest_first(path: Path) -> Iterator[str]:
+    """ファイルを末尾から ``TRANSCRIPT_MAX_BYTES`` バイトずつの窓で読み、新しい窓から順に返す。
 
     窓の先頭に掛かった行の断片は捨て、次の（前の）窓をその行の終わりまで伸ばして行ごと読む。
     窓より長い行は、どの窓でも断片になるため読まない（走査が 1 行の上限で捨てる規模の行）。
@@ -271,7 +269,6 @@ def _windows_newest_first(path: Path, size: int) -> Iterator[str]:
 
     Args:
         path: 読み取り対象のファイル。
-        size: 1 窓のバイト数。
 
     Yields:
         完全な行だけからなる窓のテキスト。窓全体が 1 行の断片なら空文字列。
@@ -282,7 +279,7 @@ def _windows_newest_first(path: Path, size: int) -> Iterator[str]:
     with path.open("rb") as stream:
         end = stream.seek(0, os.SEEK_END)
         while end > 0:
-            start = max(0, end - size)
+            start = max(0, end - TRANSCRIPT_MAX_BYTES)
             stream.seek(start)
             data = stream.read(end - start)
             if start == 0:
@@ -441,7 +438,7 @@ def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
     seen: set[str] = set()
     kept: list[str] = []
     for message in reversed(messages):
-        # 切り詰められた行は先頭 _USER_MESSAGE_CHAR_LIMIT 文字しか残っておらず、
+        # 切り詰められた行は先頭 COMPACT_LINE_MAX_CHARS 文字しか残っておらず、
         # 一致しても元の依頼が同一とは限らない。畳むと別依頼が片方消えるため対象外。
         if message in seen and not message.endswith(TRUNCATION_MARKER):
             continue
@@ -597,7 +594,7 @@ def _user_message(entry: dict[str, Any]) -> str:
         return ""
 
     raw = strip_ansi(_text_content(content))
-    return compact_line(_sanitize_freeform(raw), _USER_MESSAGE_CHAR_LIMIT)
+    return compact_line(_sanitize_freeform(raw))
 
 
 def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str], work_tree: str) -> None:

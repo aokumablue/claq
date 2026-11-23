@@ -523,7 +523,7 @@ def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) ->
     return issues
 
 
-def _scan_secret_issues(lines: list[str], *, deadline: float, report_lines: bool = True) -> list[dict]:
+def _scan_secret_issues(lines: list[str], *, deadline: float, report_lines: bool) -> list[dict]:
     """ファイル内容からハードコードされたシークレットを検出します。
 
     `# nosec`・ファイルサイズに関わらず全体を走査します。呼び出し元から渡された

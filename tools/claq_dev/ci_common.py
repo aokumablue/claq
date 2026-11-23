@@ -70,12 +70,13 @@ def list_markdown_files(directory: Path) -> list[Path]:
     return [entry for entry in directory.iterdir() if entry.is_file() and entry.name.endswith(".md")]
 
 
-def read_json(file_path: str | Path, label: str) -> Any:
-    """JSON を読み取り、パースエラーを ``label`` 付きの ValueError に正規化する。"""
+def read_json(file_path: str | Path) -> Any:
+    """JSON を読み取り、パースエラーをファイル名付きの ValueError に正規化する。"""
+    path = Path(file_path)
     try:
-        return json.loads(Path(file_path).read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
-        raise ValueError(f"{label} の JSON 形式が不正です: {error}") from error
+        raise ValueError(f"{path.name} の JSON 形式が不正です: {error}") from error
 
 
 def is_non_empty_string(value: Any) -> bool:

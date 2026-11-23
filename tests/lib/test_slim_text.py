@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from claq.lib.slim_text import compact_line
+from claq.lib import slim_text
 
 
 @pytest.mark.parametrize(
@@ -24,6 +24,7 @@ from claq.lib.slim_text import compact_line
     ids=["wording-kept", "trimmed", "empty", "whitespace-only", "fence", "fence-lang", "table",
          "heading", "bullet", "numbered"],
 )
-def test_compact_line(text: str, max_length: int, expected: str) -> None:
+def test_compact_line(text: str, max_length: int, expected: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """空白を畳みマークダウンの行頭記号を落とし、長すぎれば切って ``...`` を付ける。言い回しと句読点は変えない。フェンスと表の行は空になる。"""
-    assert compact_line(text, max_length) == expected
+    monkeypatch.setattr(slim_text, "COMPACT_LINE_MAX_CHARS", max_length)
+    assert slim_text.compact_line(text) == expected
