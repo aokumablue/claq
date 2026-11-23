@@ -196,7 +196,8 @@ class TestPromotedCardIsImmutableToLearn:
         with Database(tmp_path / "mem.db") as db:
             found = db.get_knowledge_by_key("h3-card")
             assert found is not None
-            db.set_knowledge_status(found.id, status)
+            found.status = status
+            db.upsert_knowledge(found)
 
         updated = {**self._PAYLOAD, "title": "更新後タイトル"}
         stdout, _stderr, exit_code = _run_cli(monkeypatch, tmp_path, ["learn"], updated)

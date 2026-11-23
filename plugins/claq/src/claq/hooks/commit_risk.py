@@ -15,12 +15,13 @@ from claq.hooks.hook_common import (
     INPLACE_EDIT_EXECUTABLES,
     is_git_executable_token,
     is_inplace_edit_flag,
+    memoized_in_scan,
+    write_command_name,
 )
 from claq.hooks.shell_tokens import (
     WRITE_REDIRECT_OPERATORS,
-    normalize_executable_name,
+    extract_shell_wrapper_call,
     split_segments,
-    tokenize,
     tokenize_with_status,
 )
 
@@ -47,6 +48,38 @@ _MUTATION_BEFORE_COMMIT_MESSAGE = (
 RAW_GIT_COMMIT_RE = re.compile(r"\bgit\s+commit\b")
 
 
+@memoized_in_scan
+def analysis_segments(command: str) -> tuple[list[list[str]], bool]:
+    """コマンドを、commit の検出と判定に使うセグメント列へ分ける。
+
+    既知シェルの ``-c`` 文字列（``bash -lc 'git add . && git commit -m x'``）は 1 段だけ内側の
+    セグメントへ展開する（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。展開しないと
+    文字列形の内側の commit は検出されず、品質スキャンなしで通る。外側のセグメントは内側の前に残す
+    （``bash -c '…' > tracked.py`` のリダイレクトは内側の実行より先に書く）。内側の各セグメントの
+    先頭には、シェル起動より前のトークン（``GIT_INDEX_FILE=x`` 等の代入・wrapper）を前置する。
+
+    Args:
+        command: 検査対象のコマンド文字列です。
+
+    `scan_memo` の中では結果を使い回すため、呼び出し側は返したリストを変更しない。
+
+    Returns:
+        (segments, parsed_cleanly) のタプル。parsed_cleanly は外側と展開した内側のどちらも
+        クォート不整合なくトークン化できたときだけ True です。
+    """
+    tokens, parsed_cleanly = tokenize_with_status(command)
+    segments: list[list[str]] = []
+    for segment in split_segments(tokens):
+        segments.append(segment)
+        wrapper = extract_shell_wrapper_call(segment)
+        if wrapper is None:
+            continue
+        inner_tokens, inner_parsed_cleanly = tokenize_with_status(wrapper.command)
+        parsed_cleanly = parsed_cleanly and inner_parsed_cleanly
+        segments += [[*wrapper.prefix, *inner] for inner in split_segments(inner_tokens)]
+    return segments, parsed_cleanly
+
+
 def find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
     """1 セグメント（シェル区切りを含まないトークン列）内の `git commit` 呼び出しを探します。
 
@@ -70,7 +103,7 @@ def find_git_commit_args_in_segment(segment: list[str]) -> list[str] | None:
 def parse_git_commit_command(command: str) -> tuple[bool, list[str]]:
     """コマンド文字列が `git commit` 呼び出しかを判定し、commit 引数トークンを返します。
 
-    トークン化してシェル区切りごとのセグメントに分け、セグメントごとに `git` →
+    `analysis_segments` でシェル区切りごとのセグメントに分け、セグメントごとに `git` →
     グローバルオプション → `commit` の並びを探す。セグメント分割により
     ``git status;echo commit`` のような非 commit コマンドを commit と判定しない。
 
@@ -86,8 +119,8 @@ def parse_git_commit_command(command: str) -> tuple[bool, list[str]]:
         (is_commit, commit_args) のタプル。is_commit が False の場合、
         commit_args は空リストです。
     """
-    tokens, parsed_cleanly = tokenize_with_status(command)
-    for segment in split_segments(tokens):
+    segments, parsed_cleanly = analysis_segments(command)
+    for segment in segments:
         commit_args = find_git_commit_args_in_segment(segment)
         if commit_args is not None:
             return True, commit_args
@@ -193,8 +226,8 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
             continue
 
         # 素の basename（大小区別・`.exe` 残し）で照合すると ``CP evil.py app.py`` や
-        # ``cp.exe`` が語彙から外れ、未検査の内容が commit されるため共有の正規化を通す。
-        name = normalize_executable_name(token)
+        # ``cp.exe``・``Copy-Item`` が語彙から外れ、未検査の内容が commit されるため共有の正規化を通す。
+        name = write_command_name(token)
         if name in _WORKTREE_MUTATING_EXECUTABLES or name in ALWAYS_MUTATING_EDIT_EXECUTABLES:
             return True
         if name in INPLACE_EDIT_EXECUTABLES:
@@ -222,7 +255,7 @@ def compound_commit_risk(command: str) -> str | None:
     Returns:
         deny すべき場合はその理由文字列、問題なければ None を返します。
     """
-    segments = split_segments(tokenize(command))
+    segments, _parsed_cleanly = analysis_segments(command)
     commit_indices = [i for i, segment in enumerate(segments) if find_git_commit_args_in_segment(segment) is not None]
     if not commit_indices:
         return None

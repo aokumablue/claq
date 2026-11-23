@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -10,6 +9,26 @@ from typing import Any
 
 from claq.lib.constants import PLUGIN_NAME
 from claq.lib.core_utils import get_home_dir
+
+# 採点カテゴリの名前。consumer モード（harness_audit）と repo モード（claq_dev.harness_repo_checks）が同じ名前で
+# 集計するため、ここ 1 か所に置く。
+TOOL_COVERAGE = "Tool Coverage"
+CONTEXT_EFFICIENCY = "Context Efficiency"
+QUALITY_GATES = "Quality Gates"
+MEMORY_PERSISTENCE = "Memory Persistence"
+EVAL_COVERAGE = "Eval Coverage"
+SECURITY_GUARDRAILS = "Security Guardrails"
+COST_EFFICIENCY = "Cost Efficiency"
+
+CATEGORIES = [
+    TOOL_COVERAGE,
+    CONTEXT_EFFICIENCY,
+    QUALITY_GATES,
+    MEMORY_PERSISTENCE,
+    EVAL_COVERAGE,
+    SECURITY_GUARDRAILS,
+    COST_EFFICIENCY,
+]
 
 
 def make_check(
@@ -138,14 +157,6 @@ def safe_read(root_dir: str | Path, relative_path: str) -> str:
         return ""
 
 
-def safe_parse_json(text: str) -> Any | None:
-    """JSON を解析する。空文字や不正 JSON は None。"""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
-
-
 def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions: Sequence[str]) -> bool:
     """指定拡張子のファイルが 1 つでもあるかを調べる。"""
     suffixes = tuple(extensions)
@@ -173,23 +184,15 @@ _PLUGIN_CACHE_GLOBS = (
 )
 
 
-def find_plugin_install(root_dir: str | Path) -> str | None:
-    """claq プラグインの ``plugin.json`` の絶対パスを探す。無ければ None。
+def has_plugin_install(root_dir: Path) -> bool:
+    """claq プラグインの ``plugin.json`` がリポジトリ直下かホームディレクトリ配下にあるかを返す。
 
-    リポジトリ直下を先に、ホームディレクトリ配下を続けて探す。ホームの解決は
-    `core_utils.get_home_dir()` に委ねる（``HOME`` を直接読むと、``HOME`` を
-    持たない Windows で必ずリポジトリ直下しか見えない）。各ルートでは平置き
-    レイアウトを先に見て、無ければマーケットプレイス配置を走査する。複数版が
-    残っている場合はパスの辞書順で最初のものを返す。呼び出し側は導入有無しか
-    見ないため、これは同じ入力に同じ答えを返させるための順序固定であって、
-    版の新旧を表さない。
+    ホームの解決は `core_utils.get_home_dir()` に委ねる（``HOME`` を直接読むと、``HOME`` を
+    持たない Windows で必ずリポジトリ直下しか見えない）。各ルートで平置きレイアウトと
+    マーケットプレイス配置を見て、最初に見つかった時点で返す。
     """
-    for search_root in (Path(root_dir), get_home_dir()):
-        for relative in _PLUGIN_JSON_RELATIVES:
-            candidate = search_root / relative
-            if candidate.exists():
-                return str(candidate)
-        cached = sorted(str(path) for glob in _PLUGIN_CACHE_GLOBS for path in search_root.glob(glob))
-        if cached:
-            return cached[0]
-    return None
+    return any(
+        any((search_root / relative).exists() for relative in _PLUGIN_JSON_RELATIVES)
+        or any(next(search_root.glob(glob), None) is not None for glob in _PLUGIN_CACHE_GLOBS)
+        for search_root in (root_dir, get_home_dir())
+    )

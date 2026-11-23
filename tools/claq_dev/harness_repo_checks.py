@@ -10,15 +10,22 @@ from pathlib import Path
 from typing import Any
 
 from claq.ci.harness_audit_utils import (
+    CONTEXT_EFFICIENCY,
+    COST_EFFICIENCY,
+    EVAL_COVERAGE,
+    MEMORY_PERSISTENCE,
+    QUALITY_GATES,
+    SECURITY_GUARDRAILS,
+    TOOL_COVERAGE,
     count_files,
     file_has_content,
     make_check,
-    safe_parse_json,
     safe_read,
 )
 from claq.hooks.shell_tokens import basename_any_separator
 from claq.launcher import PROTECTION_HOOKS
 from claq.lib.constants import HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD
+from claq.lib.stdin_io import parse_json_object
 from claq_dev.ci_common import extract_frontmatter
 
 _HOOK_WRAPPER_BASENAMES = {HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD}
@@ -85,8 +92,8 @@ def _event_has_matching_command(event_hooks: Any, argv_patterns: tuple[tuple[str
 
 def _hook_events(hooks_json: str) -> dict[str, Any] | None:
     """hooks.json の生テキストからイベント名→定義の辞書を返す。形が違えば None。"""
-    parsed = safe_parse_json(hooks_json)
-    if not isinstance(parsed, dict) or not isinstance(parsed.get("hooks"), dict):
+    parsed = parse_json_object(hooks_json)
+    if parsed is None or not isinstance(parsed.get("hooks"), dict):
         return None
     return parsed["hooks"]
 
@@ -179,8 +186,8 @@ def _hook_modules_resolve(root_dir: str | Path, hooks_json: str) -> bool:
 
 def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
     """plugin.json が宣言するディレクトリがすべて実在するかを判定する。"""
-    manifest = safe_parse_json(safe_read(root_dir, ".claude-plugin/plugin.json"))
-    if not isinstance(manifest, dict):
+    manifest = parse_json_object(safe_read(root_dir, ".claude-plugin/plugin.json"))
+    if manifest is None:
         return False
     declared = [
         entry
@@ -253,7 +260,7 @@ def _declares_preflight_hook(hooks_json: str) -> bool:
 
 def _tool_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Tool Coverage カテゴリのチェックを返す。"""
-    category = "Tool Coverage"
+    category = TOOL_COVERAGE
     return [
         make_check(
             check_id="tool-hooks-config", category=category, points=2, scopes=["repo", "hooks"],
@@ -295,7 +302,7 @@ def _tool_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
 
 def _context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Context Efficiency カテゴリのチェックを返す。"""
-    category = "Context Efficiency"
+    category = CONTEXT_EFFICIENCY
     return [
         make_check(
             check_id="context-model-route", category=category, points=2, scopes=["repo", "commands"],
@@ -316,7 +323,7 @@ def _context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _quality_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Quality Gates カテゴリのチェックを返す。"""
-    category = "Quality Gates"
+    category = QUALITY_GATES
     dev_root = _dev_root(root_dir)
     pyproject_toml = safe_read(dev_root, "pyproject.toml")
     validators_test = safe_read(dev_root, "tests/ci/test_validators.py")
@@ -347,7 +354,7 @@ def _quality_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _memory_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Memory Persistence カテゴリのチェックを返す。"""
-    category = "Memory Persistence"
+    category = MEMORY_PERSISTENCE
     return [
         make_check(
             check_id="memory-hooks-lifecycle", category=category, points=4, scopes=["repo", "hooks"],
@@ -376,7 +383,7 @@ def _memory_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Eval Coverage カテゴリのチェックを返す。"""
-    category = "Eval Coverage"
+    category = EVAL_COVERAGE
     return [
         make_check(
             check_id="eval-skill", category=category, points=4, scopes=["repo", "skills"],
@@ -405,7 +412,7 @@ def _eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _security_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Security Guardrails カテゴリのチェックを返す。"""
-    category = "Security Guardrails"
+    category = SECURITY_GUARDRAILS
     return [
         make_check(
             check_id="security-review-skill", category=category, points=3, scopes=["repo", "skills"],
@@ -440,7 +447,7 @@ def _security_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, An
 
 def _cost_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Cost Efficiency カテゴリのチェックを返す。"""
-    category = "Cost Efficiency"
+    category = COST_EFFICIENCY
     return [
         make_check(
             check_id="cost-no-oversized-surface", category=category, points=3, scopes=["repo"],

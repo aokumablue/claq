@@ -1056,9 +1056,18 @@ def _each_svg(html: str, check: Callable[[int, str], list[str]]) -> list[str]:
     return [violation for index, svg in enumerate(_iter_svg_blocks(html), start=1) for violation in check(index, svg)]
 
 
+def _svg_root_tag(svg: str) -> str:
+    """``<svg>`` 1 枚分の文字列から、ルートの開始タグだけを返す。
+
+    ルートの属性（class・viewBox・preserveAspectRatio）を SVG 全体から探すと、ルートに無いとき子要素
+    （``<text class="axis-text">``・``<marker viewBox>``）の値を拾う。ルートの属性はここを通して読む。
+    """
+    return re.match(r"<svg\b[^>]*>", svg).group(0)
+
+
 def _is_stretched_svg(svg: str) -> bool:
     """viewBox を縦横独立に引き伸ばす潰し描画の SVG かを返す。"""
-    return 'preserveAspectRatio="none"' in svg
+    return 'preserveAspectRatio="none"' in _svg_root_tag(svg)
 
 
 #: 直交軸チャート 1 枚に要求する目盛りラベルと目盛り線の最小本数。
@@ -1180,7 +1189,7 @@ def _chart_text_violations(index: int, svg: str) -> list[str]:
     if not texts:
         return []
     violations: list[str] = []
-    if "chart" not in _class_names(re.match(r"<svg\b[^>]*>", svg).group(0)):
+    if "chart" not in _class_names(_svg_root_tag(svg)):
         violations.append(
             f"{index} 枚目の SVG が <text> を持つのに class=\"chart\" が無い"
             "（文字の頭打ちが掛からず、広い画面で伸びる）"
@@ -1347,9 +1356,6 @@ _PATH_ARITY = {"m": 2, "l": 2, "t": 2, "h": 1, "v": 1, "s": 4, "q": 4, "c": 6, "
 #: d と points に並ぶ数値。SVG は符号や小数点の前で区切りを省けるので、区切りではなく
 #: 数値の形で拾う。
 _NUMBER_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
-#: ルートの svg の class に chart--scatter を持つ散布図。.point の有無で見分けると、
-#: 折れ線に強調の点を 1 つ置いただけで時系列の検査が外れる。
-_SCATTER_ROOT_RE = re.compile(r'<svg\b[^>]*\sclass="(?:[^"]*\s)?chart--scatter[\s"]')
 
 
 def _path_points(d: str) -> int:
@@ -1417,7 +1423,9 @@ def _validate_time_point_hits(html: str) -> list[str]:
 
 def _time_point_hit_violations(index: int, svg: str) -> list[str]:
     """SVG 1 枚の当たり判定が、時点の最も多い系列に届くかを検査する。"""
-    if _is_stretched_svg(svg) or _SCATTER_ROOT_RE.match(svg):
+    # ルートの class に chart--scatter を持つ散布図は対象外。.point の有無で見分けると、
+    # 折れ線に強調の点を 1 つ置いただけで時系列の検査が外れる。
+    if _is_stretched_svg(svg) or "chart--scatter" in _class_names(_svg_root_tag(svg)):
         return []
     counts = _series_line_points(svg)
     if not counts:
@@ -1492,17 +1500,17 @@ def _validate_axis_text_scale(html: str, css: str) -> list[str]:
     return _each_svg(html, lambda index, svg: _axis_text_scale_violations(index, svg, css, declared))
 
 
-def _min_render_width(css: str, class_value: str) -> float | None:
+def _min_render_width(css: str, class_names: list[str]) -> float | None:
     """SVG の最小描画幅（px）を返す。``chart--*`` の宣言があれば ``.chart`` より優先する。
 
     Args:
         css: 手書き CSS の文字列
-        class_value: SVG の class 属性の値
+        class_names: ルートの SVG の class 名の一覧
 
     Returns:
         ``min-inline-size`` の px 値。どこにも宣言が無ければ None
     """
-    modifiers = [f".{name}" for name in class_value.split() if name.startswith("chart--")]
+    modifiers = [f".{name}" for name in class_names if name.startswith("chart--")]
     return next(
         (value for value in (_css_length(css, name, "min-inline-size") for name in modifiers) if value),
         _css_length(css, ".chart", "min-inline-size"),
@@ -1513,11 +1521,12 @@ def _axis_text_scale_violations(index: int, svg: str, css: str, declared: float)
     """SVG 1 枚の目盛り文字の実効サイズを検査する。倍率を計算できない図は対象外。"""
     if "axis-text" not in svg:
         return []
-    box = re.search(r'viewBox="0 0 ([\d.]+) [\d.]+"', svg)
-    classes = re.search(r'class="([^"]*)"', svg)
+    root = _svg_root_tag(svg)
+    box = re.search(r'viewBox="0 0 ([\d.]+) [\d.]+"', root)
+    classes = _class_names(root)
     if not box or not classes:
         return []
-    floor = _min_render_width(css, classes.group(1))
+    floor = _min_render_width(css, classes)
     if not floor:
         return []
     view_width = box.group(1)

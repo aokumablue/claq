@@ -11,22 +11,26 @@ from typing import Any
 from claq.hooks.hook_common import resolve_effective_target
 from claq.lib.harness import normalize_tool_name
 
+# git config・ホスト設定の置換前後の全文の上限。置換前はディスクから読むので stdin の上限が効かず、
+# 置換後は MultiEdit の replace_all を重ねると倍々に伸びる（`a`→`aa` を 20 回で 1 KiB が 1 GiB）。
+# 超えたら検査できないとして呼び出し側が deny する（hook が host timeout で kill されると許可へ倒れるため）。
+FULL_TEXT_MAX_BYTES = 256 * 1024
+
 # MultiEdit の編集件数の上限。置換 1 件ごとに全文を走査するため、件数でも検査時間を抑える
 # （上限が無いと 1 MiB の payload に 13,981 件入り、256 KiB の全文で 5.2 秒かかった。64 件なら数 ms）。
 _MAX_EDITS = 64
 
 
-def read_current_text(file_path: str, limit: int) -> str:
-    """対象ファイルの現在の内容を先頭 ``limit`` 文字まで読む。
+def read_current_text(file_path: str) -> str:
+    """対象ファイルの現在の内容を先頭 ``FULL_TEXT_MAX_BYTES + 1`` 文字まで読む。
 
     改行は変換しない。git config は CRLF だけを改行に畳み、単独の CR は空白として読むため、
     universal newlines で読むと実ファイルと違う全文を解析してしまう。読めない・存在しない・
     ディレクトリの場合は空文字列（新規ファイルと同じ扱い）。呼び出し側が走査上限を超えたことを
-    長さで検出できるよう、上限より 1 文字多い値を ``limit`` に渡す。
+    長さで検出できるよう、上限より 1 文字多く読む。
 
     Args:
         file_path: 対象ファイルパス。
-        limit: 読む最大文字数。
 
     Returns:
         現在の内容。
@@ -36,15 +40,15 @@ def read_current_text(file_path: str, limit: int) -> str:
         return ""
     try:
         with resolved.open(encoding="utf-8", errors="replace", newline="") as handle:
-            return handle.read(limit)
+            return handle.read(FULL_TEXT_MAX_BYTES + 1)
     except OSError:
         return ""
 
 
-def _apply_edit(text: str, old: object, new: str, *, replace_all: bool, max_chars: int) -> str | None:
+def _apply_edit(text: str, old: object, new: str, *, replace_all: bool) -> str | None:
     """Edit 1 件の置換を全文へ適用する。
 
-    置換の結果が ``max_chars`` を超える場合は、文字列を作る前に打ち切る。置換の連鎖で全文を
+    置換の結果が ``FULL_TEXT_MAX_BYTES`` を超える場合は、文字列を作る前に打ち切る。置換の連鎖で全文を
     膨らませて検査を時間切れ（＝ allow）へ追い込む入力を許さないため。
 
     Args:
@@ -52,7 +56,6 @@ def _apply_edit(text: str, old: object, new: str, *, replace_all: bool, max_char
         old: 置換対象。
         new: 置換後の文字列。
         replace_all: 全出現を置換するか（False は最初の 1 件）。
-        max_chars: 置換後の全文の最大文字数。
 
     Returns:
         置換後の全文。置換対象が空・文字列でない・全文に見つからない・結果が上限を超えるなら None。
@@ -60,12 +63,12 @@ def _apply_edit(text: str, old: object, new: str, *, replace_all: bool, max_char
     if not isinstance(old, str) or not old or old not in text:
         return None
     count = text.count(old) if replace_all else 1
-    if len(text) + count * (len(new) - len(old)) > max_chars:
+    if len(text) + count * (len(new) - len(old)) > FULL_TEXT_MAX_BYTES:
         return None
     return text.replace(old, new, count)
 
 
-def text_after_edit(tool_name: str, container: Any, before: str, max_chars: int) -> str | None:
+def text_after_edit(tool_name: str, container: Any, before: str) -> str | None:
     """書込み系入力を適用した後の全文を組み立てる。
 
     Write は content。Edit は置換を当てた全文、MultiEdit は編集を順に当てた全文（件数は
@@ -77,7 +80,6 @@ def text_after_edit(tool_name: str, container: Any, before: str, max_chars: int)
         tool_name: 正規化前の生ツール名。
         container: extract_tool_input 相当の 1 コンテナ値。
         before: 対象ファイルの現在の内容。
-        max_chars: 組み立てる全文の最大文字数。
 
     Returns:
         置換後の全文。組み立てられなければ None（呼び出し側は fail-closed とする）。
@@ -102,7 +104,6 @@ def text_after_edit(tool_name: str, container: Any, before: str, max_chars: int)
             edit.get("old_string"),
             edit["new_string"],
             replace_all=edit.get("replace_all") is True,
-            max_chars=max_chars,
         )
         if text is None:
             return None

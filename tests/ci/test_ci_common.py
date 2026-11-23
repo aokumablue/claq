@@ -10,14 +10,14 @@ from claq_dev import ci_common
 
 
 def test_read_json_parses_and_wraps_decode_errors(tmp_path: Path) -> None:
-    """正しい JSON は値を返し、壊れた JSON はラベル付きの ValueError にする。"""
+    """正しい JSON は値を返し、壊れた JSON はファイル名付きの ValueError にする。"""
     path = tmp_path / "data.json"
     path.write_text('{"ok": true}', encoding="utf-8")
-    assert ci_common.read_json(path, "data") == {"ok": True}
+    assert ci_common.read_json(path) == {"ok": True}
 
     path.write_text("{", encoding="utf-8")
-    with pytest.raises(ValueError, match="data の JSON 形式が不正です"):
-        ci_common.read_json(path, "data")
+    with pytest.raises(ValueError, match="data.json の JSON 形式が不正です"):
+        ci_common.read_json(path)
 
 
 def test_non_empty_predicates() -> None:

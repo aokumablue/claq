@@ -14,29 +14,27 @@ from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
 
 from claq.ci.harness_audit_utils import (
+    CATEGORIES,
+    CONTEXT_EFFICIENCY,
+    EVAL_COVERAGE,
+    MEMORY_PERSISTENCE,
+    QUALITY_GATES,
+    SECURITY_GUARDRAILS,
+    TOOL_COVERAGE,
     count_files,
     file_has_content,
-    find_plugin_install,
     has_file_with_extension,
+    has_plugin_install,
     has_python_tests,
     make_check,
-    safe_parse_json,
     safe_read,
 )
 from claq.lib.git_hosting import GITHUB, GITLAB, SERVICE_LABELS, detect_git_hosting_service
+from claq.lib.stdin_io import parse_json_object
 
 # origin からホスティングを判定できないときの表示名。
 _UNKNOWN_HOSTING_LABEL = "Git hosting（origin から判定できず）"
 
-CATEGORIES = [
-    "Tool Coverage",
-    "Context Efficiency",
-    "Quality Gates",
-    "Memory Persistence",
-    "Eval Coverage",
-    "Security Guardrails",
-    "Cost Efficiency",
-]
 
 VALID_SCOPES = {"repo", "hooks", "skills", "commands", "agents"}
 VALID_FORMATS = {"text", "json"}
@@ -168,13 +166,13 @@ def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> _Hosti
 
 def _consumer_tool_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """consumer モードの Tool Coverage カテゴリのチェックを返す。"""
-    category = "Tool Coverage"
+    category = TOOL_COVERAGE
     return [
         make_check(
             check_id="consumer-plugin-install", category=category, points=4, scopes=["repo"],
             path="~/.claude/plugins/",
             description="プラグインがインストールされている",
-            passed=bool(find_plugin_install(root_dir)),
+            passed=has_plugin_install(root_dir),
             fix="Install the claq plugin for this user or project before auditing project-specific harness quality.",
         ),
         make_check(
@@ -194,7 +192,7 @@ def _consumer_tool_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _consumer_context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """consumer モードの Context Efficiency カテゴリのチェックを返す。"""
-    category = "Context Efficiency"
+    category = CONTEXT_EFFICIENCY
     return [
         make_check(
             check_id="consumer-instructions", category=category, points=3, scopes=["repo"],
@@ -219,8 +217,8 @@ def _consumer_context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _declares_package_test_script(root_dir: str | Path) -> bool:
     """``package.json`` の ``scripts.test`` に文字列のテストコマンドが宣言されているかを返す。"""
-    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
-    if not isinstance(package_json, dict):
+    package_json = parse_json_object(safe_read(root_dir, "package.json"))
+    if package_json is None:
         return False
     scripts = package_json.get("scripts")
     return isinstance(scripts, dict) and isinstance(scripts.get("test"), str)
@@ -230,7 +228,7 @@ def _consumer_quality_checks(
     root_dir: str | Path, hosting_label: str, ci_path: str, ci_pass: bool
 ) -> list[dict[str, Any]]:
     """consumer モードの Quality Gates カテゴリのチェックを返す。"""
-    category = "Quality Gates"
+    category = QUALITY_GATES
     return [
         make_check(
             check_id="consumer-test-suite", category=category, points=4, scopes=["repo"],
@@ -259,14 +257,14 @@ def _consumer_memory_eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """consumer モードの Memory Persistence・Eval Coverage カテゴリのチェックを返す。"""
     return [
         make_check(
-            check_id="consumer-memory-notes", category="Memory Persistence", points=2, scopes=["repo"],
+            check_id="consumer-memory-notes", category=MEMORY_PERSISTENCE, points=2, scopes=["repo"],
             path=".claude/memory.md",
             description="プロジェクトメモリ・恒久的なノートがチェックインされている",
             passed=file_has_content(root_dir, ".claude/memory.md") or count_files(root_dir, "docs/adr", ".md") > 0,
             fix="Add durable project memory such as .claude/memory.md or ADRs under docs/adr/.",
         ),
         make_check(
-            check_id="consumer-eval-coverage", category="Eval Coverage", points=2, scopes=["repo"],
+            check_id="consumer-eval-coverage", category=EVAL_COVERAGE, points=2, scopes=["repo"],
             path="evals/",
             description="プロジェクトが評価テストまたは複数の自動テストを持つ",
             # 「複数の自動テスト」は Python のテストも数え、閾値は JS 側と揃えて 3 件。
@@ -285,7 +283,7 @@ def _consumer_security_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """consumer モードの Security Guardrails カテゴリのチェックを返す。"""
     return [
         make_check(
-            check_id="consumer-secret-hygiene", category="Security Guardrails", points=2, scopes=["repo"],
+            check_id="consumer-secret-hygiene", category=SECURITY_GUARDRAILS, points=2, scopes=["repo"],
             path=".gitignore",
             description="プロジェクトが一般的なシークレット環境ファイルを無視している",
             passed=".env" in safe_read(root_dir, ".gitignore"),
@@ -334,16 +332,15 @@ def summarize_category_scores(checks: list[dict[str, Any]]) -> dict[str, dict[st
     return scores
 
 
-def build_report(scope: str, root_dir: str | Path) -> dict[str, Any]:
+def build_report(scope: str, root_dir: Path) -> dict[str, Any]:
     """利用者のプロジェクトを consumer モードで採点したレポートを組み立てる。
 
     Args:
         scope: 監査スコープ。
-        root_dir: 監査対象のルート。
+        root_dir: 監査対象のルート（`run` が解決済みの Path を渡す）。
     """
-    resolved_root = Path(root_dir).resolve()
-    checks = get_consumer_checks(resolved_root, detect_git_hosting_service(resolved_root))
-    return assemble_report(scope, resolved_root, "consumer", checks)
+    checks = get_consumer_checks(root_dir, detect_git_hosting_service(root_dir))
+    return assemble_report(scope, root_dir, "consumer", checks)
 
 
 def assemble_report(

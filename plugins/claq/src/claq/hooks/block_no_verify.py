@@ -94,6 +94,7 @@ from claq.hooks.hook_common import (
     is_git_executable_token,
 )
 from claq.hooks.shell_tokens import (
+    ENV_ASSIGNMENT_RE,
     command_dialect_variants,
     command_exceeds_scan_budget,
     extract_shell_wrapper_call,
@@ -276,10 +277,6 @@ def _consume_option(
     return 0, False
 
 
-# ``NAME=value`` と追記代入 ``NAME+=value`` の両方を代入として読む。``+=`` は bash の追記で、
-# 未設定の変数へは単なる代入になるため、``HOME+=x`` も ``HOME`` の差し替えである。
-_ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\+?=(.*)$", re.DOTALL)
-
 # ``GIT_CONFIG_COUNT`` 方式で config key を与える ``GIT_CONFIG_KEY_<n>`` の変数名。
 _GIT_CONFIG_KEY_INDEX_RE = re.compile(r"^GIT_CONFIG_KEY_\d+$")
 
@@ -339,7 +336,7 @@ class _EnvAssignmentScan:
         Args:
             token: セグメント内のトークン。代入の形でなければ何もしない。
         """
-        match = _ENV_ASSIGNMENT_RE.match(token)
+        match = ENV_ASSIGNMENT_RE.match(token)
         if match is None:
             return
         name, value = match.groups()

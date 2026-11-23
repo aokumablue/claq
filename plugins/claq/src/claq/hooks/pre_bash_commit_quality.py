@@ -5,7 +5,8 @@ pre:bash で `git commit` を検出したときだけ、lint や簡易静的チ�
 
 commit 検出と複合コマンドの判定は `commit_risk`、メッセージ検証は `commit_message` が持ち、
 検出は `block_no_verify` と共有する区切り記号対応トークナイザ
-（`shell_tokens.tokenize` / `split_segments`）で行い、`git` のグローバルオプションは
+（`shell_tokens.tokenize` / `split_segments`）で行い（既知シェルの ``-c`` 文字列は
+`commit_risk.analysis_segments` が 1 段だけ展開する）、`git` のグローバルオプションは
 値の有無・既知/未知を問わず読み飛ばします。`git commit -a` / `--all` / 結合短形式
 （`-am`）では、未ステージ変更ファイルを**作業ツリーから**読んでスキャン対象へ
 加えます（`-a` は作業ツリーの内容をコミットするため）。ステージ済みファイルは
@@ -51,6 +52,7 @@ from claq.hooks.commit_quality_scanner import (
 from claq.hooks.commit_risk import (
     MULTIPLE_COMMITS_MESSAGE,
     RAW_GIT_COMMIT_RE,
+    analysis_segments,
     compound_commit_risk,
     find_git_commit_args_in_segment,
     is_commit_all_flag,
@@ -61,14 +63,13 @@ from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
     emit_block_output,
     resolve_repo_root,
+    scan_memo,
 )
 from claq.hooks.shell_tokens import (
     command_dialect_variants,
     command_exceeds_scan_budget,
     normalize_executable_name,
     scan_budget_message,
-    split_segments,
-    tokenize,
 )
 from claq.lib.core_utils import log
 from claq.lib.harness import iter_bash_command_groups
@@ -188,7 +189,7 @@ def _commit_target_risk(command: str) -> str | None:
     Returns:
         deny すべき場合は `_COMMIT_TARGET_UNVERIFIABLE_MESSAGE`、問題なければ None を返します。
     """
-    for segment in split_segments(tokenize(command)):
+    for segment in analysis_segments(command)[0]:
         commit_args = find_git_commit_args_in_segment(segment)
         if commit_args is None:
             if any(
@@ -377,20 +378,19 @@ def _count_file_issues(files_to_check: list[str], repo_root: Path | None = None,
     return counts
 
 
-def _log_commit_message_issues(command: str) -> int:
+def _log_commit_message_issues(commit_args: list[str]) -> int:
     """コミットメッセージの問題を検証してログへ出し、その件数を返します。
 
     Args:
-        command: `git commit` コマンド文字列です。
+        commit_args: `git commit` の引数トークン列です。
 
     Returns:
         メッセージの問題の件数を返します。すべて警告として数える件数です。
     """
-    message_validation = validate_commit_message(command)
-    if not (message_validation and message_validation["issues"]):
+    issues = validate_commit_message(commit_args)
+    if not issues:
         return 0
 
-    issues = message_validation["issues"]
     log("\nCommit Message Issues:")
     for issue in issues:
         log(f"  WARNING {issue['message']}")
@@ -448,7 +448,7 @@ def _collect_worktree_issues(worktree_targets: list[str], *, deadline: float) ->
     return _count_file_issues(worktree_targets, repo_root=repo_root, deadline=deadline)
 
 
-def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | None:
+def _evaluate_confirmed_commit(commit_args: list[str]) -> str | None:
     """`git commit` と判定済みの入力を検査し、ブロック理由を返します。
 
     commit であることは確定しているため、想定外の例外が起きても非ブロッキングへは
@@ -456,7 +456,6 @@ def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | No
     secret 検査を無言で迂回できてしまう。
 
     Args:
-        command: `git commit` を含む bash コマンド文字列です。
         commit_args: commit 呼び出しの引数トークン列です。
 
     Returns:
@@ -494,7 +493,7 @@ def _evaluate_confirmed_commit(command: str, commit_args: list[str]) -> str | No
             log("[Hook] ERROR: could not resolve repo root for `git commit -a` worktree scan.")
             return _REPO_ROOT_UNAVAILABLE_MESSAGE
         counts = index_counts + worktree_counts
-        counts["warning"] += _log_commit_message_issues(command)
+        counts["warning"] += _log_commit_message_issues(commit_args)
         return _finalize_result(counts)
 
     except Exception as err:
@@ -512,7 +511,7 @@ def _detect_group_commits(group: tuple[str, ...]) -> list[tuple[str, list[str]]]
     見え、そのまま数えると 1 回の commit が「複数 commit」になる。要素側の検出が 2 件以上
     （``["git commit -m a", "git commit -m b"]`` のようなコマンド文字列の配列）なら別々の
     commit なので要素をそのまま数える。結合候補が検出しない場合も要素をそのまま数える
-    （``["bash", "-lc", "git commit -m x"]`` の commit は要素側でしか見えない）。
+    （``["git commit -m a", "echo done"]`` の結合は各要素を 1 語に引用するため commit が見えない）。
 
     Args:
         group: ``iter_bash_command_groups`` が返すグループの各候補から、heredoc のデータ本文を
@@ -571,6 +570,22 @@ def evaluate(raw_input: str) -> str | None:
     Args:
         raw_input: フックに渡された生の入力文字列です。
 
+    1 回の評価の間は `scan_memo` で解析結果を使い回す。commit 検出・複合判定・対象 index の判定が
+    同じコマンドを `analysis_segments` で解析するため。
+
+    Returns:
+        ブロックする場合は理由、通す場合は None。
+    """
+    with scan_memo():
+        return _evaluate_in_scan(raw_input)
+
+
+def _evaluate_in_scan(raw_input: str) -> str | None:
+    """`evaluate` の本体。`scan_memo` の中で呼ぶ。
+
+    Args:
+        raw_input: フックに渡された生の入力文字列です。
+
     Returns:
         ブロックする場合は理由、通す場合は None。
     """
@@ -612,7 +627,7 @@ def evaluate(raw_input: str) -> str | None:
             log("[Hook] ERROR: the commit may record an index other than the one scanned.")
             return target_risk
 
-        return _evaluate_confirmed_commit(command, commit_args)
+        return _evaluate_confirmed_commit(commit_args)
 
     except Exception as err:
         # commit と確定する前の例外は非ブロッキング。確定後の例外は

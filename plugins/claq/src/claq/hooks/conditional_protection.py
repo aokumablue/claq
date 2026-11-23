@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, NoReturn
 
-from claq.hooks.edit_text import read_current_text, text_after_edit
+from claq.hooks.edit_text import FULL_TEXT_MAX_BYTES, read_current_text, text_after_edit
 from claq.hooks.git_config_text import GitConfigParseError, adds_sensitive_entries
 from claq.hooks.hook_common import memoized_in_scan, normalize_protected_name
 from claq.lib.harness import normalize_tool_name
@@ -74,10 +74,6 @@ _TOX_COMMAND_KEY_PATTERN = re.compile(
     r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")[ \t]*="
 )
 
-# git config・ホスト設定の置換前後の全文の上限。置換前はディスクから読むので stdin の上限が効かず、
-# 置換後は MultiEdit の replace_all を重ねると倍々に伸びる（`a`→`aa` を 20 回で 1 KiB が 1 GiB）。
-# 超えたら検査できないとして deny する（hook が host timeout で kill されると許可へ倒れるため）。
-_FULL_TEXT_MAX_BYTES = 256 * 1024
 
 
 def _editable_text(tool_name: str, container: Any) -> list[str] | None:
@@ -356,7 +352,7 @@ def _settings_unverifiable_message(file_name: str) -> str:
     return (
         f"BLOCKED: The change to {file_name} could not be verified: the result must be a plain JSON object "
         "(no comments, trailing commas, NaN/Infinity, or excessive nesting) within "
-        f"{_FULL_TEXT_MAX_BYTES} bytes, built from a Write or an exact Edit/MultiEdit. "
+        f"{FULL_TEXT_MAX_BYTES} bytes, built from a Write or an exact Edit/MultiEdit. "
         "Ask the user to make this change instead of working around the check."
     )
 
@@ -377,11 +373,11 @@ def _settings_block_reason(tool_name: str, container: Any, file_path: str, file_
     Returns:
         ブロック理由。問題なければ None。
     """
-    before = read_current_text(file_path, _FULL_TEXT_MAX_BYTES + 1)
-    if len(before) > _FULL_TEXT_MAX_BYTES:
+    before = read_current_text(file_path)
+    if len(before) > FULL_TEXT_MAX_BYTES:
         return _settings_unverifiable_message(file_name)
-    after = text_after_edit(tool_name, container, before, _FULL_TEXT_MAX_BYTES)
-    if after is None or len(after) > _FULL_TEXT_MAX_BYTES:
+    after = text_after_edit(tool_name, container, before)
+    if after is None or len(after) > FULL_TEXT_MAX_BYTES:
         return _settings_unverifiable_message(file_name)
     # 深い入れ子は解析・直列化で RecursionError になる。貫通すると exit 1（PreToolUse では allow）。
     try:
@@ -488,7 +484,7 @@ def _git_config_unparsable_message(display_name: str) -> str:
     """
     return (
         f"BLOCKED: The change to {display_name} could not be verified: the resulting file does not "
-        f"parse as git config text, or the file or the result exceeds {_FULL_TEXT_MAX_BYTES} bytes. "
+        f"parse as git config text, or the file or the result exceeds {FULL_TEXT_MAX_BYTES} bytes. "
         "Refusing an unverifiable write rather than risking a git-hook bypass."
     )
 
@@ -510,13 +506,13 @@ def git_config_block_reason(tool_name: str, container: Any, file_path: str, disp
     Returns:
         ブロック理由。問題なければ None。
     """
-    before = read_current_text(file_path, _FULL_TEXT_MAX_BYTES + 1)
-    if len(before) > _FULL_TEXT_MAX_BYTES:
+    before = read_current_text(file_path)
+    if len(before) > FULL_TEXT_MAX_BYTES:
         return _git_config_unparsable_message(display_name)
-    after = text_after_edit(tool_name, container, before, _FULL_TEXT_MAX_BYTES)
+    after = text_after_edit(tool_name, container, before)
     if after is None:
         return _unverifiable_conditional_message(display_name)
-    if len(after) > _FULL_TEXT_MAX_BYTES:
+    if len(after) > FULL_TEXT_MAX_BYTES:
         return _git_config_unparsable_message(display_name)
     try:
         if adds_sensitive_entries(before, after):

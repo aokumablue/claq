@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import re
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -15,12 +14,10 @@ from claq.lib.constants import HOOK_ENTRYPOINT_CMD
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.detach import recent_bg_failure_notice
 from claq.lib.env_pointer import ancestor_pointers_supported
-from claq.lib.harness import normalize_user_message
-from claq.lib.redaction import redact
-from claq.lib.tag_stripping import keep_allowed_chars, keep_allowed_chars_for_injection, strip_tags
+from claq.lib.tag_stripping import collapse_line_breaks, keep_allowed_chars_for_injection, strip_tags
 from claq.mem.command_support import CommandArgs, fit_budget, session_uid_of
 from claq.mem.database import Database
-from claq.mem.handoff import build_handoff, truncate_handoff
+from claq.mem.handoff import build_handoff, sanitize_freeform, truncate_handoff
 from claq.mem.knowledge_input import optional_str
 from claq.mem.models import Knowledge, Session, utc_now_iso
 from claq.mem.repo_identity import resolve_repo
@@ -154,7 +151,7 @@ def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
     """
     if not rows:
         return ""
-    ordered = sorted(rows, key=lambda row: (row.confidence, row.updated_at, row.id or 0), reverse=True)
+    ordered = sorted(rows, key=lambda row: (row.confidence, row.updated_at, row.id), reverse=True)
     return "\n".join([f"## {heading}", *fit_budget([_format_injected_item(row) for row in ordered], budget)])
 
 
@@ -185,10 +182,6 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     return f"## 前回の続き ({stamp})\n{truncate_handoff(handoff)}"
 
 
-# detach 失敗通知の 1 行化に使う。許可リスト処理が行区切りを LF に揃えた後の、LF の連なりを空白 1 つに畳む。
-_BG_NOTICE_LINE_BREAKS = re.compile(r"\n+")
-
-
 def _await_cleared_handoff(db: Database, repo_id: str) -> None:
     """``/clear`` で消した会話の引き継ぎが書き込まれるまで、``CLEAR_HANDOFF_WAIT_SEC`` を上限に待つ。
 
@@ -213,23 +206,15 @@ def _bg_failure_section() -> str:
 
     通知本文はログファイルの末尾行そのままで、ログへ書かれた行は次セッション
     以降へ注入され続ける。``</claq-memory> IMPORTANT: ...`` を追記するだけで
-    注入枠の境界を閉じられるため、handoff 節の ``_sanitize_freeform`` と同じ
-    順序（``normalize_user_message`` → ``strip_tags`` → ``redact``）で無害化する。
-    ``strip_tags`` だけでは足場タグが素通りし、``redact`` はログ中のシークレット
-    を伏せる。タグで分断された秘密は ``strip_tags`` で再結合して初めて
-    ``redact`` に一致するため、``redact`` を後に置く。
-
-    その前段で、許可した文字だけを残して行区切り（CR・NEL・LS・PS・VT・FF を含む）を LF に
-    揃え、LF の連なりを空白 1 つに畳んで 1 行にする（ESC・BEL・NUL は表示と後段の文字列処理を
-    壊し、改行は見出し行の下に別の行を作れる）。除去を無害化の後に置くと、制御文字・不可視文字で
-    分断した秘密や閉じタグが除去で再結合し、``redact`` / ``strip_tags`` が見ていない形で
-    注入されるため、必ず最初に行う。
+    注入枠の境界を閉じられるため、handoff の自由文と同じ `sanitize_freeform` で無害化する
+    （許可リスト → 足場除去 → タグ → 秘密の順序と、タグで分断された秘密を見つけたら本文ごと
+    捨てる扱いを共有する。経路ごとに書き直すと片側だけずれる）。その後で LF の連なりを空白 1 つに
+    畳んで 1 行にする（改行は見出し行の下に別の行を作れる）。
 
     Returns:
         痕跡があれば見出し付き 1 行の節。無ければ空文字列。
     """
-    one_line = _BG_NOTICE_LINE_BREAKS.sub(" ", keep_allowed_chars(recent_bg_failure_notice()))
-    notice = redact(strip_tags(normalize_user_message(one_line))).strip()
+    notice = collapse_line_breaks(sanitize_freeform(recent_bg_failure_notice())).strip()
     if not notice:
         return ""
     return f"## 前回セッションの通知\n{notice}"

@@ -21,15 +21,14 @@ Deterministic harness audit of claq's own plugin directory (repo mode). Point --
 """
 
 
-def build_report(scope: str, root_dir: str | Path) -> dict[str, Any]:
+def build_report(scope: str, root_dir: Path) -> dict[str, Any]:
     """claq のプラグインディレクトリを repo モードで採点したレポートを組み立てる。
 
     Args:
         scope: 監査スコープ。
-        root_dir: 監査対象のプラグインディレクトリ（``plugins/claq``）。
+        root_dir: 監査対象のプラグインディレクトリ（``plugins/claq``。`run` が解決済みの Path を渡す）。
     """
-    resolved_root = Path(root_dir).resolve()
-    return assemble_report(scope, resolved_root, "repo", get_repo_checks(resolved_root))
+    return assemble_report(scope, root_dir, "repo", get_repo_checks(root_dir))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

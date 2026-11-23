@@ -76,20 +76,24 @@ from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     DIRECTORY_CHANGE_COMMANDS,
     INPLACE_EDIT_EXECUTABLES,
+    WINDOWS_WRITE_COMMAND_ALIASES,
     basename,
     effective_basename,
     emit_block_output,
     fold_path_parts,
     is_inplace_edit_flag,
+    is_path_prefix,
     match_path_segments,
     memoized_in_scan,
     normalize_protected_name,
     resolve_effective_target,
     resolve_repo_root,
     scan_memo,
+    write_command_name,
 )
 from claq.hooks.host_guard_targets import HOST_SETTINGS_DISPLAY_NAMES, find_host_guard_match
 from claq.hooks.shell_tokens import (
+    ENV_ASSIGNMENT_RE,
     WRITE_REDIRECT_OPERATORS,
     command_dialect_variants,
     command_exceeds_scan_budget,
@@ -115,46 +119,24 @@ from claq.lib.stdin_io import (
 # matcher（hooks.json）の綴りがズレても、本体側で対象外ツールを早期 return する多重防御。
 _BASH_TOOL_NAMES = frozenset({"bash"})
 
-# 末尾引数が書き込み先になるコマンド。Windows のシェルツールは PowerShell なので、
-# 別名だけでは拾えない長形式 cmdlet を併記する。
-_LAST_ARG_WRITE_COMMANDS = frozenset(
-    {"cp", "mv", "install", "copy-item", "move-item", "copy", "move", "cpi", "mi"}
-)
+# 以下の書込みコマンド名は POSIX 名だけを持つ。PowerShell / cmd の名前は `write_command_name` が
+# `WINDOWS_WRITE_COMMAND_ALIASES` で POSIX 名へ写してから照合する。
+
+# 末尾引数が書き込み先になるコマンド。
+_LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install"})
 
 # ファイルを消す／空にするコマンド群。リンタ設定を消せばルールごと無効化できるため、
 # 上書きと同じ強さの弱体化として扱う。`mv` は移動元も対象にする（実質削除）。`cp` の
 # 複製元は元ファイルが残るため対象にしない。
-_REMOVE_COMMANDS = frozenset(
-    {
-        "rm",
-        "unlink",
-        "shred",
-        "truncate",
-        "mv",
-        # PowerShell / cmd の長形式と別名（`del` / `erase` / `rd` は cmd 組み込み、
-        # `ri` / `mi` / `clc` は PowerShell の既定エイリアス）。
-        "remove-item",
-        "move-item",
-        "clear-content",
-        "del",
-        "erase",
-        "rd",
-        "ri",
-        "mi",
-        "clc",
-    }
-)
+_REMOVE_COMMANDS = frozenset({"rm", "unlink", "shred", "truncate", "mv"})
 
 # 中身を変えずに検査を無効化できるコマンド群（`chmod -x .git/hooks/pre-commit` /
 # `chmod 000 .eslintrc.json`）。モード文字列とパスを区別せず、保護対象に一致した
 # トークンがあれば deny する（誤検出 > 誤通過）。
 _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
 
-# 非オプション引数がすべて書き込み先になるコマンド。`tee` と、同じ形をとる
-# PowerShell の書き込み系 cmdlet。
-_TEE_COMMANDS = frozenset(
-    {"tee", "set-content", "add-content", "out-file", "new-item", "sc", "ac", "ni"}
-)
+# 非オプション引数がすべて書き込み先になるコマンド。
+_TEE_COMMANDS = frozenset({"tee"})
 # `-f` の有無で区別しない。保護対象がまだ無い状態での `ln -s weak.toml ruff.toml` も、
 # その名前を読む処理をリンク先の内容へ差し替える実質的な書き込みである。
 _LN_COMMANDS = frozenset({"ln"})
@@ -163,7 +145,7 @@ _DD_COMMANDS = frozenset({"dd"})
 # 保護対象の名前を空で新規作成するだけで検査を無効化できる（多くの linter は設定
 # ファイルを見つけた時点で上位ディレクトリの探索を打ち切る）。値を取るオプション
 # （``touch -r ruff.toml app.py``）の値も候補に混じるが、BSD / GNU / busybox で割れる
-# arity 表を持つより誤検出側を選ぶ。``New-Item`` は `_TEE_COMMANDS` 側にある。
+# arity 表を持つより誤検出側を選ぶ。``New-Item`` は `tee` へ写す（`WINDOWS_WRITE_COMMAND_ALIASES`）。
 _TOUCH_COMMANDS = frozenset({"touch"})
 
 # ディレクトリ移動の判定で、コマンド名より前に来うるシェルの予約語・グループ化と `builtin`。
@@ -228,14 +210,16 @@ def _find_home_log_directory_match(token: str) -> str | None:
 # 指標としての情報量が消えるため入れない。
 _RAW_TEXT_RISK_INDICATORS = (
     (">", "tee", "-i")
-    + tuple(sorted(_REMOVE_COMMANDS))
+    + tuple(
+        sorted(
+            _REMOVE_COMMANDS
+            | {alias for alias, name in WINDOWS_WRITE_COMMAND_ALIASES.items() if name in _REMOVE_COMMANDS}
+        )
+    )
     + tuple(sorted(_MODE_COMMANDS))
     + tuple(sorted(_TOUCH_COMMANDS))
     + ("ln",)
 )
-
-# `NAME=value` 形式の literal 環境変数代入。
-_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 # `_command_index` が読み飛ばす実行 wrapper。``tee pyproject.toml``（deny）と
 # ``echo tee pyproject.toml``（allow）を分けるには実行位置の特定が要り、名前集合が
@@ -291,7 +275,7 @@ def _command_index(segment: list[str]) -> int | None:
     seen_wrapper = False
     while index < len(segment):
         token = segment[index]
-        if _ENV_ASSIGNMENT_RE.match(token):
+        if ENV_ASSIGNMENT_RE.match(token):
             index += 1
             continue
         if normalize_executable_name(token) in _COMMAND_POSITION_WRAPPERS:
@@ -442,7 +426,7 @@ def _write_target_tokens_in_segment(segment: list[str]) -> list[str]:
     index = _command_index(segment)
     if index is None:
         return targets
-    name = normalize_executable_name(segment[index])
+    name = write_command_name(segment[index])
     args = segment[index + 1 :]
     for names, pick in _EXECUTED_COMMAND_TARGET_RULES:
         if name in names:
@@ -481,10 +465,10 @@ def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
         root_parts = fold_path_parts(repo_root.resolve().parts)
     except (OSError, RuntimeError):
         return False
-    return fold_path_parts(resolved.parts)[: len(root_parts)] == root_parts
+    return is_path_prefix(root_parts, fold_path_parts(resolved.parts))
 
 
-def find_protected_write(command: str, *, _recursed: bool = False) -> str | None:
+def find_protected_write(command: str, *, _outer_scope_certain: bool | None = None) -> str | None:
     """コマンド文字列内に保護対象への書き込みがあればその表示名を返す。
 
     保護対象ヒットがあった場合のみリポジトリルートを解決し、書き込み先がその配下に
@@ -497,11 +481,13 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
     （``cd plugins && printf x > ../ruff.toml`` を通さない。docs/adr/shell-analysis-boundary.md）。
 
     既知シェルの ``-c`` へ渡された文字列コマンドへは 1 段だけ再帰する（`block_no_verify`
-    と同じ。2 段以上のネストは非目標）。
+    と同じ。2 段以上のネストは非目標）。内側は外側の ``cd`` の後で実行されるため、外側が
+    cwd を動かしていれば内側の判定でも cwd 基準の解決を信用しない。
 
     Args:
         command: 検査対象のシェルコマンド文字列。
-        _recursed: 内部再帰用フラグ。True の場合、これ以上ラッパーへ再帰しない。
+        _outer_scope_certain: 内部再帰用。外側のコマンドが cwd 基準の解決を信用できるかを渡す。
+            None は最上位の呼び出しで、内側へ 1 段だけ再帰する。値があれば再帰済みで、これ以上再帰しない。
 
     Returns:
         `_protected_target` / `find_host_guard_match` の表示名（`_blocked_message` が文言を選ぶ鍵）、
@@ -511,7 +497,7 @@ def find_protected_write(command: str, *, _recursed: bool = False) -> str | None
     # しないと、同じ入力でも hook によって解析対象が変わる）。
     stripped = strip_data_heredoc_bodies(command)
     for variant in command_dialect_variants(stripped):
-        found = _find_protected_write_in_dialect(variant, _recursed=_recursed)
+        found = _find_protected_write_in_dialect(variant, _outer_scope_certain=_outer_scope_certain)
         if found is not None:
             return found
     return None
@@ -566,30 +552,32 @@ def _protected_write_hit(token: str, *, scope_certain: bool) -> str | None:
     return found if _within_repo_root(resolved, repo_root) else None
 
 
-def _find_protected_write_in_dialect(command: str, *, _recursed: bool) -> str | None:
+def _find_protected_write_in_dialect(command: str, *, _outer_scope_certain: bool | None) -> str | None:
     """1 つのシェル方言の読み方で保護対象書き込みを探す。
 
     Args:
         command: `command_dialect_variants` が返した 1 通りの読み方
             （heredoc のデータ本文は呼び出し元で除去済み）。
-        _recursed: ラッパー再帰済みかどうか。
+        _outer_scope_certain: 外側のコマンドが cwd 基準の解決を信用できるか（`find_protected_write` 参照）。
 
     Returns:
         保護対象の表示名。該当しなければ None。
     """
     segments = split_segments(tokenize(command))
-    scope_certain = not any(_changes_working_directory(segment) for segment in segments)
+    scope_certain = _outer_scope_certain is not False and not any(
+        _changes_working_directory(segment) for segment in segments
+    )
     for segment in segments:
         for token in _write_target_tokens_in_segment(segment):
             found = _protected_write_hit(token, scope_certain=scope_certain)
             if found is not None:
                 return found
-        if _recursed:
+        if _outer_scope_certain is not None:
             continue
         wrapper = extract_shell_wrapper_call(segment)
         if wrapper is None:
             continue
-        found = find_protected_write(wrapper.command, _recursed=True)
+        found = find_protected_write(wrapper.command, _outer_scope_certain=scope_certain)
         if found is not None:
             return found
     return None

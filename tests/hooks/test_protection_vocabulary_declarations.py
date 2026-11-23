@@ -26,6 +26,7 @@ from claq.hooks import (
     commit_quality_scanner,
     commit_risk,
     heredoc,
+    hook_common,
     shell_tokens,
 )
 
@@ -525,6 +526,35 @@ def test_short_options_with_value_take_the_rest_of_the_cluster(flag: str) -> Non
     """値を取る短形式の後ろの文字をフラグと読まないこと（層1・単体）。値を取らない `-q` に替えると `a` は `-a` になる。"""
     assert not commit_risk.is_commit_all_flag([f"-{flag}all"])
     assert commit_risk.is_commit_all_flag(["-qall"])
+
+
+# `hook_common.WINDOWS_WRITE_COMMAND_ALIASES` の期待内容（dict は語彙の自動棚卸しに載らないため個別に固定する）。
+_EXPECTED_WINDOWS_WRITE_COMMAND_ALIASES = {
+    **dict.fromkeys(("copy-item", "copy", "cpi"), "cp"),
+    **dict.fromkeys(("move-item", "move", "mi", "rename-item", "rename", "ren", "rni"), "mv"),
+    **dict.fromkeys(("remove-item", "del", "erase", "rd", "rmdir", "ri"), "rm"),
+    **dict.fromkeys(("clear-content", "clc"), "truncate"),
+    **dict.fromkeys(("set-content", "add-content", "out-file", "sc", "ac", "new-item", "ni"), "tee"),
+}
+
+
+def test_windows_write_command_aliases_are_exactly_as_declared() -> None:
+    """PowerShell / cmd の書込みコマンドの別名表が完全一致で固定されていること（層2）。"""
+    assert hook_common.WINDOWS_WRITE_COMMAND_ALIASES == _EXPECTED_WINDOWS_WRITE_COMMAND_ALIASES
+
+
+@pytest.mark.parametrize("alias", sorted(_EXPECTED_WINDOWS_WRITE_COMMAND_ALIASES))
+def test_every_windows_write_alias_is_a_write_in_both_hooks(alias: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """別名の全要素が、保護 config への書込み（bash_config_protection）と commit 前の変更（commit_risk）の両方で効くこと（層1）。
+
+    片方のフックだけが PowerShell 名を知っていると、そのフックだけを素通りする。commit_risk の対照は同じ形の
+    ``echo`` で、書込みでなければ commit を止めない。
+    """
+    assert _run("bash_config_protection", _bash(f"{alias} app.py ruff.toml"), monkeypatch) == 2
+    assert _run("bash_config_protection", _bash(f"{alias} app.py other.py"), monkeypatch) == 0
+    mutation = commit_risk.compound_commit_risk(f"{alias.title()} a.py b.py; git commit -am x")
+    assert mutation == commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE
+    assert commit_risk.compound_commit_risk("echo a.py b.py; git commit -am x") is None
 
 
 def test_every_vocabulary_has_a_declared_layer1_status() -> None:

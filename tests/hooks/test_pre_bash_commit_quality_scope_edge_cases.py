@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
+from claq.hooks import commit_quality_scanner, commit_risk, pre_bash_commit_quality
 
 from ._support import _SECRET_LINE, _evaluate_in_repo, _git, _init_git_repo, _spy_commit_message_validation
 
@@ -74,7 +74,7 @@ def test_evaluate_shares_one_secret_scan_budget(
     files = staged + (unstaged or [])
     assert result is not None
     assert [path for path in files if any(path in m and "SecretScanBudgetExceeded" in m for m in logs)] == files
-    assert validated == [command]
+    assert validated == [commit_risk.parse_git_commit_command(command)[1]]
 
 
 def test_evaluate_commit_amend_with_nothing_staged_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,7 +128,7 @@ def test_evaluate_scans_the_files_the_commit_includes(
 
     assert pre_bash_commit_quality.evaluate("payload") is None
     assert seen == expected_seen
-    assert validated == [command]
+    assert validated == [commit_risk.parse_git_commit_command(command)[1]]
 
 
 @pytest.mark.parametrize(

@@ -165,6 +165,19 @@ def fold_path_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(normalize_protected_name(part) for part in parts)
 
 
+def is_path_prefix(prefix: tuple[str, ...], parts: tuple[str, ...]) -> bool:
+    """畳んだパス要素列 ``parts`` が ``prefix`` で始まる（``prefix`` 自身か、その配下を指す）かを返す。
+
+    Args:
+        prefix: `fold_path_parts` で畳んだ親側の要素列。
+        parts: `fold_path_parts` で畳んだ判定対象の要素列。
+
+    Returns:
+        ``parts`` の先頭が ``prefix`` と一致すれば True。
+    """
+    return parts[: len(prefix)] == prefix
+
+
 def match_folded_path_window(
     parts: tuple[str, ...], candidates: tuple[tuple[str, ...], ...]
 ) -> tuple[str, ...] | None:
@@ -220,10 +233,62 @@ ALWAYS_MUTATING_EDIT_EXECUTABLES = frozenset({"ed", "red", "ex", "sponge"})
 # `bash_config_protection` と `pre_bash_commit_quality` が共有する。
 INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl", "ruby"})
 
+# PowerShell / cmd のファイル書込み・削除コマンドを、書き込み先の取り方が同じ POSIX 名へ写す表。
+# Windows の Bash ツールは PowerShell で動くため、別名（``ri`` / ``mi`` / ``clc`` は PowerShell の既定
+# エイリアス、``del`` / ``erase`` / ``rd`` / ``copy`` / ``move`` / ``rename`` は cmd 組み込み）と長形式 cmdlet を併記する。
+# `bash_config_protection` と `commit_risk` が `write_command_name` を通して共有する。片方だけが
+# PowerShell 名を知っていると、``Copy-Item evil.py app.py; git commit -am x`` が片方のフックだけを素通りする。
+WINDOWS_WRITE_COMMAND_ALIASES = {
+    "copy-item": "cp",
+    "copy": "cp",
+    "cpi": "cp",
+    "move-item": "mv",
+    "move": "mv",
+    "mi": "mv",
+    # 改名は元の名前を消して新しい名前で作る（保護対象を別名へ逃がすのは削除と同じ）。
+    "rename-item": "mv",
+    "rename": "mv",
+    "ren": "mv",
+    "rni": "mv",
+    "remove-item": "rm",
+    "del": "rm",
+    "erase": "rm",
+    "rd": "rm",
+    "rmdir": "rm",
+    "ri": "rm",
+    "clear-content": "truncate",
+    "clc": "truncate",
+    "set-content": "tee",
+    "add-content": "tee",
+    "out-file": "tee",
+    "sc": "tee",
+    "ac": "tee",
+    # 非オプション引数をすべて作成先として読む点で `tee` と同じ取り方になる。
+    "new-item": "tee",
+    "ni": "tee",
+}
+
+
+def write_command_name(token: str) -> str:
+    """実行トークンを、書込みコマンドの照合に使う名前（`normalize_executable_name` + Windows 別名の POSIX 化）へ畳む。
+
+    Args:
+        token: 実行位置の 1 トークン。
+
+    Returns:
+        PowerShell / cmd の書込みコマンドなら対応する POSIX 名、それ以外は正規化した名前。
+    """
+    name = normalize_executable_name(token)
+    return WINDOWS_WRITE_COMMAND_ALIASES.get(name, name)
+
+
 # カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
-# 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
+# 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。PowerShell の
+# ``Set-Location`` / ``Push-Location`` / ``Pop-Location`` と別名 ``sl`` も同じ移動になる。
 # `bash_config_protection` と `pre_bash_commit_quality` が共有する。
-DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
+DIRECTORY_CHANGE_COMMANDS = frozenset(
+    {"cd", "pushd", "popd", "chdir", "set-location", "sl", "push-location", "pop-location"}
+)
 
 # sed の GNU 長形式 in-place フラグの名前（長形式の短縮は意図して組み立てる回避形なので見ない）。
 _LONG_INPLACE_OPTION_NAME = "in-place"

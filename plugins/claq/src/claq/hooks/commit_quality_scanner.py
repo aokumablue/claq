@@ -391,10 +391,6 @@ def should_scan_secrets(file_path: str) -> bool:
     return not name.endswith(_MINIFIED_SUFFIXES)
 
 
-# 出力を 1 行に保つために畳む対象。許可リスト処理の後は行区切りが LF に揃っている。
-_LINE_BREAKS = re.compile(r"\n+")
-
-
 def _neutralize_one_line(text: str) -> str:
     """不信テキストを deny 出力の 1 項目（1 行）へ無害化する。
 
@@ -412,9 +408,9 @@ def _neutralize_one_line(text: str) -> str:
     Returns:
         改行を含まない無害化済みの文字列。
     """
-    from claq.lib.tag_stripping import keep_allowed_chars, strip_tags
+    from claq.lib.tag_stripping import collapse_line_breaks, keep_allowed_chars, strip_tags
 
-    return _LINE_BREAKS.sub(" ", strip_tags(keep_allowed_chars(text)))
+    return collapse_line_breaks(strip_tags(keep_allowed_chars(text)))
 
 
 def _sanitize_untrusted_excerpt(text: str) -> str:
@@ -523,7 +519,7 @@ def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) ->
     return issues
 
 
-def _scan_secret_issues(lines: list[str], *, deadline: float, report_lines: bool = True) -> list[dict]:
+def _scan_secret_issues(lines: list[str], *, deadline: float, report_lines: bool) -> list[dict]:
     """ファイル内容からハードコードされたシークレットを検出します。
 
     `# nosec`・ファイルサイズに関わらず全体を走査します。呼び出し元から渡された

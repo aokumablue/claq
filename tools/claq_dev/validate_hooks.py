@@ -178,7 +178,7 @@ def validate_hooks(hooks_file: str | Path) -> int:
         # 他の validator の「skills ディレクトリが…」と違い、ファイル名の後に空白を置いた文面になる。
         return report_missing("hooks.json ", hooks_path)
     try:
-        document = read_json(hooks_path, "hooks.json")
+        document = read_json(hooks_path)
     except ValueError as error:
         emit_error(str(error))
         return 1

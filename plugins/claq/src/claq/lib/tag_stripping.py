@@ -410,6 +410,24 @@ def _hides_secret_behind_tags(text: str) -> bool:
     return _erase_known_tags(redact(text)) != redact(erased)
 
 
+_LINE_BREAKS_RE = re.compile(r"\n+")
+
+
+def collapse_line_breaks(text: str) -> str:
+    """LF の連なりを空白 1 つに畳み、1 行にする。
+
+    `keep_allowed_chars` が行区切り（CR・NEL・LS・PS・VT・FF）を LF に揃えた後に掛ける。改行を残すと、
+    注入枠や deny 出力の 1 項目の下に別の行（偽の見出し・``[Hook] PASS``）を作れる。
+
+    Args:
+        text: 行区切りを LF に揃えた文字列。
+
+    Returns:
+        LF を含まない文字列。
+    """
+    return _LINE_BREAKS_RE.sub(" ", text)
+
+
 def keep_allowed_chars(text: str) -> str:
     """許可した文字だけを残し、行区切りを LF に揃える。
 

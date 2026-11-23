@@ -52,6 +52,11 @@ _FEAT = ["-m", "feat: x"]
         pytest.param("git commit -m x && echo hi", (True, _MX), id="args-stop-at-and"),
         pytest.param("git commit -m x ; true", (True, _MX), id="args-stop-at-semicolon"),
         pytest.param("&& echo hi", (False, []), id="leading-separator-without-git"),
+        # 既知シェルの `-c` 文字列は 1 段だけ内側を読む（文字列形の commit を品質スキャンから外さない）。
+        pytest.param("bash -lc 'git commit -m x'", (True, _MX), id="string-shell-wrapper"),
+        pytest.param("env FOO=1 sh -c 'echo hi && git commit -m x'", (True, _MX), id="string-shell-wrapper-with-prefix"),
+        # 2 段以上の `sh -c` は非目標（docs/adr/shell-analysis-boundary.md）。
+        pytest.param("bash -c \"sh -c 'git commit -m x'\"", (False, []), id="nested-shell-wrapper-is-not-read"),
     ],
 )
 def test_parse_git_commit_command(command: str, expected: tuple[bool, list[str]]) -> None:
@@ -91,6 +96,25 @@ def test_is_commit_all_flag(commit_args: list[str], expected: bool) -> None:
 def test_compound_commit_risk_sees_glued_operator_runs(command: str) -> None:
     """`shlex` が記号の連なりを 1 語にしても、commit 前の変更を見落とさない。"""
     assert commit_risk.compound_commit_risk(command) == commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        pytest.param(
+            "bash -lc 'git add . && git commit -m x'", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE, id="mutation-inside"
+        ),
+        pytest.param("bash -c 'git commit -m a; git commit -m b'", commit_risk.MULTIPLE_COMMITS_MESSAGE, id="two-inside"),
+        pytest.param("cp evil.py app.py; bash -c 'git commit -am x'", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE, id="mutation-outside"),
+        # 外側のリダイレクトはシェルが内側を実行する前に書き込み先を開く。
+        pytest.param("bash -c 'git commit -am x' > app.py", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE, id="outer-redirect"),
+        pytest.param("git commit -m a && bash -c 'git commit -m b'", commit_risk.MULTIPLE_COMMITS_MESSAGE, id="one-each-side"),
+        pytest.param("bash -lc 'git commit -m x'", None, id="single-commit-inside"),
+    ],
+)
+def test_compound_commit_risk_reads_one_shell_wrapper_level(command: str, expected: str | None) -> None:
+    """既知シェルの `-c` 文字列の内側も、外側と同じセグメント列として複数 commit・commit 前の変更を判定すること。"""
+    assert commit_risk.compound_commit_risk(command) == expected
 
 
 @pytest.mark.parametrize(

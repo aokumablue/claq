@@ -22,6 +22,7 @@ from claq.hooks.hook_common import (
     effective_basename,
     emit_block_output,
     fold_path_parts,
+    is_path_prefix,
     match_path_segments,
     memoized_in_scan,
     normalize_protected_name,
@@ -163,10 +164,13 @@ CONDITIONALLY_PROTECTED_FILES_FOLDED = frozenset(
 
 # 実行中の plugin root から見て守るディレクトリ。`runtime/` は hooks.json が起動する
 # `claq-hook`、`src/claq/` はフック本体で、書き換えると次のツール呼び出しから全保護フックが外れる。
-_RUNNING_PLUGIN_GUARDED_DIRS = (("runtime",), ("src", "claq"))
+_RUNNING_PLUGIN_RUNTIME_DIR_NAME = "runtime"
+_RUNNING_PLUGIN_GUARDED_DIRS = ((_RUNNING_PLUGIN_RUNTIME_DIR_NAME,), ("src", "claq"))
 
 # 上の表示名。`blocked_message_for_file` がブロック文言を選ぶ鍵（Edit/Write と Bash で共有）。
 RUNNING_PLUGIN_DISPLAY_NAMES = frozenset("/".join(segments) + "/" for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
+# `cd` を含むコマンドで起動ファイルの basename に当たったときの表示名（`host_guard_targets` が返す）。
+RUNNING_PLUGIN_RUNTIME_DISPLAY = f"{_RUNNING_PLUGIN_RUNTIME_DIR_NAME}/"
 
 
 def protected_path_segment(file_path: str) -> str | None:
@@ -295,7 +299,7 @@ def running_plugin_root_is_guarded() -> bool:
         return True
     plugin_root = _running_plugin_root()
     repo_parts = fold_path_parts(repo_root.resolve().parts)
-    if fold_path_parts(plugin_root.parts)[: len(repo_parts)] != repo_parts:
+    if not is_path_prefix(repo_parts, fold_path_parts(plugin_root.parts)):
         return True
     # ホームや ~/.claude を git で管理していると、キャッシュの plugin root も toplevel の内側に入る。
     # 内側にあるだけでなく、そのリポジトリがランタイムを追跡しているときだけ開発用 checkout とみなす。
@@ -338,7 +342,7 @@ def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> st
     target = fold_path_parts(resolved.parts)
     for segments in _RUNNING_PLUGIN_GUARDED_DIRS:
         guarded = fold_path_parts(_running_plugin_root().joinpath(*segments).parts)
-        if target[: len(guarded)] == guarded or (include_ancestors and guarded[: len(target)] == target):
+        if is_path_prefix(guarded, target) or (include_ancestors and is_path_prefix(target, guarded)):
             return "/".join(segments) + "/" if running_plugin_root_is_guarded() else None
     return None
 

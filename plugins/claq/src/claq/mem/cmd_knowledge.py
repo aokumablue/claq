@@ -186,10 +186,10 @@ def _collect_list_rows(
         rows = [row for row in rows if row.kind == kind]
 
     if rank is None:
-        rows.sort(key=lambda row: (row.updated_at, row.id or 0), reverse=True)
+        rows.sort(key=lambda row: (row.updated_at, row.id), reverse=True)
         return rows[:limit]
     hits = [(score, row) for row in rows if (score := rank(row)) > 0.0]
-    hits.sort(key=lambda hit: (hit[0], hit[1].updated_at, hit[1].id or 0), reverse=True)
+    hits.sort(key=lambda hit: (hit[0], hit[1].updated_at, hit[1].id), reverse=True)
     return [row for _score, row in hits[:limit]]
 
 
@@ -384,7 +384,7 @@ def handle_promote(settings: Settings, args: CommandArgs) -> None:
     actor = actor_identity()
     with Database(settings.db_path) as db:
         found = find_knowledge(db, key)
-        db.set_knowledge_status(found.id, "active")
+        db.promote_knowledge(found.id)
     log.info(
         "promote: key=%s scope=%s source=%s previous_status=%s actor=%s",
         found.key,

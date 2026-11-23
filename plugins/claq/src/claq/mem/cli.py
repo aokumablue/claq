@@ -34,6 +34,7 @@ import sys
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from claq.lib.harness import JSON_PARSE_FAILURES
 from claq.lib.output_adapter import print_session_start_output
 from claq.lib.stdin_io import read_raw_stdin
 from claq.mem import logger as mem_logger
@@ -128,7 +129,7 @@ def _read_stdin_json() -> dict[str, Any]:
         return {}
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError as e:
+    except JSON_PARSE_FAILURES as e:
         raise CommandError(f"stdin を JSON として読めません: {e}") from e
     if not isinstance(parsed, dict):
         raise CommandError("stdin が JSON object ではありません")

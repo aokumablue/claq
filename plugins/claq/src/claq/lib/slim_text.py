@@ -9,6 +9,9 @@ from __future__ import annotations
 TRUNCATION_MARKER = "..."
 """``compact_line`` が上限で切ったときに付ける末尾。"""
 
+COMPACT_LINE_MAX_CHARS = 200
+"""``compact_line`` が 1 行（ユーザー依頼 1 件）に残す上限文字数。"""
+
 
 def _strip_markdown_prefix(line: str) -> str:
     """見出しや箇条書きの先頭記号を落とす。コードフェンス行と表の行は空にする。"""
@@ -26,10 +29,10 @@ def _strip_markdown_prefix(line: str) -> str:
     return stripped
 
 
-def compact_line(text: str, max_length: int) -> str:
-    """空白を畳みマークダウンの行頭記号を落として 1 行にし、長すぎれば切って ``...`` を付ける。"""
+def compact_line(text: str) -> str:
+    """空白を畳みマークダウンの行頭記号を落として 1 行にし、``COMPACT_LINE_MAX_CHARS`` を超えれば切って ``...`` を付ける。"""
     value = _strip_markdown_prefix(" ".join(text.split())).strip()
-    if len(value) > max_length:
-        return value[:max_length].rstrip() + TRUNCATION_MARKER
+    if len(value) > COMPACT_LINE_MAX_CHARS:
+        return value[:COMPACT_LINE_MAX_CHARS].rstrip() + TRUNCATION_MARKER
 
     return value

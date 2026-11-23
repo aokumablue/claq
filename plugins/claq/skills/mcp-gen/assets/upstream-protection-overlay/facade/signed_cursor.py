@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .audit_log import AuditLog
-from .cursor import PAGE_TOKEN_TOO_LONG, accepts_position, decode, encode, is_int
+from .cursor import PAGE_TOKEN_TOO_LONG, accepts_position, encode, encode_payload, is_int, read_payload
 from .errors import CursorError, FacadeError
 
 _VERSION = 1
@@ -42,14 +42,8 @@ def _read_payload(body: str) -> dict[str, Any] | None:
     Returns:
         本体（版・位置・期限）。読めない・版が違う・形が違うときは None。
     """
-    try:
-        payload = json.loads(decode(body))
-    except ValueError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    version, position, expires = payload.get("v"), payload.get("pos"), payload.get("exp")
-    if not (is_int(version) and version == _VERSION and isinstance(position, dict) and is_int(expires)):
+    payload = read_payload(body, _VERSION)
+    if payload is None or not is_int(payload.get("exp")):
         return None
     return payload
 
@@ -106,7 +100,7 @@ class CursorCodec:
             カーソル文字列。
         """
         payload = {"v": _VERSION, "pos": dict(position), "exp": int(self._clock()) + self._ttl_seconds}
-        body = encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        body = encode_payload(payload)
         return f"{body}.{self._sign(body, scope=scope, principal=principal, fingerprint=fingerprint)}"
 
     def open(self, token: str, *, scope: str, principal: str, fingerprint: str) -> dict[str, Any]:

@@ -224,15 +224,13 @@ def _ps_parent_and_lstart(pid: int, deadline: float) -> tuple[int, str] | None:
         return None
 
 
-def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
+def _resolve_ancestor_chain() -> list[tuple[int, str]]:
     """``os.getppid()`` から始まる祖先チェーンと、各 PID の起動時刻を返す。
 
     全 hook 起動で走るため、プロセス表全体（``ps -eo``）ではなく辿る PID だけを 1 段ずつ
     照会する（プロセス数に比例して遅くならない）。全段の ``ps`` は ``_PS_TIMEOUT_SECONDS``
     の締め切り 1 本を共有し、段数倍の待ちで hook の timeout に近づかないようにする。
-
-    Args:
-        max_depth: 辿る祖先の最大段数（``os.getppid()`` 自身を含む）。
+    辿る段数は ``_MAX_ANCESTOR_DEPTH``（``os.getppid()`` 自身を含む）。
 
     Returns:
         ``(pid, lstart)`` の近い祖先から遠い祖先の順のリスト。``ps`` で照会できなかった
@@ -243,7 +241,7 @@ def _resolve_ancestor_chain(max_depth: int) -> list[tuple[int, str]]:
     deadline = time.monotonic() + _PS_TIMEOUT_SECONDS
     chain: list[tuple[int, str]] = []
     current = os.getppid()
-    for _ in range(max_depth):
+    for _ in range(_MAX_ANCESTOR_DEPTH):
         found = _ps_parent_and_lstart(current, deadline)
         if found is None:
             break
@@ -291,7 +289,7 @@ def _write_env_pointer_unsafe(plugin_root: Path) -> None:
     # 祖先ポインタ方式が成立しない OS（Windows）では `ps` を呼ばない。全 hook 起動ごとの
     # 無駄な spawn になるうえ、MSYS/Cygwin 由来の `ps.exe` が PATH にあると別 PID 空間の
     # 値を拾って無意味なポインタを書きうる。
-    chain = _resolve_ancestor_chain(_MAX_ANCESTOR_DEPTH) if ancestor_pointers_supported() else []
+    chain = _resolve_ancestor_chain() if ancestor_pointers_supported() else []
     for pid, lstart in chain:
         _write_ancestor_pointer(roots_dir / str(pid), root_text, lstart)
 
@@ -314,21 +312,17 @@ def _maybe_run_gc(claq_dir: Path, roots_dir: Path, *, keep_pids: frozenset[int])
             見えるため。実行中ホストが書いたばかりの記録を自分で壊さない）。
     """
     stamp = claq_dir / _GC_STAMP_FILENAME
+    now = time.time()
     try:
-        if stamp.stat().st_mtime > _now() - _GC_THROTTLE_SECONDS:
+        if stamp.stat().st_mtime > now - _GC_THROTTLE_SECONDS:
             return
     except FileNotFoundError:
         pass  # 初回はスタンプが無い
 
     stamp.touch()
 
-    _gc_roots(roots_dir, keep_pids=keep_pids)
-    _gc_stale_temp_files(claq_dir, _now())
-
-
-def _now() -> float:
-    """現在時刻の unix time を返す（テストで monkeypatch しやすいよう分離）。"""
-    return time.time()
+    _gc_roots(roots_dir, now, keep_pids=keep_pids)
+    _gc_stale_temp_files(claq_dir, now)
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -350,14 +344,13 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
-def _gc_roots(roots_dir: Path, *, keep_pids: frozenset[int]) -> None:
+def _gc_roots(roots_dir: Path, now: float, *, keep_pids: frozenset[int]) -> None:
     """``roots/`` を掃除する。実行中ホストのポインタは残す。
 
     ``keep_pids`` に含まれるファイル名は削除しない（同じ呼び出しで書いたばかりの
     ポインタを自分で消さないため）。個々のエントリの判定は ``_gc_one`` が行い、
-    stat/unlink の失敗は無視する。
+    stat/unlink の失敗は無視する。``now`` は猶予判定の基準時刻（epoch 秒）。
     """
-    now = _now()
     try:
         entries = list(roots_dir.iterdir())
     except OSError:

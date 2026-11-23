@@ -17,7 +17,6 @@ DB に読み出されないデータを溜めない。
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import re
 import time
@@ -35,10 +34,11 @@ from claq.lib.harness import (
 )
 from claq.lib.redaction import PLACEHOLDER, redact
 from claq.lib.slim_text import TRUNCATION_MARKER, compact_line
+from claq.lib.stdin_io import parse_json_object
 from claq.lib.tag_stripping import keep_allowed_chars, strip_tags
 from claq.mem.knowledge_input import optional_str
 from claq.mem.logger import get as _get_logger
-from claq.mem.repo_identity import find_work_tree_root
+from claq.mem.repo_identity import PATH_SEPARATOR_RE, find_work_tree_root
 from claq.mem.settings import CONTEXT_HANDOFF_CHAR_BUDGET
 
 log = _get_logger("HANDOFF")
@@ -59,8 +59,6 @@ _TRANSCRIPT_ROOTS_ENV = "CLAQ_TRANSCRIPT_ROOTS"
 _USER_MESSAGE_COUNT = 3
 """引き継ぎに載せる直近ユーザー依頼の件数。"""
 
-_USER_MESSAGE_CHAR_LIMIT = 200
-"""ユーザー依頼 1 件を圧縮する上限文字数。"""
 
 _FILE_LIST_LIMIT = 8
 """引き継ぎに載せる変更ファイルの件数。"""
@@ -96,9 +94,6 @@ host はローカルコマンドの起動を ``<command-name>`` タグ付きで�
 _COMMAND_NAME_TAG = "<command-name>"
 """スラッシュコマンド起動をタグ付きで記録したエントリの印。"""
 
-_PATH_SEPARATOR_RE = re.compile(r"[/\\]")
-"""パス区切り（POSIX の ``/`` と Windows の ``\\``）。"""
-
 _PATH_SEGMENT_LIMIT = 3
 """引き継ぎに載せるファイルパスの末尾セグメント数。絶対パス全体は予算の無駄。"""
 
@@ -116,7 +111,7 @@ _MAX_TRANSCRIPT_LINE_CHARS = 1_000_000
 def _neutralize(text: str) -> str:
     """``keep_allowed_chars`` → ``normalize_user_message`` → ``strip_tags`` の 3 段で無害化する。
 
-    ``redact`` の前までの合成で、順序の理由は ``_sanitize_freeform`` を参照。
+    ``redact`` の前までの合成で、順序の理由は ``sanitize_freeform`` を参照。
 
     Args:
         text: 無害化前の文字列。
@@ -127,8 +122,8 @@ def _neutralize(text: str) -> str:
     return strip_tags(normalize_user_message(keep_allowed_chars(text)))
 
 
-def _sanitize_freeform(text: str) -> str:
-    """自由文（明示 handoff・ユーザー発話）を引き継ぎへ載せる前に無害化する。
+def sanitize_freeform(text: str) -> str:
+    """自由文（明示 handoff・ユーザー発話・detach 失敗通知）を注入枠へ載せる前に無害化する。
 
     順序は ``keep_allowed_chars`` → ``normalize_user_message`` → ``strip_tags`` →
     ``redact`` で固定する。
@@ -167,7 +162,7 @@ def _sanitize_freeform(text: str) -> str:
     """
     stripped = _neutralize(text)
     if stripped == PLACEHOLDER:
-        log.warning("タグで分断されたシークレットを検出しました: 引き継ぎ本文を破棄します")
+        log.warning("タグで分断されたシークレットを検出しました: 本文を破棄します")
         return ""
     return redact(stripped)
 
@@ -215,7 +210,7 @@ def build_handoff(payload: dict[str, Any]) -> str:
     """
     explicit = str(payload.get("handoff") or "").strip()
     if explicit:
-        return truncate_handoff(_sanitize_freeform(explicit))
+        return truncate_handoff(sanitize_freeform(explicit))
     transcript_path = str(payload.get("transcript_path") or "")
     return truncate_handoff(_summarize_transcript(transcript_path, optional_str(payload.get("cwd"))))
 
@@ -258,15 +253,15 @@ def _summarize_transcript(transcript_path: str, cwd: str | None) -> str:
         return ""
     work_tree = find_work_tree_root(cwd)
     deadline = time.monotonic() + TRANSCRIPT_TIMEOUT_SEC
-    with contextlib.closing(_windows_newest_first(path, TRANSCRIPT_MAX_BYTES)) as windows:
+    with contextlib.closing(_windows_newest_first(path)) as windows:
         messages, files, tools = _scan(next(windows, ""), deadline, work_tree)
         while not messages and time.monotonic() < deadline and (window := next(windows, None)) is not None:
             messages = _scan(window, deadline, work_tree)[0]
     return _compose(messages, files, tools)
 
 
-def _windows_newest_first(path: Path, size: int) -> Iterator[str]:
-    """ファイルを末尾から ``size`` バイトずつの窓で読み、新しい窓から順に返す。
+def _windows_newest_first(path: Path) -> Iterator[str]:
+    """ファイルを末尾から ``TRANSCRIPT_MAX_BYTES`` バイトずつの窓で読み、新しい窓から順に返す。
 
     窓の先頭に掛かった行の断片は捨て、次の（前の）窓をその行の終わりまで伸ばして行ごと読む。
     窓より長い行は、どの窓でも断片になるため読まない（走査が 1 行の上限で捨てる規模の行）。
@@ -274,7 +269,6 @@ def _windows_newest_first(path: Path, size: int) -> Iterator[str]:
 
     Args:
         path: 読み取り対象のファイル。
-        size: 1 窓のバイト数。
 
     Yields:
         完全な行だけからなる窓のテキスト。窓全体が 1 行の断片なら空文字列。
@@ -285,7 +279,7 @@ def _windows_newest_first(path: Path, size: int) -> Iterator[str]:
     with path.open("rb") as stream:
         end = stream.seek(0, os.SEEK_END)
         while end > 0:
-            start = max(0, end - size)
+            start = max(0, end - TRANSCRIPT_MAX_BYTES)
             stream.seek(start)
             data = stream.read(end - start)
             if start == 0:
@@ -444,7 +438,7 @@ def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
     seen: set[str] = set()
     kept: list[str] = []
     for message in reversed(messages):
-        # 切り詰められた行は先頭 _USER_MESSAGE_CHAR_LIMIT 文字しか残っておらず、
+        # 切り詰められた行は先頭 COMPACT_LINE_MAX_CHARS 文字しか残っておらず、
         # 一致しても元の依頼が同一とは限らない。畳むと別依頼が片方消えるため対象外。
         if message in seen and not message.endswith(TRUNCATION_MARKER):
             continue
@@ -462,14 +456,7 @@ def parse_entry(line: str) -> dict[str, Any] | None:
     Returns:
         解析できた dict。空行・不正 JSON・非 dict なら None。
     """
-    stripped = line.strip()
-    if not stripped:
-        return None
-    try:
-        entry = json.loads(stripped)
-    except json.JSONDecodeError:
-        return None
-    return entry if isinstance(entry, dict) else None
+    return parse_json_object(line.strip())
 
 
 # ユーザー発話として本文に採ってよいブロック種別（allowlist）。
@@ -585,7 +572,7 @@ def _user_message(entry: dict[str, Any]) -> str:
 
     注入済みの ``<claq-memory>`` 等のタグは ``strip_tags`` で落とす。
     落とさないと前セッションへ注入した記憶をそのまま引き継ぎとして
-    記録し直すエコーが起きる。無害化の合成と順序は ``_sanitize_freeform``
+    記録し直すエコーが起きる。無害化の合成と順序は ``sanitize_freeform``
     が単一の情報源で、明示 handoff 経路と共有する。
 
     圧縮は無害化の**後**に掛ける。前に掛けると ``redact`` より先に 200 文字で切って
@@ -607,7 +594,7 @@ def _user_message(entry: dict[str, Any]) -> str:
         return ""
 
     raw = strip_ansi(_text_content(content))
-    return compact_line(_sanitize_freeform(raw), _USER_MESSAGE_CHAR_LIMIT)
+    return compact_line(sanitize_freeform(raw))
 
 
 def _collect_tools(entry: dict[str, Any], tools: set[str], files: set[str], work_tree: str) -> None:
@@ -724,7 +711,7 @@ def _shorten_path(path: str) -> str:
     Returns:
         末尾 ``_PATH_SEGMENT_LIMIT`` セグメント。省略した場合は ``…/`` を付ける。
     """
-    segments = [segment for segment in _PATH_SEPARATOR_RE.split(path) if segment]
+    segments = [segment for segment in PATH_SEPARATOR_RE.split(path) if segment]
     if len(segments) <= _PATH_SEGMENT_LIMIT:
         return path
     return "…/" + "/".join(segments[-_PATH_SEGMENT_LIMIT:])
