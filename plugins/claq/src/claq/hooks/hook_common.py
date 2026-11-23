@@ -165,6 +165,19 @@ def fold_path_parts(parts: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(normalize_protected_name(part) for part in parts)
 
 
+def is_path_prefix(prefix: tuple[str, ...], parts: tuple[str, ...]) -> bool:
+    """畳んだパス要素列 ``parts`` が ``prefix`` で始まる（``prefix`` 自身か、その配下を指す）かを返す。
+
+    Args:
+        prefix: `fold_path_parts` で畳んだ親側の要素列。
+        parts: `fold_path_parts` で畳んだ判定対象の要素列。
+
+    Returns:
+        ``parts`` の先頭が ``prefix`` と一致すれば True。
+    """
+    return parts[: len(prefix)] == prefix
+
+
 def match_folded_path_window(
     parts: tuple[str, ...], candidates: tuple[tuple[str, ...], ...]
 ) -> tuple[str, ...] | None:

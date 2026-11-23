@@ -43,6 +43,7 @@ from claq.hooks.config_protection import (
 from claq.hooks.hook_common import (
     basename,
     fold_path_parts,
+    is_path_prefix,
     match_folded_path_window,
     memoized_in_scan,
     normalize_protected_name,
@@ -129,6 +130,6 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
         return None
     target = fold_path_parts(resolved.parts)
     for location, display in _guarded_locations():
-        if location[: len(target)] == target:
+        if is_path_prefix(target, location):
             return display
     return running_plugin_guarded_dir(resolved, include_ancestors=True)

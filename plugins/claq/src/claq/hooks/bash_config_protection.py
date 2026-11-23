@@ -82,6 +82,7 @@ from claq.hooks.hook_common import (
     emit_block_output,
     fold_path_parts,
     is_inplace_edit_flag,
+    is_path_prefix,
     match_path_segments,
     memoized_in_scan,
     normalize_protected_name,
@@ -464,7 +465,7 @@ def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
         root_parts = fold_path_parts(repo_root.resolve().parts)
     except (OSError, RuntimeError):
         return False
-    return fold_path_parts(resolved.parts)[: len(root_parts)] == root_parts
+    return is_path_prefix(root_parts, fold_path_parts(resolved.parts))
 
 
 def find_protected_write(command: str, *, _outer_scope_certain: bool | None = None) -> str | None:
