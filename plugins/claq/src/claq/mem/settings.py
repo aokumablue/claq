@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 from claq.lib.core_utils import get_claq_dir
@@ -47,16 +46,11 @@ CONTEXT_ITEM_CHAR_LIMIT = 200
 """知識 1 件が占めてよい行の長さ（文字数）。超えるなら body を落として title だけ出す。"""
 
 
-@dataclass
 class Settings:
     """mem のローカルランタイム設定。
 
     値はすべてハードコード既定値であり、永続化するランタイム状態は持たない。
     """
-
-    log_level: str = "info"
-
-    # --- 導出プロパティ ---
 
     @property
     def data_path(self) -> Path:

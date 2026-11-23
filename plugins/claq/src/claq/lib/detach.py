@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from claq.lib.core_utils import ensure_private_dir, get_claq_dir, read_tail_text
+from claq.lib.core_utils import ensure_private_dir, get_claq_dir, read_tail_text, unlink_stale_entries
 
 # detach 起動した子の実行時間上限（秒）。detach 後の子はハーネスの timeout の
 # 管轄外なので、自前の watchdog で止める。正常系はローカル I/O 数秒で終わるため、
@@ -164,19 +164,9 @@ def gc_detach_stdin_orphans() -> None:
     Raises:
         例外は発生しません（iterdir/stat/unlink の失敗は無視します）。
     """
-    cutoff = time.time() - _DETACH_STDIN_GRACE_SECONDS
-    try:
-        entries = list(get_claq_dir().iterdir())
-    except OSError:
-        return
-    for entry in entries:
-        if not entry.name.endswith(_DETACH_STDIN_SUFFIX):
-            continue
-        try:
-            if entry.stat().st_mtime < cutoff:
-                entry.unlink()
-        except OSError:
-            continue
+    unlink_stale_entries(
+        get_claq_dir(), lambda name: name.endswith(_DETACH_STDIN_SUFFIX), time.time() - _DETACH_STDIN_GRACE_SECONDS
+    )
 
 
 def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str]) -> None:

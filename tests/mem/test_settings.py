@@ -38,8 +38,7 @@ def test_defaults_and_derived_paths_without_touching_disk(tmp_path: Path) -> Non
     """既定値と導出パスを返し、構築してもファイルを 1 つも作らない。"""
     s = Settings()
 
-    assert (s.log_level, s.data_path, s.db_path, s.log_dir) == (
-        "info",
+    assert (s.data_path, s.db_path, s.log_dir) == (
         tmp_path,
         tmp_path / "mem.db",
         tmp_path / "logs",

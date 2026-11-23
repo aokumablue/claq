@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 
 from claq.lib.constants import BASE_DIR_NAME
-from claq.lib.core_utils import make_private_dirs
+from claq.lib.core_utils import make_private_dirs, unlink_stale_entries
 from claq.lib.subprocess_utils import run_text
 
 _ROOTS_DIRNAME = "roots"
@@ -403,15 +403,4 @@ def _gc_stale_temp_files(claq_dir: Path, now: float) -> None:
     detach の stdin 一時ファイルは生成側が ``get_claq_dir()`` 配下に作る別契約なので、
     回収も生成側（`detach.gc_detach_stdin_orphans`）に置く。
     """
-    try:
-        entries = list(claq_dir.iterdir())
-    except OSError:
-        return
-    for entry in entries:
-        if not entry.name.startswith(_ENV_TMP_PREFIX):
-            continue
-        try:
-            if entry.stat().st_mtime < now - _DEAD_PID_GRACE_SECONDS:
-                entry.unlink()
-        except OSError:
-            continue
+    unlink_stale_entries(claq_dir, lambda name: name.startswith(_ENV_TMP_PREFIX), now - _DEAD_PID_GRACE_SECONDS)

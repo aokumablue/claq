@@ -148,11 +148,11 @@ async def call_with_retry[T](
     Raises:
         UpstreamError: 再試行しない失敗、または試行を使い切ったとき。
     """
-    for attempt in range(attempts):
+    for attempt in range(attempts - 1):
         try:
             return await operation()
         except UpstreamError as error:
-            if not error.retryable or attempt == attempts - 1:
+            if not error.retryable:
                 raise
             delay = _retry_delay(error, attempt, base_delay=base_delay, jitter=jitter)
             if delay is None or clock() + delay >= deadline:
@@ -166,7 +166,7 @@ async def call_with_retry[T](
                 error.detail,
             )
             await sleep(delay)
-    raise AssertionError("unreachable")  # pragma: no cover
+    return await operation()
 
 
 async def call_with_deadline[T](

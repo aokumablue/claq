@@ -23,7 +23,7 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
 _USAGE = "Usage: runtime/claq-hook [--bg] <module> [args...]"
 # 落ちると保護が外れる PreToolUse の保護フック（hooks.json の matcher 付きエントリ）。
-_PROTECTION_HOOKS = frozenset(
+PROTECTION_HOOKS = frozenset(
     {
         "claq.hooks.block_no_verify",
         "claq.hooks.pre_bash_commit_quality",
@@ -85,8 +85,8 @@ def force_utf8_streams() -> None:
             pass
 
 
-def _unsupported_python_exit_code() -> int | None:
-    """Python 3.12 未満なら fail-open の終了コード 0 を返します。
+def _python_is_unsupported() -> bool:
+    """Python 3.12 未満なら stderr に理由を書いて True を返します（呼び出し側は exit 0 で fail-open する）。
 
     fail-open にするのは、exit 2 だと全 Edit/Bash が拒否されセッションが即死し、守るべき
     対象より被害が大きいため。ただし保護 hook が静かに無効化されている事実を見落とさせない
@@ -94,11 +94,11 @@ def _unsupported_python_exit_code() -> int | None:
     まだ import できず、stdout は host ごとに hook 種別で契約が異なるため触らない）。
 
     Returns:
-        3.12 以上なら None。未満なら stderr に理由を書いて 0。
+        3.12 未満なら True。
     """
     # wrapper が選んだインタプリタ（PATH 上の python3 か CLAQ_PYTHON）は requires-python より古いことがある。
     if sys.version_info >= (3, 12):  # noqa: UP036
-        return None
+        return False
     version = ".".join(str(part) for part in sys.version_info[:3])
     sys.stderr.write(
         f"ERROR: claq requires Python 3.12+; {sys.executable} is {version}. "
@@ -116,7 +116,7 @@ def _unsupported_python_exit_code() -> int | None:
         )
         + "\n"
     )
-    return 0
+    return True
 
 
 def _run_module_in_process(target: str, target_args: list[str]) -> int:
@@ -146,7 +146,7 @@ def _run_module_in_process(target: str, target_args: list[str]) -> int:
         # （`launcher.py` 冒頭の fail-open と同じ理由）。代わりに保護フックでは、他の無効化経路と
         # 同じ `claqProtectionDisabled` マーカーを出して**保護喪失を可視化**する。
         sys.stderr.write(f"ERROR: {target}: {exc}\n")
-        if target in _PROTECTION_HOOKS:
+        if target in PROTECTION_HOOKS:
             marker = {"claqProtectionDisabled": True, "reason": "hook_raised", "module": target}
             sys.stderr.write(json.dumps(marker) + "\n")
         return 1
@@ -162,9 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     """
     force_utf8_streams()
 
-    unsupported = _unsupported_python_exit_code()
-    if unsupported is not None:
-        return unsupported
+    if _python_is_unsupported():
+        return 0
 
     src_dir = str(PLUGIN_ROOT / "src")
     if src_dir not in sys.path:

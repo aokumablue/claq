@@ -6,6 +6,9 @@ mem/handoff.py がユーザー発話を引き継ぎの 1 行へ畳むときに�
 
 from __future__ import annotations
 
+TRUNCATION_MARKER = "..."
+"""``compact_line`` が上限で切ったときに付ける末尾。"""
+
 
 def _strip_markdown_prefix(line: str) -> str:
     """見出しや箇条書きの先頭記号を落とす。コードフェンス行と表の行は空にする。"""
@@ -27,6 +30,6 @@ def compact_line(text: str, max_length: int) -> str:
     """空白を畳みマークダウンの行頭記号を落として 1 行にし、長すぎれば切って ``...`` を付ける。"""
     value = _strip_markdown_prefix(" ".join(text.split())).strip()
     if len(value) > max_length:
-        return value[:max_length].rstrip() + "..."
+        return value[:max_length].rstrip() + TRUNCATION_MARKER
 
     return value

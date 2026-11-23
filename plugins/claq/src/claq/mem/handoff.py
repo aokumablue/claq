@@ -34,7 +34,7 @@ from claq.lib.harness import (
     normalize_user_message,
 )
 from claq.lib.redaction import PLACEHOLDER, redact
-from claq.lib.slim_text import compact_line
+from claq.lib.slim_text import TRUNCATION_MARKER, compact_line
 from claq.lib.tag_stripping import keep_allowed_chars, strip_tags
 from claq.mem.knowledge_input import optional_str
 from claq.mem.logger import get as _get_logger
@@ -61,9 +61,6 @@ _USER_MESSAGE_COUNT = 3
 
 _USER_MESSAGE_CHAR_LIMIT = 200
 """ユーザー依頼 1 件を圧縮する上限文字数。"""
-
-_TRUNCATION_MARKER = "..."
-"""``compact_line`` が上限で切ったときに付ける末尾。重複畳み込みの除外判定に使う。"""
 
 _FILE_LIST_LIMIT = 8
 """引き継ぎに載せる変更ファイルの件数。"""
@@ -449,7 +446,7 @@ def _dedupe_keeping_latest(messages: list[str]) -> list[str]:
     for message in reversed(messages):
         # 切り詰められた行は先頭 _USER_MESSAGE_CHAR_LIMIT 文字しか残っておらず、
         # 一致しても元の依頼が同一とは限らない。畳むと別依頼が片方消えるため対象外。
-        if message in seen and not message.endswith(_TRUNCATION_MARKER):
+        if message in seen and not message.endswith(TRUNCATION_MARKER):
             continue
         seen.add(message)
         kept.append(message)

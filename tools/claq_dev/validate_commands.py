@@ -9,6 +9,7 @@ from pathlib import Path
 from claq_dev.ci_common import (
     PLUGIN_ROOT,
     emit_error,
+    frontmatter_spelling_errors,
     list_markdown_files,
     parse_validator_args,
     read_or_report,
@@ -106,10 +107,7 @@ def _frontmatter_field_errors(file_name: str, content: str) -> Iterator[str]:
     if not isinstance(frontmatter, dict):
         yield f"{file_name} - フロントマターがマッピングではありません"
         return
-    for key in frontmatter:
-        swapped = key.replace("_", "-")
-        if swapped != key and swapped in _KNOWN_FRONTMATTER_FIELDS:
-            yield f"{file_name} - frontmatter の {key} は {swapped} の綴り違い（黙って無視される）"
+    yield from frontmatter_spelling_errors(file_name, frontmatter, _KNOWN_FRONTMATTER_FIELDS)
 
 
 def _validate_command_file(

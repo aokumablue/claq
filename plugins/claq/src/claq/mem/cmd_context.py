@@ -11,6 +11,7 @@ import re
 import time
 from datetime import UTC, datetime, timedelta
 
+from claq.lib.constants import HOOK_ENTRYPOINT_CMD
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.detach import recent_bg_failure_notice
 from claq.lib.env_pointer import ancestor_pointers_supported
@@ -247,7 +248,7 @@ def _shell_bootstrap_section() -> str:
     """
     if ancestor_pointers_supported():
         return ""
-    wrapper = get_plugin_root() / "runtime" / "claq-hook.cmd"
+    wrapper = get_plugin_root() / "runtime" / HOOK_ENTRYPOINT_CMD
     return (
         "## claq の呼び出し\n"
         'この OS では `. "$HOME/.claq/env.sh"` は解決できない。md 中の '

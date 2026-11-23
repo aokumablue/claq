@@ -22,13 +22,14 @@ from claq.hooks.hook_common import (
     effective_basename,
     emit_block_output,
     fold_path_parts,
-    match_folded_path_window,
+    match_path_segments,
     memoized_in_scan,
     normalize_protected_name,
     resolve_effective_target,
     resolve_repo_root,
     scan_memo,
 )
+from claq.lib.constants import HOOK_ENTRYPOINT
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.harness import (
     extract_file_paths,
@@ -43,6 +44,7 @@ from claq.lib.stdin_io import (
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
 )
+from claq.lib.subprocess_utils import run_text
 
 # matcher（hooks.json）は書込み系ツールに限定されているが、matcher の綴りがズレても
 # 本体側で書込み系以外を早期 return する多重防御。
@@ -167,27 +169,6 @@ _RUNNING_PLUGIN_GUARDED_DIRS = (("runtime",), ("src", "claq"))
 RUNNING_PLUGIN_DISPLAY_NAMES = frozenset("/".join(segments) + "/" for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
 
 
-@memoized_in_scan
-def _match_path_segments(file_path: str, candidates: tuple[tuple[str, ...], ...]) -> str | None:
-    """パスの連続した要素が候補のいずれかに一致するか判定する。
-
-    symlink は解決してから判定し、解決不能なら生パスで判定する。比較は大小無視で行い
-    （`.GIT/HOOKS` は APFS / NTFS では `.git/hooks` そのものを指す）、返す表示名は畳む前の
-    綴りを使う。候補の要素 ``*`` は任意の 1 要素に一致する。
-
-    Args:
-        file_path: 検査対象の生パス文字列。
-        candidates: 連続一致を探す要素列の候補（畳む前の綴り）。
-
-    Returns:
-        一致した候補の表示名（``/`` 区切り）。一致しなければ None。
-    """
-    resolved = resolve_effective_target(file_path)
-    parts = resolved.parts if resolved is not None else Path(file_path).parts
-    segments = match_folded_path_window(parts, candidates)
-    return None if segments is None else "/".join(segments)
-
-
 def protected_path_segment(file_path: str) -> str | None:
     """パスがディレクトリ単位の保護対象配下か、保護ディレクトリ自身かを判定する。
 
@@ -201,7 +182,7 @@ def protected_path_segment(file_path: str) -> str | None:
     Returns:
         該当した保護 path の表示名（``.git/hooks``）。該当しなければ None。
     """
-    return _match_path_segments(file_path, _PROTECTED_PATH_SEGMENTS)
+    return match_path_segments(file_path, _PROTECTED_PATH_SEGMENTS)
 
 
 def repo_git_config_path(file_path: str) -> str | None:
@@ -216,7 +197,7 @@ def repo_git_config_path(file_path: str) -> str | None:
     Returns:
         該当した保護 path の表示名（``.git/config`` 等）。該当しなければ None。
     """
-    return _match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS)
+    return match_path_segments(file_path, _GIT_CONFIG_REPO_SEGMENTS)
 
 
 def protected_path_display_name(segment: str) -> str:
@@ -332,11 +313,9 @@ def _plugin_runtime_is_tracked(repo_root: Path, plugin_root: Path) -> bool:
         index に載っていれば True。git が無い・タイムアウト・追跡外なら False（保護を外さない）。
     """
     try:
-        result = subprocess.run(
-            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / "runtime" / "claq-hook")],
-            capture_output=True,
+        result = run_text(
+            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / "runtime" / HOOK_ENTRYPOINT)],
             timeout=5,
-            check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False

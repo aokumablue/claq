@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import redirect_stderr, redirect_stdout
@@ -17,6 +18,12 @@ from claq.mem import settings as settings_mod
 from claq.mem.database import Database
 from claq.mem.models import Knowledge
 from claq.mem.repo_identity import resolve_repo
+
+
+def reset_mem_logger() -> None:
+    """claq.mem のロガーを未初期化に戻し、付いているハンドラを外す。"""
+    mem_logger._initialized = False
+    logging.getLogger("claq.mem").handlers.clear()
 
 
 @pytest.fixture
@@ -65,12 +72,12 @@ def _run_cli(
     stderr = io.StringIO()
     # logger は初回の setup で stderr を掴んだまま使い回すため、前のテストの初期化が残ると
     # logger の stderr 出力がこの捕捉に入らない。前後で捨て、捕捉した stderr へ掴ませる。
-    mem_logger.reset()
+    reset_mem_logger()
     try:
         with redirect_stdout(stdout), redirect_stderr(stderr):
             exit_code = cli.main()
     finally:
-        mem_logger.reset()
+        reset_mem_logger()
     return stdout.getvalue(), stderr.getvalue(), exit_code
 
 

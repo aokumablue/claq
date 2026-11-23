@@ -8,13 +8,15 @@ import pytest
 
 import claq.mem.logger as logger
 
+from ._support import reset_mem_logger
+
 
 @pytest.fixture(autouse=True)
 def _reset_logger() -> Iterator[None]:
     """各テストの前後でロガーの初期化状態とハンドラを消す。"""
-    logger.reset()
+    reset_mem_logger()
     yield
-    logger.reset()
+    reset_mem_logger()
 
 
 def _mem_root() -> logging.Logger:
@@ -29,26 +31,12 @@ def test_get_returns_child_logger() -> None:
     assert log.name == "claq.mem.TEST"
 
 
-@pytest.mark.parametrize(
-    ("level", "expected"),
-    [("debug", logging.DEBUG), ("info", logging.INFO)],
-)
-def test_setup_adds_file_and_stderr_handlers_with_level(tmp_path: Path, level: str, expected: int) -> None:
-    """ファイル出力と stderr の 2 ハンドラを付け、レベルを設定する。"""
-    logger.setup(tmp_path, level=level)
-    assert len(_mem_root().handlers) == 2
-    assert _mem_root().level == expected
-
-
-def test_setup_is_idempotent_and_reset_clears_state(tmp_path: Path) -> None:
-    """2 回目の setup は無視され（ハンドラもレベルも変わらない）、reset でハンドラと初期化済みフラグが消える。"""
-    logger.setup(tmp_path, level="info")
-    logger.setup(tmp_path, level="debug")
+def test_setup_adds_two_handlers_at_info_once(tmp_path: Path) -> None:
+    """ファイル出力と stderr の 2 ハンドラを INFO で付け、2 回目の setup は何も足さない。"""
+    logger.setup(tmp_path)
+    logger.setup(tmp_path)
     assert len(_mem_root().handlers) == 2
     assert _mem_root().level == logging.INFO
-    logger.reset()
-    assert _mem_root().handlers == []
-    assert logger._initialized is False
 
 
 def test_setup_closes_dirs_and_reuses_log_file(tmp_path: Path) -> None:
@@ -62,22 +50,22 @@ def test_setup_closes_dirs_and_reuses_log_file(tmp_path: Path) -> None:
     """
     root = tmp_path / "claq-root"
     logs = root / "logs"
-    logger.setup(logs, level="info")
+    logger.setup(logs)
     existing = sorted(logs.glob("mem-*.log"))
     assert len(existing) == 1
     assert root.stat().st_mode & 0o777 == 0o700
     assert logs.stat().st_mode & 0o777 == 0o700
     assert existing[0].stat().st_mode & 0o777 == 0o600
 
-    logger.reset()
-    logger.setup(logs, level="info")
+    reset_mem_logger()
+    logger.setup(logs)
     assert sorted(logs.glob("mem-*.log")) == existing
     assert existing[0].stat().st_mode & 0o777 == 0o600
 
 
 def test_messages_are_written_to_file_with_secrets_redacted(tmp_path: Path) -> None:
     """ログメッセージはファイルへ書かれ、シークレットは [REDACTED] に置換される。"""
-    logger.setup(tmp_path, level="info")
+    logger.setup(tmp_path)
     log = logger.get("TEST")
     log.info("test message 12345")
     log.info("token=" + "sk-ant-" + "api03-" + "A" * 90)
@@ -94,7 +82,7 @@ def test_file_only_records_skip_stderr_but_reach_file(tmp_path: Path, capsys: py
 
     呼び出し側が利用者向けの 1 行を自分で stderr へ出す経路で、同じ失敗が 2 行にならないこと。
     """
-    logger.setup(tmp_path, level="info")
+    logger.setup(tmp_path)
     log = logger.get("TEST")
     log.error("file only failure", extra=logger.FILE_ONLY)
     log.error("shared failure")
@@ -127,8 +115,8 @@ def test_setup_can_retry_after_handler_construction_failure(monkeypatch: pytest.
     monkeypatch.setattr(logger, "_file_handler", flaky_file_handler)
 
     with pytest.raises(OSError, match="disk full"):
-        logger.setup(tmp_path, level="info")
+        logger.setup(tmp_path)
     assert logger._initialized is False
 
-    logger.setup(tmp_path, level="info")
+    logger.setup(tmp_path)
     assert _mem_root().handlers

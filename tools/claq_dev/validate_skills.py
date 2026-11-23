@@ -9,6 +9,7 @@ from claq_dev.ci_common import (
     PLUGIN_ROOT,
     emit_error,
     extract_frontmatter,
+    frontmatter_spelling_errors,
     parse_validator_args,
     read_or_report,
     report_errors,
@@ -29,8 +30,7 @@ _REQUIRED_FRONTMATTER_FIELDS = ("name", "description")
 # fork が既定のバックグラウンド実行に戻り、起動したターンに結果が届かない。
 _BOOLEAN_FRONTMATTER_FIELDS = ("user-invocable", "disable-model-invocation", "background")
 
-# 綴りを間違えても自前パーサは「別のキー」として黙って受理する。ハイフンと
-# アンダースコアの取り違えが唯一現実的な誤りなので、その形だけを名指しで拒否する。
+# 綴り違いの検査（`frontmatter_spelling_errors`）が照合する既知フィールド。
 _KNOWN_FRONTMATTER_FIELDS = frozenset(
     {"name", "description", "context", *_BOOLEAN_FRONTMATTER_FIELDS}
 )
@@ -38,10 +38,7 @@ _KNOWN_FRONTMATTER_FIELDS = frozenset(
 
 def _frontmatter_field_errors(label: str, frontmatter: dict[str, object]) -> Iterator[str]:
     """ハイフン／アンダースコアの綴り違いと、真偽値フィールドの型の誤りを返す。"""
-    for key in frontmatter:
-        swapped = key.replace("_", "-")
-        if swapped != key and swapped in _KNOWN_FRONTMATTER_FIELDS:
-            yield f"{label} - frontmatter の {key} は {swapped} の綴り違い（黙って無視される）"
+    yield from frontmatter_spelling_errors(label, frontmatter, _KNOWN_FRONTMATTER_FIELDS)
     for field in _BOOLEAN_FRONTMATTER_FIELDS:
         if field in frontmatter and not isinstance(frontmatter[field], bool):
             yield (

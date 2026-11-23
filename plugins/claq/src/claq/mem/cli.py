@@ -59,40 +59,23 @@ _DB_SIDECAR_SUFFIXES: tuple[str, ...] = ("-wal", "-shm", "-journal")
 _VALUE_OPTIONS: frozenset[str] = frozenset({"--status", "--kind", "--limit", "--superseded-by"})
 _BOOL_FLAGS: frozenset[str] = frozenset({"--global", "--repo", "--json"})
 
-# stdin の JSON を実際に使う subcommand。これ以外は stdin を読まない。
-# 無条件に読むと、書き手が pipe を閉じない呼ばれ方で `list` / `search` / `show`
-# まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされ、渡すべき stdin が
-# 無いのに「stdin リダイレクト漏れの可能性」と誤って警告する。
-_STDIN_COMMANDS: frozenset[str] = frozenset({"learn", "context", "handoff"})
-
 _FILTER_OPTIONS: frozenset[str] = frozenset({"--global", "--repo", "--status", "--kind", "--limit", "--json"})
 
 
 class _CommandSpec(NamedTuple):
-    """subcommand が受理する引数の形。
+    """subcommand の実装と、受理する引数の形。
 
     Attributes:
+        handler: コマンドを実行する関数。
         arity: 位置引数の個数。None は可変長（``search`` は複数の位置引数を検索語として連結する）。
         options: 受理するオプション。
+        reads_stdin: stdin の JSON を読むか。
     """
 
+    handler: CommandHandler
     arity: int | None
     options: frozenset[str]
-
-
-# オプションの対応表を持たないと `promote <key> --global` のような未対応 flag が
-# 黙って通り、指定と異なるカード（repo 優先探索の結果）を操作してしまう。
-_COMMAND_SPECS: dict[str, _CommandSpec] = {
-    "init": _CommandSpec(0, frozenset()),
-    "context": _CommandSpec(0, frozenset()),
-    "handoff": _CommandSpec(0, frozenset()),
-    "learn": _CommandSpec(0, frozenset()),
-    "list": _CommandSpec(0, _FILTER_OPTIONS),
-    "search": _CommandSpec(None, _FILTER_OPTIONS),
-    "show": _CommandSpec(1, frozenset()),
-    "promote": _CommandSpec(1, frozenset()),
-    "forget": _CommandSpec(1, frozenset({"--superseded-by"})),
-}
+    reads_stdin: bool = False
 
 
 def _parse_options(argv: list[str]) -> CommandArgs:
@@ -167,7 +150,7 @@ def _parse_args_and_stdin(command: str, argv: list[str]) -> CommandArgs:
         CommandError: オプションの解析に失敗した場合、または stdin が JSON object として読めない場合。
     """
     args = _parse_options(argv)
-    if command not in _STDIN_COMMANDS:
+    if not _COMMANDS[command].reads_stdin:
         return args
     return dataclasses.replace(args, stdin_data=_read_stdin_json())
 
@@ -186,7 +169,7 @@ def _check_positional_arity(command: str, args: CommandArgs) -> None:
     Raises:
         CommandError: 契約に反する個数の位置引数が指定された場合。
     """
-    spec = _COMMAND_SPECS[command]
+    spec = _COMMANDS[command]
     if spec.arity == 0 and args.positionals:
         raise CommandError(f"{command} は位置引数を取りません: {' '.join(args.positionals)!r}")
     if spec.arity == 1:
@@ -233,7 +216,7 @@ def _check_supported_options(command: str, args: CommandArgs) -> None:
     Raises:
         CommandError: 未対応のオプション、または排他オプションの同時指定。
     """
-    spec = _COMMAND_SPECS[command]
+    spec = _COMMANDS[command]
     used = set(args.flags) | set(args.values)
     unsupported = sorted(used - spec.options)
     if unsupported:
@@ -249,7 +232,7 @@ def _load_settings_or_raise() -> Settings:
         初期化済みの Settings。
     """
     settings = Settings()
-    mem_logger.setup(settings.log_dir, settings.log_level)
+    mem_logger.setup(settings.log_dir)
     return settings
 
 
@@ -288,10 +271,10 @@ def main() -> int:
         return 0
 
     command = sys.argv[1]
-    handler = _COMMAND_HANDLERS.get(command)
+    spec = _COMMANDS.get(command)
     try:
         # 不明なコマンドの引数は解析しない。オプションの誤りとして報告すると、コマンド名の誤りに気づけない。
-        if handler is None:
+        if spec is None:
             settings, args = _load_settings_or_raise(), CommandArgs()
         else:
             settings, args = _prepare_command(command, sys.argv[2:])
@@ -303,12 +286,12 @@ def main() -> int:
         return 1
 
     # 不明なコマンドの報告はファイルへも残すので、logger の初期化後に出す。
-    if handler is None:
+    if spec is None:
         log.error("不明なコマンド: %s", command)
         return 2
 
     try:
-        additional_context = handler(settings, args)
+        additional_context = spec.handler(settings, args)
     except CommandError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -365,16 +348,21 @@ def _remove_db_sidecars(db_path: Path) -> None:
         Path(f"{db_path}{suffix}").unlink(missing_ok=True)
 
 
-_COMMAND_HANDLERS: dict[str, CommandHandler] = {
-    "init": _handle_init,
-    "context": handle_context,
-    "handoff": handle_handoff,
-    "learn": handle_learn,
-    "list": handle_list,
-    "search": handle_search,
-    "show": handle_show,
-    "promote": handle_promote,
-    "forget": handle_forget,
+# オプションの対応表を持たないと `promote <key> --global` のような未対応 flag が
+# 黙って通り、指定と異なるカード（repo 優先探索の結果）を操作してしまう。
+# stdin は JSON を実際に使う subcommand だけが読む。無条件に読むと、書き手が pipe を
+# 閉じない呼ばれ方で `list` / `search` / `show` まで STDIN_FIRST_BYTE_TIMEOUT ぶん待たされ、
+# 渡すべき stdin が無いのに「stdin リダイレクト漏れの可能性」と誤って警告する。
+_COMMANDS: dict[str, _CommandSpec] = {
+    "init": _CommandSpec(_handle_init, 0, frozenset()),
+    "context": _CommandSpec(handle_context, 0, frozenset(), reads_stdin=True),
+    "handoff": _CommandSpec(handle_handoff, 0, frozenset(), reads_stdin=True),
+    "learn": _CommandSpec(handle_learn, 0, frozenset(), reads_stdin=True),
+    "list": _CommandSpec(handle_list, 0, _FILTER_OPTIONS),
+    "search": _CommandSpec(handle_search, None, _FILTER_OPTIONS),
+    "show": _CommandSpec(handle_show, 1, frozenset()),
+    "promote": _CommandSpec(handle_promote, 1, frozenset()),
+    "forget": _CommandSpec(handle_forget, 1, frozenset({"--superseded-by"})),
 }
 
 
@@ -401,5 +389,5 @@ Commands:
 """
 
 
-if __name__ == "__main__":  # pragma: no cover
-    sys.exit(main())
+if __name__ == "__main__":
+    raise SystemExit(main())

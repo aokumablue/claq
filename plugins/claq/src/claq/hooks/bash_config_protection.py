@@ -81,7 +81,7 @@ from claq.hooks.hook_common import (
     emit_block_output,
     fold_path_parts,
     is_inplace_edit_flag,
-    match_folded_path_window,
+    match_path_segments,
     memoized_in_scan,
     normalize_protected_name,
     resolve_effective_target,
@@ -200,11 +200,10 @@ def _expand_config_home_variables(token: str) -> str:
     return _XDG_VARIABLE_PREFIX_RE.sub(lambda _match: xdg, token) if xdg else token
 
 
-@memoized_in_scan
 def _find_home_log_directory_match(token: str) -> str | None:
     """トークンが ``~/.claq/logs/`` のディレクトリ構造に一致するか、そのディレクトリ自身を指すかを判定する。
 
-    symlink を解決し、畳んだ名前（`normalize_protected_name`）で構造的に一致を見る。
+    symlink を解決し、畳んだ名前で構造的に一致を見る（`match_path_segments`）。
     ``~/.claq/logs/`` はどのリポジトリでも同じ固定位置を指すため、呼び出し側は
     repo スコープ判定を適用せず即座に deny する。
 
@@ -219,10 +218,8 @@ def _find_home_log_directory_match(token: str) -> str | None:
     Returns:
         一致すれば ``"~/.claq/logs"``。該当しなければ None。
     """
-    resolved = resolve_effective_target(token)
-    parts = resolved.parts if resolved is not None else Path(token).parts
-    segments = match_folded_path_window(parts, _HOME_LOG_PATH_SEGMENTS)
-    return None if segments is None else "~/" + "/".join(segments)
+    segments = match_path_segments(token, _HOME_LOG_PATH_SEGMENTS)
+    return None if segments is None else "~/" + segments
 
 
 # malformed JSON fallback で「破壊的操作の指示」とみなす部分文字列。トークン化経路と

@@ -70,12 +70,13 @@ _SCAN_BUDGET_CHECK_BYTES = 256 * 1024
 # 停止までの超過量を「1 パターン × 1 行の線形走査 1 回」に抑える。全パターンが線形で
 # あること（JWT の lookbehind と所有量指定子）がこの上界の前提。
 
-_LINTABLE_SUFFIXES = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".py", ".go", ".rs"}
 # lint 対象のうち、ログ出力呼び出しとデバッガ文（`_scan_lint_issues` の JS 専用の 2 検査）を検出する拡張子。
 # この 2 つは JavaScript / TypeScript の構文で、Python・Go・Rust ではコメント・docstring・識別子に
 # 現れた語にすぎない。拾うとデバッガ文（error）が正当な commit を止める。
 # ES モジュール（`.mjs` / `.mts`）と CommonJS（`.cjs` / `.cts`）の明示拡張子も同じ構文のファイルである。
 _JAVASCRIPT_SUFFIXES = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}
+# lint 対象の拡張子。JS / TS に Python・Go・Rust を足したもの。
+_LINTABLE_SUFFIXES = _JAVASCRIPT_SUFFIXES | {".py", ".go", ".rs"}
 # JS / TS のコメント行の先頭（`//`・JSDoc の `*`・`/*`）。この行のログ出力呼び出しとデバッガ文は実行されない。
 _JS_COMMENT_LINE_PREFIXES = ("//", "*", "/*")
 # デバッガ文だけを拾う。プロパティ（`chrome.` の後・オブジェクトのキー）と引用符の中の語（ESLint のルール名・
@@ -149,6 +150,8 @@ _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     # 自分のパターンに一致しないようにするため（上のコメントと同じ理由）。
     (r"(?i)PuTTY-User-Key-File-[0-9]", "PuTTY private key"),
 )
+# 1 行ごとに 14 本を引くので、re の内部キャッシュ探索を避けてコンパイル済みで持つ。
+_COMPILED_SECRET_PATTERNS = tuple((re.compile(pattern), name) for pattern, name in _SECRET_PATTERNS)
 
 
 def _monotonic() -> float:
@@ -205,12 +208,12 @@ class _ScanBudget:
         self._deadline = deadline
         self._remaining = 0
 
-    def check(self, scanned_bytes: int, where: str) -> None:
+    def check(self, scanned_bytes: int, line_number: int) -> None:
         """走査済みバイト数を積み、間隔を跨いだら予算を確認します。
 
         Args:
             scanned_bytes: 直前の走査で消費したバイト数です。
-            where: 超過時のメッセージに載せる位置情報です。
+            line_number: 超過時のメッセージに載せる 1 始まりの行番号です。
 
         Raises:
             SecretScanBudgetExceeded: 実時間バジェットを超過した場合。
@@ -221,7 +224,7 @@ class _ScanBudget:
         self._remaining = _SCAN_BUDGET_CHECK_BYTES
         if _monotonic() > self._deadline:
             raise SecretScanBudgetExceeded(
-                f"scan exceeded {_SECRET_SCAN_TIME_BUDGET_SECONDS}s time budget at {where}"
+                f"scan exceeded {_SECRET_SCAN_TIME_BUDGET_SECONDS}s time budget at line {line_number}"
             )
 
 
@@ -496,7 +499,7 @@ def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) ->
     budget = _ScanBudget(deadline)
     for index, line in enumerate(lines):
         line_num = index + 1
-        budget.check(len(line), f"line {line_num}")
+        budget.check(len(line), line_num)
 
         if "# nosec" in line:
             continue
@@ -547,9 +550,9 @@ def _scan_secret_issues(lines: list[str], *, deadline: float, report_lines: bool
     for index, line in enumerate(lines):
         line_num = index + 1 if report_lines else 0
         location = f"at line {line_num}" if report_lines else "in extracted binary content"
-        for pattern, name in _SECRET_PATTERNS:
-            budget.check(len(line), f"line {index + 1}")
-            if re.search(pattern, line):
+        for pattern, name in _COMPILED_SECRET_PATTERNS:
+            budget.check(len(line), index + 1)
+            if pattern.search(line):
                 issues.append(_issue("secret", f"Potential {name} exposed {location}", line=line_num, severity="error"))
 
     return issues

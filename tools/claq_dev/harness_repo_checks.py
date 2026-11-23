@@ -17,15 +17,11 @@ from claq.ci.harness_audit_utils import (
     safe_read,
 )
 from claq.hooks.shell_tokens import basename_any_separator
+from claq.launcher import PROTECTION_HOOKS
+from claq.lib.constants import HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD
 from claq_dev.ci_common import extract_frontmatter
 
-
-def file_exists(root_dir: str | Path, relative_path: str) -> bool:
-    """相対パスが存在するかを確認する。"""
-    return Path(root_dir, relative_path).exists()
-
-
-_HOOK_WRAPPER_BASENAMES = {"claq-hook", "claq-hook.cmd"}
+_HOOK_WRAPPER_BASENAMES = {HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD}
 
 
 def _hook_command_argv(command: str) -> tuple[str, ...] | None:
@@ -195,7 +191,7 @@ def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
     # 宣言値は `./skills/` のようなディレクトリパス。ここだけは存在検査のままにする
     # （ディレクトリに「中身が空でない」を要求すると常に False になる）。surface が
     # 空になっていないかは `tool-skill-count` が SKILL.md の件数で別に見る。
-    return bool(declared) and all(file_exists(root_dir, entry.lstrip("./").rstrip("/")) for entry in declared)
+    return bool(declared) and all(Path(root_dir, entry.lstrip("./").rstrip("/")).exists() for entry in declared)
 
 
 def _dev_root(root_dir: str | Path) -> Path:
@@ -235,12 +231,7 @@ def _coverage_gate_configured(dev_root: Path) -> bool:
 _PREFLIGHT_EVENTS = ("PreToolUse", "beforeSubmitPrompt")
 """実行前ガードが載りうるフックイベント。"""
 
-_PREFLIGHT_GUARD_ARGV_PATTERNS = (
-    ("claq.hooks.block_no_verify",),
-    ("claq.hooks.pre_bash_commit_quality",),
-    ("claq.hooks.bash_config_protection",),
-    ("claq.hooks.config_protection",),
-)
+_PREFLIGHT_GUARD_ARGV_PATTERNS = tuple((module,) for module in sorted(PROTECTION_HOOKS))
 """実行前ガードとして数える wrapper 起動後の引数列。"""
 
 

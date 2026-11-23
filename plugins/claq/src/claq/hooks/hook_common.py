@@ -299,6 +299,27 @@ def resolve_effective_target(raw_path: str) -> Path | None:
         return None
 
 
+@memoized_in_scan
+def match_path_segments(file_path: str, candidates: tuple[tuple[str, ...], ...]) -> str | None:
+    """パスの連続した要素が候補のいずれかに一致するか判定する。
+
+    symlink は解決してから判定し、解決不能なら生パスで判定する。比較は大小無視で行い
+    （`.GIT/HOOKS` は APFS / NTFS では `.git/hooks` そのものを指す）、返す表示名は畳む前の
+    綴りを使う。候補の要素 ``*`` は任意の 1 要素に一致する。
+
+    Args:
+        file_path: 検査対象の生パス文字列。
+        candidates: 連続一致を探す要素列の候補（畳む前の綴り）。
+
+    Returns:
+        一致した候補の表示名（``/`` 区切り）。一致しなければ None。
+    """
+    resolved = resolve_effective_target(file_path)
+    parts = resolved.parts if resolved is not None else Path(file_path).parts
+    segments = match_folded_path_window(parts, candidates)
+    return None if segments is None else "/".join(segments)
+
+
 def effective_basename(raw_path: str) -> str:
     """symlink を解決した実体 basename を返します。
 
