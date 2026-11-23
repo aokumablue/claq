@@ -11,7 +11,7 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, NamedTuple, NoReturn
+from typing import Any, NamedTuple
 
 from claq.ci.harness_audit_utils import (
     CATEGORIES,
@@ -415,22 +415,17 @@ Audits the current working directory by default.
 """
 
 
-def show_help(usage: str) -> NoReturn:
-    """ヘルプを表示して終了コード 0 で終了する。"""
-    print(usage)
-    raise SystemExit(0)
-
-
 def run(argv: Sequence[str] | None, build: Callable[[str, Path], dict[str, Any]], usage: str) -> int:
     """CLI 引数を解釈し、``build(scope, root)`` が返すレポートを出力する。
 
     Returns:
-        チェックが全件合格なら 0、不合格があれば 1、引数・入出力の失敗も 1。
+        ``--help`` とチェックが全件合格なら 0、不合格があれば 1、引数・入出力の失敗も 1。
     """
     try:
         args = parse_args(argv)
         if args["help"]:
-            show_help(usage)
+            print(usage)
+            return 0
         report = build(args["scope"], args["root"])
         if args["format"] == "json":
             print(json.dumps(report, indent=2, ensure_ascii=False))

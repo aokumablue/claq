@@ -268,10 +268,9 @@ def test_main_text_lists_top_actions_only_when_failing(
 def test_main_help_exits_zero_and_errors_return_one(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`--help` は exit 0 で抜け、レポート組み立ての失敗は stderr に出して 1 を返す。"""
-    with pytest.raises(SystemExit) as excinfo:
-        harness_audit.main(["--help"])
-    assert excinfo.value.code == 0
+    """`--help` は使い方を出して 0 を返し、レポート組み立ての失敗は stderr に出して 1 を返す。"""
+    assert harness_audit.main(["--help"]) == 0
+    assert "Usage" in capsys.readouterr().out
 
     def _boom(*_args: object, **_kwargs: object) -> None:
         """常に ValueError を送出する build_report の代役。"""

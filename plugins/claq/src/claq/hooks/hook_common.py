@@ -100,32 +100,6 @@ def resolve_repo_root() -> Path | None:
     return Path(top) if result.returncode == 0 and top else None
 
 
-def write_stdout(text: str) -> None:
-    """標準出力にテキストを書き出します。
-
-    Args:
-        text: 出力するテキストです。
-
-    Raises:
-        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
-        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
-    """
-    sys.stdout.write(text)
-
-
-def write_stderr(text: str) -> None:
-    """標準エラーにテキストを書き出します。
-
-    Args:
-        text: 出力するテキストです。
-
-    Raises:
-        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
-        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
-    """
-    sys.stderr.write(text)
-
-
 def basename(path: str) -> str:
     """パスからファイル名を取得します。
 
@@ -462,8 +436,8 @@ def emit_block_output(reason: str) -> int:
         フックが返すべき終了コード。
     """
     with contextlib.suppress(Exception):
-        write_stdout(adapt_deny_output(reason))
-        write_stderr(reason + "\n")
+        sys.stdout.write(adapt_deny_output(reason))
+        sys.stderr.write(reason + "\n")
     _flush_or_discard(sys.stdout)
     _flush_or_discard(sys.stderr)
     return 2

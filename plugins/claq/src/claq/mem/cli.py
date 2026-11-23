@@ -320,23 +320,14 @@ def _handle_init(settings: Settings, _args: CommandArgs) -> None:
         settings: mem 設定。
         _args: 未使用。他コマンドとハンドラ署名を揃える。
     """
-    _remove_db_artifacts(settings.db_path)
+    settings.db_path.unlink(missing_ok=True)
+    _remove_db_sidecars(settings.db_path)
     with Database(settings.db_path):
         pass
     # SQLite ビルドにより close 時に -wal/-shm が自動削除されない環境があるため
     # 明示削除する。close 時の checkpoint でデータは mem.db へ反映済みで安全。
     _remove_db_sidecars(settings.db_path)
     log.info("DB再作成完了: %s", settings.db_path)
-
-
-def _remove_db_artifacts(db_path: Path) -> None:
-    """mem.db 本体と WAL sidecar を削除する。
-
-    Args:
-        db_path: mem.db の絶対パス。
-    """
-    db_path.unlink(missing_ok=True)
-    _remove_db_sidecars(db_path)
 
 
 def _remove_db_sidecars(db_path: Path) -> None:

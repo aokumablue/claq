@@ -104,13 +104,16 @@ _MEMORY_LIFECYCLE_COMMANDS = (
 )
 
 
-def _has_memory_lifecycle_hooks(root_dir: Path) -> bool:
+def _has_memory_lifecycle_hooks(hooks_json: str) -> bool:
     """SessionStart / SessionEnd が実在のメモリ永続化コマンドを起動しているかを返す。
 
     ディレクトリの存在ではなく ``hooks/hooks.json`` をパースし、各イベントが
     ``claq.mem.cli context`` / ``claq.mem.cli handoff`` を起動していることを見る。
+
+    Args:
+        hooks_json: `get_repo_checks` が 1 回だけ読んだ ``hooks/hooks.json`` の生テキスト。
     """
-    hooks = _hook_events(safe_read(root_dir, "hooks/hooks.json"))
+    hooks = _hook_events(hooks_json)
     return hooks is not None and all(
         _event_has_matching_command(hooks.get(event), patterns) for event, patterns in _MEMORY_LIFECYCLE_COMMANDS
     )
@@ -351,7 +354,7 @@ def _quality_checks(root_dir: Path) -> list[dict[str, Any]]:
     ]
 
 
-def _memory_checks(root_dir: Path) -> list[dict[str, Any]]:
+def _memory_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Memory Persistence カテゴリのチェックを返す。"""
     category = MEMORY_PERSISTENCE
     return [
@@ -359,7 +362,7 @@ def _memory_checks(root_dir: Path) -> list[dict[str, Any]]:
             check_id="memory-hooks-lifecycle", category=category, points=4, scopes=["repo", "hooks"],
             path="hooks/hooks.json",
             description="実際に使用されるメモリ永続化ライフサイクル定義が hooks/hooks.json に存在する",
-            passed=_has_memory_lifecycle_hooks(root_dir),
+            passed=_has_memory_lifecycle_hooks(hooks_json),
             fix="Wire real memory lifecycle commands (claq.mem.cli context/handoff) into "
             "hooks/hooks.json's SessionStart/SessionEnd events.",
         ),
@@ -472,7 +475,7 @@ def get_repo_checks(root_dir: Path) -> list[dict[str, Any]]:
         *_tool_checks(root_dir, hooks_json),
         *_context_checks(root_dir),
         *_quality_checks(root_dir),
-        *_memory_checks(root_dir),
+        *_memory_checks(root_dir, hooks_json),
         *_eval_checks(root_dir),
         *_security_checks(root_dir, hooks_json),
         *_cost_checks(root_dir),

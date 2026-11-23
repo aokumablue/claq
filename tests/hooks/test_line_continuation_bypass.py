@@ -273,9 +273,16 @@ def test_emit_block_output_keeps_deny_when_output_fails(failure: Exception, monk
     閉じたときの BrokenPipeError で、host の timeout と同時に起きる。
     """
 
-    def fail(_text: str) -> None:
-        """出力層の例外を模す。"""
-        raise failure
+    class _FailingStream:
+        """write も flush も出力層の例外を送出するストリーム。"""
 
-    monkeypatch.setattr(hook_common, "write_stdout", fail)
+        def write(self, _text: str) -> None:
+            """出力層の例外を模す。"""
+            raise failure
+
+        def flush(self) -> None:
+            """出力層の例外を模す。"""
+            raise failure
+
+    monkeypatch.setattr(hook_common.sys, "stdout", _FailingStream())
     assert hook_common.emit_block_output("[Hook] BLOCKED: test") == 2
