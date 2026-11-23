@@ -88,18 +88,10 @@ def find_latest_installed_claq(installed_dir: Path) -> Path | None:
     return max(candidates, key=lambda item: item[0])[1]
 
 
-def ensure_grok_plugin_root_symlink(
-    *,
-    link_path: Path | str | None = None,
-    home: Path | None = None,
-) -> Path | None:
+def ensure_grok_plugin_root_symlink() -> Path | None:
     """``~/.grok/plugins/claq`` を **installed-plugins 配下のみ** へ symlink する。
 
     開発用リポジトリや任意パスはリンク先にしない。
-
-    Args:
-        link_path: リンクのパス。None なら ``~/.grok/plugins/claq``。
-        home: ホーム上書き（テスト用）。
 
     Returns:
         作成・更新したリンク先 Path。インストールが無い・既存の空でないディレクトリに触れないときは None。
@@ -107,13 +99,11 @@ def ensure_grok_plugin_root_symlink(
     Raises:
         OSError: 解決・リンクの作成に失敗した場合（原因を ``scripts/grok.sh`` が表示する）。
     """
-    base = home if home is not None else Path.home()
-    link = Path(link_path) if link_path is not None else base / ".grok" / "plugins" / "claq"
-
-    target = _resolve_symlink_target(base)
+    home = Path.home()
+    target = _resolve_symlink_target(home)
     if target is None:
         return None
-    return _ensure_symlink(link, target)
+    return _ensure_symlink(home / ".grok" / "plugins" / "claq", target)
 
 
 def _resolve_symlink_target(home: Path) -> Path | None:

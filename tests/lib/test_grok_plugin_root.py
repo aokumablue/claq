@@ -14,8 +14,9 @@ from claq.lib import grok_plugin_root as mod
 
 
 @pytest.fixture
-def link(tmp_path: Path) -> Path:
-    """既定位置 ``~/.grok/plugins/claq`` に当たるリンクのパス。"""
+def link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """``$HOME`` を ``tmp_path`` に差し替え、既定位置 ``~/.grok/plugins/claq`` に当たるリンクのパスを返す。"""
+    monkeypatch.setenv("HOME", str(tmp_path))
     return tmp_path / ".grok" / "plugins" / "claq"
 
 
@@ -184,7 +185,7 @@ def test_symlink_target_resolution_order(
     if env_root is not None:
         monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(locate(env_root)))
 
-    result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+    result = mod.ensure_grok_plugin_root_symlink()
 
     assert result == locate(expected).resolve()
     assert link.resolve() == result
@@ -192,16 +193,8 @@ def test_symlink_target_resolution_order(
 
 def test_returns_none_without_installed(tmp_path: Path, link: Path) -> None:
     """installed-plugins が無ければ None で、リンクも作らない（開発ツリーへは落ちない）。"""
-    assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None
+    assert mod.ensure_grok_plugin_root_symlink() is None
     assert not link.exists()
-
-
-def test_home_omitted_uses_path_home(tmp_path: Path, link: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """home 未指定時は Path.home()（$HOME）を使う（grok.sh からの実呼び出し経路）。"""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    target = _make_installed_plugin(tmp_path)
-
-    assert mod.ensure_grok_plugin_root_symlink(link_path=link) == target.resolve()
 
 
 @pytest.mark.parametrize(
@@ -226,7 +219,7 @@ def test_existing_link_state(
         link.parent.mkdir(parents=True)
         prepare(link, target)
 
-    result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+    result = mod.ensure_grok_plugin_root_symlink()
 
     if replaced:
         assert result == target.resolve()
@@ -244,7 +237,7 @@ def test_vanished_candidate_returns_none(tmp_path: Path, link: Path) -> None:
     hits: list[Path] = []
 
     with _vanishes_after_listing(lambda path: path == target, hits):
-        assert mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link) is None
+        assert mod.ensure_grok_plugin_root_symlink() is None
     assert hits
 
 
@@ -255,7 +248,7 @@ def test_unresolvable_existing_symlink_is_replaced(tmp_path: Path, link: Path) -
     link.symlink_to(link.parent / "missing")
 
     with _failing("resolve", lambda path: path == link, OSError()):
-        result = mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+        result = mod.ensure_grok_plugin_root_symlink()
 
     assert result == target.resolve()
     assert link.is_symlink()
@@ -285,4 +278,4 @@ def test_os_errors_are_propagated(
         prepare(link)
 
     with _failing(method, lambda path: should_fail(path, link), OSError("injected")), pytest.raises(OSError):
-        mod.ensure_grok_plugin_root_symlink(home=tmp_path, link_path=link)
+        mod.ensure_grok_plugin_root_symlink()
