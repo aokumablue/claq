@@ -75,7 +75,6 @@ _TOX_COMMAND_KEY_PATTERN = re.compile(
 )
 
 
-
 def _editable_text(tool_name: str, container: Any) -> list[str] | None:
     """書込み系入力から検査対象テキスト（新規/変更内容）の断片リストを取り出す。
 

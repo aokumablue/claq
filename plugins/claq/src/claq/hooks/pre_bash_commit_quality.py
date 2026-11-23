@@ -570,74 +570,62 @@ def evaluate(raw_input: str) -> str | None:
     理由に検査を迂回させないため deny する。commit と確定した入力は
     `_evaluate_confirmed_commit` に委譲し、以降は fail-closed で扱う。
 
-    Args:
-        raw_input: フックに渡された生の入力文字列です。
-
     1 回の評価の間は `scan_memo` で解析結果を使い回す。commit 検出・複合判定・対象 index の判定が
     同じコマンドを `analysis_segments` で解析するため。
+
+    Args:
+        raw_input: フックに渡された生の入力文字列です。
 
     Returns:
         ブロックする場合は理由、通す場合は None。
     """
     with scan_memo():
-        return _evaluate_in_scan(raw_input)
+        try:
+            payload = parse_json_object(raw_input)
+            if payload is None:
+                return _malformed_input_reason(raw_input)
 
+            # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める。先に判定できた
+            # コンテナの結論を返すと、先頭が「通る commit」のときに後続キーの commit が
+            # 検査されない。
+            groups = [
+                tuple(strip_data_heredoc_bodies(command) for command in group)
+                for group in iter_bash_command_groups(payload)
+            ]
+            # 予算は全候補を走査する前に検査する。候補ごとに走査と交互に検査すると、上限内の要素を
+            # 並べた argv 配列で要素の走査が積み上がり、上限を超える結合候補に着く前に timeout に
+            # 近づく（4,999 トークンの要素 45 個で 7.45 秒）。
+            if any(command_exceeds_scan_budget(command) for group in groups for command in group):
+                return _SCAN_BUDGET_MESSAGE
+            commits = [commit for group in groups for commit in _detect_group_commits(group)]
+            if not commits:
+                return None
 
-def _evaluate_in_scan(raw_input: str) -> str | None:
-    """`evaluate` の本体。`scan_memo` の中で呼ぶ。
+            # 複数コンテナに commit が散っている場合、どれがどの順で実行されるかは実行前に
+            # 確定できないため、1 コマンド内の複数 commit と同じく検査不能として deny する。
+            if len(commits) > 1:
+                log("[Hook] ERROR: commit content cannot be inspected before execution.")
+                return MULTIPLE_COMMITS_MESSAGE
 
-    Args:
-        raw_input: フックに渡された生の入力文字列です。
+            command, commit_args = commits[0]
+            compound_risk = next(filter(None, map(compound_commit_risk, command_dialect_variants(command))), None)
+            if compound_risk is not None:
+                log("[Hook] ERROR: commit content cannot be inspected before execution.")
+                return compound_risk
 
-    Returns:
-        ブロックする場合は理由、通す場合は None。
-    """
-    try:
-        payload = parse_json_object(raw_input)
-        if payload is None:
-            return _malformed_input_reason(raw_input)
+            target_risk = _commit_target_risk(command)
+            if target_risk is not None:
+                log("[Hook] ERROR: the commit may record an index other than the one scanned.")
+                return target_risk
 
-        # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める。先に判定できた
-        # コンテナの結論を返すと、先頭が「通る commit」のときに後続キーの commit が
-        # 検査されない。
-        groups = [
-            tuple(strip_data_heredoc_bodies(command) for command in group)
-            for group in iter_bash_command_groups(payload)
-        ]
-        # 予算は全候補を走査する前に検査する。候補ごとに走査と交互に検査すると、上限内の要素を
-        # 並べた argv 配列で要素の走査が積み上がり、上限を超える結合候補に着く前に timeout に
-        # 近づく（4,999 トークンの要素 45 個で 7.45 秒）。
-        if any(command_exceeds_scan_budget(command) for group in groups for command in group):
-            return _SCAN_BUDGET_MESSAGE
-        commits = [commit for group in groups for commit in _detect_group_commits(group)]
-        if not commits:
-            return None
+            return _evaluate_confirmed_commit(commit_args)
 
-        # 複数コンテナに commit が散っている場合、どれがどの順で実行されるかは実行前に
-        # 確定できないため、1 コマンド内の複数 commit と同じく検査不能として deny する。
-        if len(commits) > 1:
-            log("[Hook] ERROR: commit content cannot be inspected before execution.")
-            return MULTIPLE_COMMITS_MESSAGE
+        except Exception as err:
+            # commit と確定する前の例外は非ブロッキング。確定後の例外は
+            # _evaluate_confirmed_commit 側で fail-closed にする。
+            log(f"[Hook] Error: {err}")
 
-        command, commit_args = commits[0]
-        compound_risk = next(filter(None, map(compound_commit_risk, command_dialect_variants(command))), None)
-        if compound_risk is not None:
-            log("[Hook] ERROR: commit content cannot be inspected before execution.")
-            return compound_risk
-
-        target_risk = _commit_target_risk(command)
-        if target_risk is not None:
-            log("[Hook] ERROR: the commit may record an index other than the one scanned.")
-            return target_risk
-
-        return _evaluate_confirmed_commit(commit_args)
-
-    except Exception as err:
-        # commit と確定する前の例外は非ブロッキング。確定後の例外は
-        # _evaluate_confirmed_commit 側で fail-closed にする。
-        log(f"[Hook] Error: {err}")
-
-    return None
+        return None
 
 
 def main() -> int:

@@ -40,7 +40,6 @@ FILE_ONLY = {_FILE_ONLY_ATTR: True}
 """
 
 
-
 def _file_handler(log_dir: Path) -> logging.Handler:
     """日次ログファイルへ書く FileHandler を作る。
 

@@ -59,23 +59,18 @@ def make_check(
     }
 
 
-def file_has_content(root_dir: str | Path, relative_path: str) -> bool:
+def file_has_content(root_dir: Path, relative_path: str) -> bool:
     """相対パスが存在し、かつ空白以外の中身を持つかを確認する。
 
     存在を根拠に「テストがある」「ポリシーがある」と採点する以上、0 バイトへの
     切り詰めは不合格でなければならない（docs/adr/verification-scope-release-gates.md:
     skip されるゲートはゲートとして機能しない）。読み取り失敗は False として扱う。
     """
-    path = Path(root_dir, relative_path)
+    path = root_dir / relative_path
     try:
         return path.is_file() and bool(path.read_text(encoding="utf-8").strip())
     except (OSError, UnicodeDecodeError):
         return False
-
-
-def read_text(root_dir: str | Path, relative_path: str) -> str:
-    """テキストファイルを UTF-8 で読む。"""
-    return Path(root_dir, relative_path).read_text(encoding="utf-8")
 
 
 _VENDOR_DIR_NAMES = frozenset({".git", ".venv", "venv", "node_modules", "vendor", "__pycache__"})
@@ -117,7 +112,7 @@ def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
                 stack.append(Path(entry.path))
 
 
-def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
+def has_python_tests(root_dir: Path, minimum: int) -> bool:
     """pytest / unittest の命名規約（``test_*.py`` / ``*_test.py``）のテストが ``minimum`` 件以上あるかを調べる。
 
     拡張子だけの ``has_file_with_extension`` では Python のテストを拾えない
@@ -135,7 +130,7 @@ def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
             0 以下でも「0 件で True」にはならない（件数を加算した後にしか閾値を見ない）。
     """
     found = 0
-    for entry in _walk_dir(Path(root_dir)):
+    for entry in _walk_dir(root_dir):
         if entry.name.endswith(".py") and (entry.name.startswith("test_") or entry.name.endswith("_test.py")):
             found += 1
             if found >= minimum:
@@ -143,24 +138,24 @@ def has_python_tests(root_dir: str | Path, minimum: int) -> bool:
     return False
 
 
-def count_files(root_dir: str | Path, relative_dir: str, extension: str | None) -> int:
+def count_files(root_dir: Path, relative_dir: str, extension: str | None) -> int:
     """指定ディレクトリ以下の、``extension`` で終わる（None なら全）ファイル数を数える。"""
-    dir_path = Path(root_dir, relative_dir)
+    dir_path = root_dir / relative_dir
     return sum(1 for entry in _walk_dir(dir_path) if extension is None or entry.name.endswith(extension))
 
 
-def safe_read(root_dir: str | Path, relative_path: str) -> str:
+def safe_read(root_dir: Path, relative_path: str) -> str:
     """読めなければ空文字を返す読み込み。"""
     try:
-        return read_text(root_dir, relative_path)
+        return (root_dir / relative_path).read_text(encoding="utf-8")
     except OSError:
         return ""
 
 
-def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions: Sequence[str]) -> bool:
+def has_file_with_extension(root_dir: Path, relative_dir: str, extensions: Sequence[str]) -> bool:
     """指定拡張子のファイルが 1 つでもあるかを調べる。"""
     suffixes = tuple(extensions)
-    return any(entry.name.endswith(suffixes) for entry in _walk_dir(Path(root_dir, relative_dir)))
+    return any(entry.name.endswith(suffixes) for entry in _walk_dir(root_dir / relative_dir))
 
 
 # consumer モードで「このプラグインが導入済みか」を見るときの探索先。

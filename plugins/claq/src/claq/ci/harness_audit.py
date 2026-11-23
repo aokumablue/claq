@@ -145,7 +145,7 @@ class _HostingLayout(NamedTuple):
     ci_pass: bool
 
 
-def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> _HostingLayout:
+def _hosting_layout(root_dir: Path, hosting_service: str | None) -> _HostingLayout:
     """consumer 向けに、ホスティングごとの CI 設定の置き場所と充足状況を返す。
 
     ホスティングが不明なら、GitHub と GitLab のどちらの置き場所でも満たしたとみなす。
@@ -164,7 +164,7 @@ def _hosting_layout(root_dir: str | Path, hosting_service: str | None) -> _Hosti
     )
 
 
-def _consumer_tool_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def _consumer_tool_checks(root_dir: Path) -> list[dict[str, Any]]:
     """consumer モードの Tool Coverage カテゴリのチェックを返す。"""
     category = TOOL_COVERAGE
     return [
@@ -190,7 +190,7 @@ def _consumer_tool_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _consumer_context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def _consumer_context_checks(root_dir: Path) -> list[dict[str, Any]]:
     """consumer モードの Context Efficiency カテゴリのチェックを返す。"""
     category = CONTEXT_EFFICIENCY
     return [
@@ -215,7 +215,7 @@ def _consumer_context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _declares_package_test_script(root_dir: str | Path) -> bool:
+def _declares_package_test_script(root_dir: Path) -> bool:
     """``package.json`` の ``scripts.test`` に文字列のテストコマンドが宣言されているかを返す。"""
     package_json = parse_json_object(safe_read(root_dir, "package.json"))
     if package_json is None:
@@ -225,7 +225,7 @@ def _declares_package_test_script(root_dir: str | Path) -> bool:
 
 
 def _consumer_quality_checks(
-    root_dir: str | Path, hosting_label: str, ci_path: str, ci_pass: bool
+    root_dir: Path, hosting_label: str, ci_path: str, ci_pass: bool
 ) -> list[dict[str, Any]]:
     """consumer モードの Quality Gates カテゴリのチェックを返す。"""
     category = QUALITY_GATES
@@ -253,7 +253,7 @@ def _consumer_quality_checks(
     ]
 
 
-def _consumer_memory_eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def _consumer_memory_eval_checks(root_dir: Path) -> list[dict[str, Any]]:
     """consumer モードの Memory Persistence・Eval Coverage カテゴリのチェックを返す。"""
     return [
         make_check(
@@ -279,7 +279,7 @@ def _consumer_memory_eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _consumer_security_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def _consumer_security_checks(root_dir: Path) -> list[dict[str, Any]]:
     """consumer モードの Security Guardrails カテゴリのチェックを返す。"""
     return [
         make_check(
@@ -292,7 +292,7 @@ def _consumer_security_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def get_consumer_checks(root_dir: str | Path, hosting_service: str | None) -> list[dict[str, Any]]:
+def get_consumer_checks(root_dir: Path, hosting_service: str | None) -> list[dict[str, Any]]:
     """consumer project 向けのチェック定義を、カテゴリ順に連結して返す。
 
     Args:

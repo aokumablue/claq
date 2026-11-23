@@ -104,7 +104,7 @@ _MEMORY_LIFECYCLE_COMMANDS = (
 )
 
 
-def _has_memory_lifecycle_hooks(root_dir: str | Path) -> bool:
+def _has_memory_lifecycle_hooks(root_dir: Path) -> bool:
     """SessionStart / SessionEnd が実在のメモリ永続化コマンドを起動しているかを返す。
 
     ディレクトリの存在ではなく ``hooks/hooks.json`` をパースし、各イベントが
@@ -126,15 +126,15 @@ _ON_INVOKE_BUDGET_CHARS = 20000
 _SURFACE_GLOBS = (("skills", "SKILL.md"), ("commands", "*.md"), ("agents", "*.md"))
 
 
-def _iter_surface_files(root_dir: str | Path) -> Iterator[Path]:
+def _iter_surface_files(root_dir: Path) -> Iterator[Path]:
     """常時オン/起動時コストを持つ定義ファイルを列挙する。"""
     for directory, pattern in _SURFACE_GLOBS:
-        base = Path(root_dir) / directory
+        base = root_dir / directory
         if base.is_dir():
             yield from sorted(base.rglob(pattern))
 
 
-def always_on_description_chars(root_dir: str | Path) -> int:
+def always_on_description_chars(root_dir: Path) -> int:
     """全 surface の frontmatter ``description`` の合計文字数を返す。
 
     毎セッション払うコストは frontmatter の ``description`` だけなので、それを
@@ -165,16 +165,16 @@ def always_on_description_chars(root_dir: str | Path) -> int:
     return total
 
 
-def oversized_surfaces(root_dir: str | Path) -> list[str]:
+def oversized_surfaces(root_dir: Path) -> list[str]:
     """起動ごとの読み込みコストが上限を超える定義ファイルの相対パスを返す。"""
     return [
-        str(path.relative_to(Path(root_dir)))
+        str(path.relative_to(root_dir))
         for path in _iter_surface_files(root_dir)
         if len(path.read_text(encoding="utf-8", errors="replace")) > _ON_INVOKE_BUDGET_CHARS
     ]
 
 
-def _hook_modules_resolve(root_dir: str | Path, hooks_json: str) -> bool:
+def _hook_modules_resolve(root_dir: Path, hooks_json: str) -> bool:
     """hooks.json が参照する claq フックモジュールがすべて実在するかを判定する。
 
     個数ではなく「宣言したものが実在する」を契約にする。こちらは破損を確実に
@@ -184,7 +184,7 @@ def _hook_modules_resolve(root_dir: str | Path, hooks_json: str) -> bool:
     return bool(modules) and all(file_has_content(root_dir, f"src/claq/hooks/{name}.py") for name in modules)
 
 
-def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
+def _manifest_surfaces_resolve(root_dir: Path) -> bool:
     """plugin.json が宣言するディレクトリがすべて実在するかを判定する。"""
     manifest = parse_json_object(safe_read(root_dir, ".claude-plugin/plugin.json"))
     if manifest is None:
@@ -201,13 +201,13 @@ def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
     return bool(declared) and all(Path(root_dir, entry.lstrip("./").rstrip("/")).exists() for entry in declared)
 
 
-def _dev_root(root_dir: str | Path) -> Path:
+def _dev_root(root_dir: Path) -> Path:
     """プラグインディレクトリ（``<repo>/plugins/claq``）から開発リポジトリのルートを返す。
 
     pyproject.toml と tests/ は配布物の外（リポジトリ直下）に置くため、品質ゲートの検査はここを見る。
     check の ``path`` も、これらはリポジトリ直下からの相対パスで書く。
     """
-    return Path(root_dir).resolve().parents[1]
+    return root_dir.parents[1]
 
 
 def _coverage_gate_configured(dev_root: Path) -> bool:
@@ -258,7 +258,7 @@ def _declares_preflight_hook(hooks_json: str) -> bool:
     )
 
 
-def _tool_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
+def _tool_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Tool Coverage カテゴリのチェックを返す。"""
     category = TOOL_COVERAGE
     return [
@@ -300,7 +300,7 @@ def _tool_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
     ]
 
 
-def _context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def _context_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モードの Context Efficiency カテゴリのチェックを返す。"""
     category = CONTEXT_EFFICIENCY
     return [
@@ -321,7 +321,7 @@ def _context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _quality_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def _quality_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モードの Quality Gates カテゴリのチェックを返す。"""
     category = QUALITY_GATES
     dev_root = _dev_root(root_dir)
@@ -352,7 +352,7 @@ def _quality_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _memory_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def _memory_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モードの Memory Persistence カテゴリのチェックを返す。"""
     category = MEMORY_PERSISTENCE
     return [
@@ -381,7 +381,7 @@ def _memory_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def _eval_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モードの Eval Coverage カテゴリのチェックを返す。"""
     category = EVAL_COVERAGE
     return [
@@ -410,7 +410,7 @@ def _eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def _security_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
+def _security_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Security Guardrails カテゴリのチェックを返す。"""
     category = SECURITY_GUARDRAILS
     return [
@@ -445,7 +445,7 @@ def _security_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, An
     ]
 
 
-def _cost_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def _cost_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モードの Cost Efficiency カテゴリのチェックを返す。"""
     category = COST_EFFICIENCY
     return [
@@ -466,7 +466,7 @@ def _cost_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     ]
 
 
-def get_repo_checks(root_dir: str | Path) -> list[dict[str, Any]]:
+def get_repo_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モード向けのチェック定義を、カテゴリ順に連結して返す。"""
     hooks_json = safe_read(root_dir, "hooks/hooks.json")
     return [
