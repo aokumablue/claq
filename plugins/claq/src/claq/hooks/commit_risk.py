@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
     INPLACE_EDIT_EXECUTABLES,
@@ -49,34 +50,55 @@ RAW_GIT_COMMIT_RE = re.compile(r"\bgit\s+commit\b")
 
 
 @memoized_in_scan
+def _tokenized_segments(command: str) -> tuple[list[list[str]], bool]:
+    """コマンド文字列をトークン化してセグメントへ分ける。
+
+    外側の文字列にも ``-c`` の内側の文字列にも使う。方言の読み方 2 通りや argv 配列の要素と結合文字列が
+    同じ内側の文字列を持つため、`scan_memo` の中では結果を使い回す（呼び出し側は変更しない）。
+
+    Args:
+        command: トークン化する文字列。
+
+    Returns:
+        (segments, parsed_cleanly) のタプル。
+    """
+    tokens, parsed_cleanly = tokenize_with_status(command)
+    return split_segments(tokens), parsed_cleanly
+
+
+@memoized_in_scan
 def analysis_segments(command: str) -> tuple[list[list[str]], bool]:
     """コマンドを、commit の検出と判定に使うセグメント列へ分ける。
 
     既知シェルの ``-c`` 文字列（``bash -lc 'git add . && git commit -m x'``）は 1 段だけ内側の
     セグメントへ展開する（docs/adr/shell-analysis-boundary.md: 2 段以上のネストは非目標）。展開しないと
-    文字列形の内側の commit は検出されず、品質スキャンなしで通る。外側のセグメントは内側の前に残す
-    （``bash -c '…' > tracked.py`` のリダイレクトは内側の実行より先に書く）。内側の各セグメントの
-    先頭には、シェル起動より前のトークン（``GIT_INDEX_FILE=x`` 等の代入・wrapper）を前置する。
+    文字列形の内側の commit は検出されず、品質スキャンなしで通る。内側の文字列は外側と同じく heredoc の
+    データ本文を落としてから読む（`block_no_verify` / `bash_config_protection` の再帰と同じ前処理）。
+    外側のセグメントは ``-c`` の文字列だけを除いて内側の前に残す（``bash -c '…' > tracked.py`` の
+    リダイレクトは内側の実行より先に書く。文字列を残すと、commit 自身のメッセージを「commit より前の
+    コマンド」として読む）。内側の各セグメントの先頭には、シェル起動より前のトークン（``GIT_INDEX_FILE=x``
+    等の代入・wrapper）を前置する。
+
+    `scan_memo` の中では結果を使い回すため、呼び出し側は返したリストを変更しない。
 
     Args:
         command: 検査対象のコマンド文字列です。
-
-    `scan_memo` の中では結果を使い回すため、呼び出し側は返したリストを変更しない。
 
     Returns:
         (segments, parsed_cleanly) のタプル。parsed_cleanly は外側と展開した内側のどちらも
         クォート不整合なくトークン化できたときだけ True です。
     """
-    tokens, parsed_cleanly = tokenize_with_status(command)
+    outer_segments, parsed_cleanly = _tokenized_segments(command)
     segments: list[list[str]] = []
-    for segment in split_segments(tokens):
-        segments.append(segment)
+    for segment in outer_segments:
         wrapper = extract_shell_wrapper_call(segment)
         if wrapper is None:
+            segments.append(segment)
             continue
-        inner_tokens, inner_parsed_cleanly = tokenize_with_status(wrapper.command)
+        segments.append(segment[: wrapper.command_index] + segment[wrapper.command_index + 1 :])
+        inner_segments, inner_parsed_cleanly = _tokenized_segments(strip_data_heredoc_bodies(wrapper.command))
         parsed_cleanly = parsed_cleanly and inner_parsed_cleanly
-        segments += [[*wrapper.prefix, *inner] for inner in split_segments(inner_tokens)]
+        segments += [[*wrapper.prefix, *inner] for inner in inner_segments]
     return segments, parsed_cleanly
 
 

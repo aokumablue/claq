@@ -110,6 +110,8 @@ def test_compound_commit_risk_sees_glued_operator_runs(command: str) -> None:
         pytest.param("bash -c 'git commit -am x' > app.py", commit_risk._MUTATION_BEFORE_COMMIT_MESSAGE, id="outer-redirect"),
         pytest.param("git commit -m a && bash -c 'git commit -m b'", commit_risk.MULTIPLE_COMMITS_MESSAGE, id="one-each-side"),
         pytest.param("bash -lc 'git commit -m x'", None, id="single-commit-inside"),
+        # 内側の heredoc のデータ本文は外側と同じく落とす（本文の `git commit` を commit と読まない）。
+        pytest.param('bash -c "cat > notes.md <<EOF\ngit commit -m x\nEOF"', None, id="heredoc-body-inside"),
     ],
 )
 def test_compound_commit_risk_reads_one_shell_wrapper_level(command: str, expected: str | None) -> None:

@@ -39,10 +39,10 @@ class TestHeredocNormalization:
     @pytest.mark.parametrize(
         ("segment", "expected"),
         [
-            (["sh", "-c", "git commit"], ((), "git commit")),
-            (["env", "A=1", "bash", "-lc", "x"], (("env", "A=1"), "x")),
-            (["sh", "sh", "-c", "x"], ((), "x")),
-            (["sh", "x", "bash", "-c", "y"], ((), "y")),
+            (["sh", "-c", "git commit"], ((), "git commit", 2)),
+            (["env", "A=1", "bash", "-lc", "x"], (("env", "A=1"), "x", 4)),
+            (["sh", "sh", "-c", "x"], ((), "x", 3)),
+            (["sh", "x", "bash", "-c", "y"], ((), "y", 4)),
             (["sh", "-c"], None),
             (["sh", "x"], None),
             (["git", "-c", "x"], None),
