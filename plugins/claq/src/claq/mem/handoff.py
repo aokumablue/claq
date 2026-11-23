@@ -17,7 +17,6 @@ DB に読み出されないデータを溜めない。
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import re
 import time
@@ -35,6 +34,7 @@ from claq.lib.harness import (
 )
 from claq.lib.redaction import PLACEHOLDER, redact
 from claq.lib.slim_text import TRUNCATION_MARKER, compact_line
+from claq.lib.stdin_io import parse_json_object
 from claq.lib.tag_stripping import keep_allowed_chars, strip_tags
 from claq.mem.knowledge_input import optional_str
 from claq.mem.logger import get as _get_logger
@@ -459,14 +459,7 @@ def parse_entry(line: str) -> dict[str, Any] | None:
     Returns:
         解析できた dict。空行・不正 JSON・非 dict なら None。
     """
-    stripped = line.strip()
-    if not stripped:
-        return None
-    try:
-        entry = json.loads(stripped)
-    except json.JSONDecodeError:
-        return None
-    return entry if isinstance(entry, dict) else None
+    return parse_json_object(line.strip())
 
 
 # ユーザー発話として本文に採ってよいブロック種別（allowlist）。

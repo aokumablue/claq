@@ -547,6 +547,26 @@ class TestTranscriptSummary:
         # 使用ツールだけでは引き継ぐ材料にならないため、遡りを打ち切ると何も残らない。
         assert _from_transcript(tmp_path, entries) == ""
 
+    def test_line_too_deep_to_parse_is_skipped(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """深すぎる入れ子で JSON 解析が RecursionError を送出する行は、不正 JSON と同じく読み飛ばすこと。
+
+        行の上限（``_MAX_TRANSCRIPT_LINE_CHARS``）内でも、Python 3.14 では約 100 万文字の入れ子で
+        RecursionError になる。閾値は Python の版で変わるため、解析そのものを差し替えて固定する。
+        """
+        real_loads = handoff_mod.parse_json_object.__globals__["json"].loads
+
+        def loads(text: str, *args: object, **kwargs: object) -> object:
+            """深い入れ子の印を持つ行だけ RecursionError を送出する。"""
+            if "DEEP" in text:
+                raise RecursionError("maximum recursion depth exceeded")
+            return real_loads(text, *args, **kwargs)
+
+        monkeypatch.setattr(handoff_mod.parse_json_object.__globals__["json"], "loads", loads)
+
+        assert _from_transcript(tmp_path, ['{"DEEP": 1}', _user("テストを直す")]) == _from_transcript(
+            tmp_path, [_user("テストを直す")]
+        )
+
     def test_empty_transcript_yields_nothing(self, tmp_path: Path) -> None:
         """空のトランスクリプトからは何も組み立てないこと。"""
         path = tmp_path / "transcript.jsonl"

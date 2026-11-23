@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -136,14 +135,6 @@ def safe_read(root_dir: str | Path, relative_path: str) -> str:
         return read_text(root_dir, relative_path)
     except OSError:
         return ""
-
-
-def safe_parse_json(text: str) -> Any | None:
-    """JSON を解析する。空文字や不正 JSON は None。"""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
 
 
 def has_file_with_extension(root_dir: str | Path, relative_dir: str, extensions: Sequence[str]) -> bool:

@@ -16,6 +16,11 @@ from claq.mem.models import Repo
 from ._support import _raising, _run_cli, _seed
 
 
+def _raise_recursion(_text: str) -> object:
+    """深い入れ子の JSON 解析と同じく RecursionError を送出する。"""
+    raise RecursionError("maximum recursion depth exceeded")
+
+
 class TestSessionStartContract:
     """SessionStart フック経路（context）の出力契約。"""
 
@@ -219,6 +224,13 @@ class TestArgvAndStdin:
         """JSON object として読めない stdin は CommandError にする（learn に「title は必須」と誤った文面を出さない）。"""
         monkeypatch.setattr(cli, "read_raw_stdin", lambda: raw)
         with pytest.raises(command_support.CommandError, match=expected):
+            cli._read_stdin_json()
+
+    def test_read_stdin_json_rejects_too_deep_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """深すぎる入れ子で JSON 解析が RecursionError を送出しても、不正 JSON と同じ CommandError にする。"""
+        monkeypatch.setattr(cli, "read_raw_stdin", lambda: "[[[]]]")
+        monkeypatch.setattr(cli.json, "loads", _raise_recursion)
+        with pytest.raises(command_support.CommandError, match="JSON として読めません"):
             cli._read_stdin_json()
 
     def test_positionals_flags_and_values(self, monkeypatch: pytest.MonkeyPatch) -> None:

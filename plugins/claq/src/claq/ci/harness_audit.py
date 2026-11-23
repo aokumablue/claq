@@ -20,10 +20,10 @@ from claq.ci.harness_audit_utils import (
     has_plugin_install,
     has_python_tests,
     make_check,
-    safe_parse_json,
     safe_read,
 )
 from claq.lib.git_hosting import GITHUB, GITLAB, SERVICE_LABELS, detect_git_hosting_service
+from claq.lib.stdin_io import parse_json_object
 
 # origin からホスティングを判定できないときの表示名。
 _UNKNOWN_HOSTING_LABEL = "Git hosting（origin から判定できず）"
@@ -219,8 +219,8 @@ def _consumer_context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _declares_package_test_script(root_dir: str | Path) -> bool:
     """``package.json`` の ``scripts.test`` に文字列のテストコマンドが宣言されているかを返す。"""
-    package_json = safe_parse_json(safe_read(root_dir, "package.json"))
-    if not isinstance(package_json, dict):
+    package_json = parse_json_object(safe_read(root_dir, "package.json"))
+    if package_json is None:
         return False
     scripts = package_json.get("scripts")
     return isinstance(scripts, dict) and isinstance(scripts.get("test"), str)

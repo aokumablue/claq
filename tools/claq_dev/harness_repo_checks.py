@@ -13,12 +13,12 @@ from claq.ci.harness_audit_utils import (
     count_files,
     file_has_content,
     make_check,
-    safe_parse_json,
     safe_read,
 )
 from claq.hooks.shell_tokens import basename_any_separator
 from claq.launcher import PROTECTION_HOOKS
 from claq.lib.constants import HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD
+from claq.lib.stdin_io import parse_json_object
 from claq_dev.ci_common import extract_frontmatter
 
 _HOOK_WRAPPER_BASENAMES = {HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD}
@@ -85,8 +85,8 @@ def _event_has_matching_command(event_hooks: Any, argv_patterns: tuple[tuple[str
 
 def _hook_events(hooks_json: str) -> dict[str, Any] | None:
     """hooks.json の生テキストからイベント名→定義の辞書を返す。形が違えば None。"""
-    parsed = safe_parse_json(hooks_json)
-    if not isinstance(parsed, dict) or not isinstance(parsed.get("hooks"), dict):
+    parsed = parse_json_object(hooks_json)
+    if parsed is None or not isinstance(parsed.get("hooks"), dict):
         return None
     return parsed["hooks"]
 
@@ -179,8 +179,8 @@ def _hook_modules_resolve(root_dir: str | Path, hooks_json: str) -> bool:
 
 def _manifest_surfaces_resolve(root_dir: str | Path) -> bool:
     """plugin.json が宣言するディレクトリがすべて実在するかを判定する。"""
-    manifest = safe_parse_json(safe_read(root_dir, ".claude-plugin/plugin.json"))
-    if not isinstance(manifest, dict):
+    manifest = parse_json_object(safe_read(root_dir, ".claude-plugin/plugin.json"))
+    if manifest is None:
         return False
     declared = [
         entry
