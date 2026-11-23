@@ -15,6 +15,7 @@ from claq.hooks.hook_common import (
     INPLACE_EDIT_EXECUTABLES,
     is_git_executable_token,
     is_inplace_edit_flag,
+    memoized_in_scan,
     write_command_name,
 )
 from claq.hooks.shell_tokens import (
@@ -47,6 +48,7 @@ _MUTATION_BEFORE_COMMIT_MESSAGE = (
 RAW_GIT_COMMIT_RE = re.compile(r"\bgit\s+commit\b")
 
 
+@memoized_in_scan
 def analysis_segments(command: str) -> tuple[list[list[str]], bool]:
     """コマンドを、commit の検出と判定に使うセグメント列へ分ける。
 
@@ -58,6 +60,8 @@ def analysis_segments(command: str) -> tuple[list[list[str]], bool]:
 
     Args:
         command: 検査対象のコマンド文字列です。
+
+    `scan_memo` の中では結果を使い回すため、呼び出し側は返したリストを変更しない。
 
     Returns:
         (segments, parsed_cleanly) のタプル。parsed_cleanly は外側と展開した内側のどちらも

@@ -63,6 +63,7 @@ from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
     emit_block_output,
     resolve_repo_root,
+    scan_memo,
 )
 from claq.hooks.shell_tokens import (
     command_dialect_variants,
@@ -565,6 +566,22 @@ def evaluate(raw_input: str) -> str | None:
     JSON が壊れていても raw 文字列上に `git commit` が見える場合は、malformed JSON を
     理由に検査を迂回させないため deny する。commit と確定した入力は
     `_evaluate_confirmed_commit` に委譲し、以降は fail-closed で扱う。
+
+    Args:
+        raw_input: フックに渡された生の入力文字列です。
+
+    1 回の評価の間は `scan_memo` で解析結果を使い回す。commit 検出・複合判定・対象 index の判定が
+    同じコマンドを `analysis_segments` で解析するため。
+
+    Returns:
+        ブロックする場合は理由、通す場合は None。
+    """
+    with scan_memo():
+        return _evaluate_in_scan(raw_input)
+
+
+def _evaluate_in_scan(raw_input: str) -> str | None:
+    """`evaluate` の本体。`scan_memo` の中で呼ぶ。
 
     Args:
         raw_input: フックに渡された生の入力文字列です。
