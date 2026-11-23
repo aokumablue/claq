@@ -65,6 +65,12 @@ _DENIED = [
     "env X=1 tee pyproject.toml",
     # 追記代入 `NAME+=value` も代入として読み飛ばす（block_no_verify と同じ規則。実行位置を `X+=1` と取り違えない）。
     "X+=1 tee pyproject.toml",
+    # シェルの予約語の後ろも実行位置（cd の判定と同じ読み飛ばし）。if / for / グループ化の中の書込みを見落とさない。
+    "if [ -f pyproject.toml ]; then rm pyproject.toml; fi",
+    "{ rm pyproject.toml; }",
+    "for f in a; do rm pyproject.toml; done",
+    "! rm pyproject.toml",
+    "if true; then tee pyproject.toml < /dev/null; fi",
     "sudo tee pyproject.toml",
     "command tee pyproject.toml",
     "sudo -u root tee pyproject.toml",

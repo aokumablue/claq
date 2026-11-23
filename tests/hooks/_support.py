@@ -315,7 +315,7 @@ _EXPECTED_CONDITIONALLY_PROTECTED_FILES = frozenset({
 _EXPECTED_DIRECTORY_CHANGE_COMMANDS = frozenset(
     {"cd", "pushd", "popd", "chdir", "set-location", "sl", "push-location", "pop-location"}
 )
-# `bash_config_protection._LEADING_SHELL_KEYWORDS` の期待内容（ディレクトリ移動の前に読み飛ばす語）。
+# `bash_config_protection._LEADING_SHELL_KEYWORDS` の期待内容（実行位置の前に読み飛ばす語）。
 _EXPECTED_LEADING_SHELL_KEYWORDS = frozenset(
     {"{", "(", "!", "if", "then", "elif", "else", "while", "until", "do", "builtin"}
 )

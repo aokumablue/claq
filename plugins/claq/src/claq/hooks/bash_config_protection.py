@@ -148,9 +148,10 @@ _DD_COMMANDS = frozenset({"dd"})
 # arity 表を持つより誤検出側を選ぶ。``New-Item`` は `tee` へ写す（`WINDOWS_WRITE_COMMAND_ALIASES`）。
 _TOUCH_COMMANDS = frozenset({"touch"})
 
-# ディレクトリ移動の判定で、コマンド名より前に来うるシェルの予約語・グループ化と `builtin`。
+# 実行位置の特定（`_command_index`）で、コマンド名より前に来うるシェルの予約語・グループ化と `builtin`。
 # ``{ cd x; …}`` / ``if cd x; then …`` / ``builtin cd x`` の ``cd`` を見落とすと、cwd 基準の解決を
-# 信用したまま相対パスの書込み先を判定してしまう。
+# 信用したまま相対パスの書込み先を判定してしまう。``then rm ruff.toml`` / ``do tee ruff.toml`` の
+# 書込みコマンドも同じ位置にあるため、書込み先の抽出と cd の判定が同じ読み飛ばしを使う。
 _LEADING_SHELL_KEYWORDS = frozenset({"{", "(", "!", "if", "then", "elif", "else", "while", "until", "do", "builtin"})
 
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILES_FOLDED
@@ -258,7 +259,8 @@ _WRAPPER_POSITIONAL_VALUE_RE = re.compile(r"^[0-9]")
 def _command_index(segment: list[str]) -> int | None:
     """セグメント内で実際に実行される executable トークンの index を返す。
 
-    先頭から連続する literal 環境変数代入（``NAME=value``）と `_COMMAND_POSITION_WRAPPERS`
+    先頭のシェル予約語（`_LEADING_SHELL_KEYWORDS`）を読み飛ばした後、
+    連続する literal 環境変数代入（``NAME=value``）と `_COMMAND_POSITION_WRAPPERS`
     の実行 wrapper（値を取る wrapper 自身のオプションは値ごと）を消費し、最初にそれ以外の
     形になったトークンの index を返す。wrapper 通過後に限り、数字で始まる非オプション語を
     wrapper の positional 値として読み飛ばす（``5foo ruff.toml`` の実行位置はずらさない）。
@@ -272,6 +274,8 @@ def _command_index(segment: list[str]) -> int | None:
         wrapper/オプションで実行対象が特定できない場合は None。
     """
     index = 0
+    while index < len(segment) and segment[index] in _LEADING_SHELL_KEYWORDS:
+        index += 1
     seen_wrapper = False
     while index < len(segment):
         token = segment[index]
@@ -441,14 +445,10 @@ def _changes_working_directory(segment: list[str]) -> bool:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        先頭の `_LEADING_SHELL_KEYWORDS` を除いた実行位置のコマンドが `DIRECTORY_CHANGE_COMMANDS`
-        に属するなら True。
+        実行位置のコマンド（`_command_index`）が `DIRECTORY_CHANGE_COMMANDS` に属するなら True。
     """
-    start = 0
-    while start < len(segment) and segment[start] in _LEADING_SHELL_KEYWORDS:
-        start += 1
-    index = _command_index(segment[start:])
-    return index is not None and normalize_executable_name(segment[start + index]) in DIRECTORY_CHANGE_COMMANDS
+    index = _command_index(segment)
+    return index is not None and normalize_executable_name(segment[index]) in DIRECTORY_CHANGE_COMMANDS
 
 
 def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
