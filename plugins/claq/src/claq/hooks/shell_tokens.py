@@ -19,6 +19,12 @@ MAX_COMMAND_BYTES = 64 * 1024
 # トークン（``status;echo``）を全フックが同じ規則で割るため 1 箇所に持つ。
 SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
 
+# ``NAME=value`` と追記代入 ``NAME+=value`` の両方を代入として読む（group 1 が名前、group 2 が値）。``+=`` は
+# bash の追記で、未設定の変数へは単なる代入になるため、``HOME+=x`` も ``HOME`` の差し替えである。
+# `block_no_verify`（env 注入）と `bash_config_protection`（実行位置）が共有する。片方だけが ``+=`` を
+# 知っていると、``X+=1 tee ruff.toml`` の実行位置がずれて書き込み先が検査から外れる。
+ENV_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\+?=(.*)$", re.DOTALL)
+
 # ``sh -c`` 再帰と heredoc 本文判定で共有する既知シェル実行ファイル（`normalize_executable_name` で畳んで判定）。
 # 別集合を持つと「本文が実行されるか」の判定軸が 2 つに割れる。
 SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash"})

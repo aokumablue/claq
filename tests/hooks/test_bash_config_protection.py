@@ -63,6 +63,8 @@ _DENIED = [
     "sudo ln -f /dev/null pyproject.toml",
     "env cp /tmp/x pyproject.toml",
     "env X=1 tee pyproject.toml",
+    # 追記代入 `NAME+=value` も代入として読み飛ばす（block_no_verify と同じ規則。実行位置を `X+=1` と取り違えない）。
+    "X+=1 tee pyproject.toml",
     "sudo tee pyproject.toml",
     "command tee pyproject.toml",
     "sudo -u root tee pyproject.toml",

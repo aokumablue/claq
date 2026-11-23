@@ -92,6 +92,7 @@ from claq.hooks.hook_common import (
 )
 from claq.hooks.host_guard_targets import HOST_SETTINGS_DISPLAY_NAMES, find_host_guard_match
 from claq.hooks.shell_tokens import (
+    ENV_ASSIGNMENT_RE,
     WRITE_REDIRECT_OPERATORS,
     command_dialect_variants,
     command_exceeds_scan_budget,
@@ -219,9 +220,6 @@ _RAW_TEXT_RISK_INDICATORS = (
     + ("ln",)
 )
 
-# `NAME=value` 形式の literal 環境変数代入。
-_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-
 # `_command_index` が読み飛ばす実行 wrapper。``tee pyproject.toml``（deny）と
 # ``echo tee pyproject.toml``（allow）を分けるには実行位置の特定が要り、名前集合が
 # 原理的に不可避になる。`block_no_verify` の全トークン走査との非対称は意図的で、
@@ -276,7 +274,7 @@ def _command_index(segment: list[str]) -> int | None:
     seen_wrapper = False
     while index < len(segment):
         token = segment[index]
-        if _ENV_ASSIGNMENT_RE.match(token):
+        if ENV_ASSIGNMENT_RE.match(token):
             index += 1
             continue
         if normalize_executable_name(token) in _COMMAND_POSITION_WRAPPERS:
