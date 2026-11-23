@@ -111,20 +111,6 @@ class Database:
         """
         self.close()
 
-    def _returning(self, sql: str, params: tuple[object, ...]) -> sqlite3.Row:
-        """変更系 SQL を実行してコミットし、RETURNING の先頭行を返す。
-
-        Args:
-            sql: ``RETURNING *`` を含む SQL。
-            params: プレースホルダに渡す値。
-
-        Returns:
-            先頭の ``sqlite3.Row``。
-        """
-        row = self.conn.execute(sql, params).fetchone()
-        self.conn.commit()
-        return row
-
     # --- repos ---
 
     def upsert_repo(self, repo: Repo) -> Repo:
@@ -139,7 +125,7 @@ class Database:
         Returns:
             DB に格納された最新状態の Repo。
         """
-        row = self._returning(
+        row = self.conn.execute(
             """INSERT INTO repos
                  (id, identity_key, root_path, remote_url, first_seen_at, last_seen_at)
                VALUES (?, ?, ?, ?, ?, ?)
@@ -156,7 +142,8 @@ class Database:
                 repo.first_seen_at,
                 repo.last_seen_at,
             ),
-        )
+        ).fetchone()
+        self.conn.commit()
         return Repo.from_row(row)
 
     def relink_repo_identity(self, repo_id: str, identity_key: str) -> None:
