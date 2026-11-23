@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .audit_log import AuditLog
-from .cursor import PAGE_TOKEN_TOO_LONG, accepts_position, encode, encode_payload, is_int, read_payload
+from .cursor import PAGE_TOKEN_TOO_LONG, accepts_position, encode, encode_payload, is_int, read_payload, verified_body
 from .errors import CursorError, FacadeError
 
 _VERSION = 1
@@ -122,14 +122,7 @@ class CursorCodec:
             CursorError: ASCII でない・形式が不正・署名が合わない（改ざん・別の用途・主体・
                 検索条件）・本体を読めないか版や形が違う・期限切れのとき。
         """
-        # compare_digest は ASCII でない str を TypeError で拒むので、先に同じ文面で拒否する
-        if not token.isascii():
-            raise CursorError()
-        # 区切りの無い・空の部分は、署名が合わないので下の照合で拒否される
-        body, _, signature = token.partition(".")
-        expected = self._sign(body, scope=scope, principal=principal, fingerprint=fingerprint)
-        if not hmac.compare_digest(signature, expected):
-            raise CursorError()
+        body = verified_body(token, lambda raw: self._sign(raw, scope=scope, principal=principal, fingerprint=fingerprint))
         payload = _read_payload(body)
         if payload is None:
             raise CursorError()

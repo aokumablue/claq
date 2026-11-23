@@ -17,7 +17,7 @@ import base64
 import hashlib
 import hmac
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .errors import CursorError, FacadeError
@@ -154,6 +154,30 @@ def read_payload(body: str, version: int) -> dict[str, Any] | None:
     return payload
 
 
+def verified_body(token: str, expected: Callable[[str], str]) -> str:
+    """cursor の照合値を確かめ、本体を返す（照合値を確かめる前に本体を読まない）。
+
+    `signed_cursor` も同じ手順で開く（照合値の作り方だけを ``expected`` で渡す）。
+
+    Args:
+        token: クライアントから受け取った cursor（``本体.照合値``）。
+        expected: 本体から、正しい照合値を作る関数。
+
+    Returns:
+        照合値が合った本体（符号化済み）。
+
+    Raises:
+        CursorError: ASCII でない・照合値が合わないとき（区切りの無い・空の部分も照合で拒否される）。
+    """
+    # compare_digest は ASCII でない str を TypeError で拒むので、先に同じ文面で拒否する
+    if not token.isascii():
+        raise CursorError()
+    body, _, check = token.partition(".")
+    if not hmac.compare_digest(check, expected(body)):
+        raise CursorError()
+    return body
+
+
 class PageCursor:
     """一覧の続きの cursor。上流のページトークン（`page`）と、そのページで読み飛ばす件数（`skip`）を封じる。
 
@@ -240,12 +264,7 @@ class PageCursor:
             CursorError: ASCII でない・照合値が合わない（書き換え・別の用途・別の検索条件）・本体を読めないか
                 版や形が違う・長さか位置の形がこのページングの発行するものと違うとき。
         """
-        # compare_digest は ASCII でない str を TypeError で拒むので、先に同じ文面で拒否する
-        if not token.isascii():
-            raise CursorError()
-        body, _, check = token.partition(".")
-        if not hmac.compare_digest(check, self._check(body, fingerprint)):
-            raise CursorError()
+        body = verified_body(token, lambda raw: self._check(raw, fingerprint))
         payload = read_payload(body, _VERSION)
         if payload is None or not self._accepts(token, payload["pos"]):
             raise CursorError()
