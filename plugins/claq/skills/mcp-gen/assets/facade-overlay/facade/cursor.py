@@ -116,14 +116,31 @@ def accepts_position(token: str, position: Mapping[str, Any], *, max_page_token_
     )
 
 
-def _read_position(body: str) -> dict[str, Any] | None:
-    """照合値を確かめた本体を読み、版と位置の形が正しければ位置を返す。
+def encode_payload(payload: Mapping[str, Any]) -> str:
+    """cursor の本体（版と位置など）を、キー順を固定した JSON の符号化文字列にする。
+
+    `signed_cursor` も同じ形で符号化する（本体の作り方を 1 か所に置く）。
+
+    Args:
+        payload: 本体。
+
+    Returns:
+        符号化済みの本体。
+    """
+    return encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def read_payload(body: str, version: int) -> dict[str, Any] | None:
+    """照合値を確かめた本体を読み、版が ``version`` で位置が dict なら本体を返す。
+
+    `signed_cursor` も同じ規則で読む（期限など追加の項目は呼び出し側が確かめる）。
 
     Args:
         body: 符号化済みの本体。
+        version: 期待する版。
 
     Returns:
-        位置。読めない・版が違う・位置が dict でないときは None。
+        本体。読めない・dict でない・版が違う・位置が dict でないときは None。
     """
     try:
         payload = json.loads(decode(body))
@@ -131,10 +148,10 @@ def _read_position(body: str) -> dict[str, Any] | None:
         return None
     if not isinstance(payload, dict):
         return None
-    version, position = payload.get("v"), payload.get("pos")
-    if not (is_int(version) and version == _VERSION and isinstance(position, dict)):
+    payload_version = payload.get("v")
+    if not (is_int(payload_version) and payload_version == version and isinstance(payload.get("pos"), dict)):
         return None
-    return position
+    return payload
 
 
 class PageCursor:
@@ -203,7 +220,7 @@ class PageCursor:
                 開けない cursor は返さない。
         """
         payload = {"v": _VERSION, "pos": dict(position)}
-        body = encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        body = encode_payload(payload)
         token = f"{body}.{self._check(body, fingerprint)}"
         if not self._accepts(token, position):
             raise FacadeError(PAGE_TOKEN_TOO_LONG)
@@ -229,7 +246,7 @@ class PageCursor:
         body, _, check = token.partition(".")
         if not hmac.compare_digest(check, self._check(body, fingerprint)):
             raise CursorError()
-        position = _read_position(body)
-        if position is None or not self._accepts(token, position):
+        payload = read_payload(body, _VERSION)
+        if payload is None or not self._accepts(token, payload["pos"]):
             raise CursorError()
-        return position
+        return payload["pos"]
