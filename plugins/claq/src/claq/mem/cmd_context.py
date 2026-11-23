@@ -151,7 +151,7 @@ def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
     """
     if not rows:
         return ""
-    ordered = sorted(rows, key=lambda row: (row.confidence, row.updated_at, row.id or 0), reverse=True)
+    ordered = sorted(rows, key=lambda row: (row.confidence, row.updated_at, row.id), reverse=True)
     return "\n".join([f"## {heading}", *fit_budget([_format_injected_item(row) for row in ordered], budget)])
 
 
