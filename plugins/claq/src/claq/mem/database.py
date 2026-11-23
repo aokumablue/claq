@@ -125,20 +125,6 @@ class Database:
         self.conn.commit()
         return row
 
-    def _updated(self, sql: str, params: tuple[object, ...]) -> bool:
-        """UPDATE を実行してコミットし、1 行以上更新できたかを返す。
-
-        Args:
-            sql: UPDATE 文。
-            params: プレースホルダに渡す値。
-
-        Returns:
-            対象行があれば True、無ければ False。
-        """
-        cursor = self.conn.execute(sql, params)
-        self.conn.commit()
-        return cursor.rowcount > 0
-
     # --- repos ---
 
     def upsert_repo(self, repo: Repo) -> Repo:
@@ -173,7 +159,7 @@ class Database:
         )
         return Repo.from_row(row)
 
-    def relink_repo_identity(self, repo_id: str, identity_key: str) -> bool:
+    def relink_repo_identity(self, repo_id: str, identity_key: str) -> None:
         """既存リポジトリ行を新しい ``identity_key`` へ載せ替える。
 
         remote の追加・変更・削除で ``identity_key`` が変わっても、同一
@@ -187,14 +173,9 @@ class Database:
         Args:
             repo_id: 載せ替える既存行の ``repos.id``。
             identity_key: 新しい正体キー。
-
-        Returns:
-            対象行が存在して更新できた場合 True、該当なしなら False。
         """
-        return self._updated(
-            "UPDATE repos SET identity_key = ? WHERE id = ?",
-            (identity_key, repo_id),
-        )
+        self.conn.execute("UPDATE repos SET identity_key = ? WHERE id = ?", (identity_key, repo_id))
+        self.conn.commit()
 
     def list_repos(self) -> list[Repo]:
         """登録済みリポジトリを最終観測の新しい順に返す。
@@ -311,43 +292,33 @@ class Database:
         ).fetchall()
         return [Knowledge.from_row(row) for row in rows]
 
-    def set_knowledge_status(self, knowledge_id: int, status: str) -> bool:
-        """知識カードの status を更新する。
+    def promote_knowledge(self, knowledge_id: int) -> None:
+        """知識カードを ``active`` にし、``updated_at`` を現在時刻にする。
 
         Args:
             knowledge_id: 対象の ``knowledge.id``。
-            status: ``active`` / ``pending`` / ``archived``。
-
-        Returns:
-            対象行が存在して更新できた場合 True、該当なしなら False。
         """
-        return self._updated(
-            "UPDATE knowledge SET status = ?, updated_at = ? WHERE id = ?",
-            (status, utc_now_iso(), knowledge_id),
+        self.conn.execute(
+            "UPDATE knowledge SET status = 'active', updated_at = ? WHERE id = ?",
+            (utc_now_iso(), knowledge_id),
         )
+        self.conn.commit()
 
     # --- sessions ---
 
-    def start_session(self, session: Session) -> Session:
+    def start_session(self, session: Session) -> None:
         """セッションを開始登録する。
 
-        同一 ``session_uid`` の再入は既存行を書き換えずに返す（``started_at`` は
-        初回の値のまま）。衝突時の ``DO UPDATE`` は、``RETURNING`` に既存行を
-        返させるための無変更の代入。
+        同一 ``session_uid`` の再入は既存行を書き換えない（``started_at`` は初回の値のまま）。
 
         Args:
             session: 開始するセッション。
-
-        Returns:
-            DB に格納された最新状態の Session。
         """
-        row = self._returning(
+        self.conn.execute(
             """INSERT INTO sessions
                  (session_uid, repo_id, handoff, started_at, ended_at)
                VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(session_uid) DO UPDATE SET
-                 session_uid = excluded.session_uid
-               RETURNING *""",
+               ON CONFLICT(session_uid) DO NOTHING""",
             (
                 session.session_uid,
                 session.repo_id,
@@ -356,7 +327,7 @@ class Database:
                 session.ended_at,
             ),
         )
-        return Session.from_row(row)
+        self.conn.commit()
 
     def finish_session(self, session_uid: str, handoff: str, ended_at: str) -> bool:
         """セッションに引き継ぎと終了時刻を記録する。
@@ -369,10 +340,12 @@ class Database:
         Returns:
             対象セッションが存在して更新できた場合 True、該当なしなら False。
         """
-        return self._updated(
+        cursor = self.conn.execute(
             "UPDATE sessions SET handoff = ?, ended_at = ? WHERE session_uid = ?",
             (handoff, ended_at, session_uid),
         )
+        self.conn.commit()
+        return cursor.rowcount > 0
 
     def get_latest_session(self, repo_id: str) -> Session | None:
         """引き継ぎを持つセッションのうち、終了が最も新しい 1 件を返す。

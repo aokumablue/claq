@@ -384,7 +384,7 @@ def handle_promote(settings: Settings, args: CommandArgs) -> None:
     actor = actor_identity()
     with Database(settings.db_path) as db:
         found = find_knowledge(db, key)
-        db.set_knowledge_status(found.id, "active")
+        db.promote_knowledge(found.id)
     log.info(
         "promote: key=%s scope=%s source=%s previous_status=%s actor=%s",
         found.key,

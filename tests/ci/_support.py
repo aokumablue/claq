@@ -35,6 +35,6 @@ def _exit_code_as_main(module_name: str) -> object:
 
 @pytest.fixture(autouse=True)
 def _isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`find_plugin_install` が実ホームの導入状態を読まないよう、ホームを tmp 配下へ固定する。"""
+    """`has_plugin_install` が実ホームの導入状態を読まないよう、ホームを tmp 配下へ固定する。"""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("CLAQ_HOME", raising=False)

@@ -208,11 +208,6 @@ class TestRepos:
             db.upsert_repo(repo)
         assert [repo.id for repo in db.list_repos()] == ["b-newest", "c-mid", "a-old"]
 
-    def test_relink_repo_identity_reports_missing_row(self, db: Database) -> None:
-        """存在しない id の載せ替えは False を返すこと。"""
-        assert db.relink_repo_identity("no-such-repo", "github.com/o/r") is False
-
-
 class TestKnowledge:
     """knowledge の CRUD。"""
 
@@ -302,35 +297,26 @@ class TestKnowledge:
         rows = db.list_knowledge(scope="repo", repo_id="claq-dev", status="active")
         assert [row.key for row in rows] == ["hit"]
 
-    def test_set_status_updates_row(self, db: Database) -> None:
-        """status と updated_at（現在時刻）を更新して True を返す。"""
-        stored = db.upsert_knowledge(_knowledge())
+    def test_promote_updates_row(self, db: Database) -> None:
+        """status を active にし、updated_at を現在時刻にする。"""
+        stored = db.upsert_knowledge(_knowledge(status="pending"))
         before = utc_now_iso()
-        assert db.set_knowledge_status(stored.id, "archived") is True
+        db.promote_knowledge(stored.id)
         after = db.get_knowledge_by_key("use-python3")
-        assert after.status == "archived"
+        assert after.status == "active"
         assert before <= after.updated_at <= utc_now_iso()
-
-    def test_set_status_returns_false_when_missing(self, db: Database) -> None:
-        """該当行が無ければ False。"""
-        assert db.set_knowledge_status(9999, "archived") is False
 
 
 class TestSessions:
     """sessions の CRUD。"""
 
     def test_start_session_inserts_then_is_idempotent(self, db: Database) -> None:
-        """開始登録で id を採番し、同一 session_uid の再入は既存行をそのまま返す。"""
+        """開始登録で行を作り、同一 session_uid の再入は既存行を書き換えない。"""
         db.upsert_repo(_repo())
-        first = db.start_session(Session(session_uid="uid-1", repo_id="claq-dev", started_at=_TS))
-        assert first.id is not None
-        assert first.handoff == ""
-        assert first.ended_at is None
-        second = db.start_session(
-            Session(session_uid="uid-1", repo_id="claq-dev", started_at="2026-09-09T00:00:00+00:00")
-        )
-        assert second.id == first.id
-        assert second.started_at == _TS
+        db.start_session(Session(session_uid="uid-1", repo_id="claq-dev", started_at=_TS))
+        db.start_session(Session(session_uid="uid-1", repo_id="claq-dev", started_at="2026-09-09T00:00:00+00:00"))
+        rows = db.conn.execute("SELECT handoff, started_at, ended_at FROM sessions").fetchall()
+        assert [tuple(row) for row in rows] == [("", _TS, None)]
 
     def test_start_session_requires_existing_repo(self, db: Database) -> None:
         """未登録 repo_id は外部キー制約で弾かれる。"""

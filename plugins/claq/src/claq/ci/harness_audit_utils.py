@@ -173,23 +173,15 @@ _PLUGIN_CACHE_GLOBS = (
 )
 
 
-def find_plugin_install(root_dir: str | Path) -> str | None:
-    """claq プラグインの ``plugin.json`` の絶対パスを探す。無ければ None。
+def has_plugin_install(root_dir: Path) -> bool:
+    """claq プラグインの ``plugin.json`` がリポジトリ直下かホームディレクトリ配下にあるかを返す。
 
-    リポジトリ直下を先に、ホームディレクトリ配下を続けて探す。ホームの解決は
-    `core_utils.get_home_dir()` に委ねる（``HOME`` を直接読むと、``HOME`` を
-    持たない Windows で必ずリポジトリ直下しか見えない）。各ルートでは平置き
-    レイアウトを先に見て、無ければマーケットプレイス配置を走査する。複数版が
-    残っている場合はパスの辞書順で最初のものを返す。呼び出し側は導入有無しか
-    見ないため、これは同じ入力に同じ答えを返させるための順序固定であって、
-    版の新旧を表さない。
+    ホームの解決は `core_utils.get_home_dir()` に委ねる（``HOME`` を直接読むと、``HOME`` を
+    持たない Windows で必ずリポジトリ直下しか見えない）。各ルートで平置きレイアウトと
+    マーケットプレイス配置を見て、最初に見つかった時点で返す。
     """
-    for search_root in (Path(root_dir), get_home_dir()):
-        for relative in _PLUGIN_JSON_RELATIVES:
-            candidate = search_root / relative
-            if candidate.exists():
-                return str(candidate)
-        cached = sorted(str(path) for glob in _PLUGIN_CACHE_GLOBS for path in search_root.glob(glob))
-        if cached:
-            return cached[0]
-    return None
+    return any(
+        any((search_root / relative).exists() for relative in _PLUGIN_JSON_RELATIVES)
+        or any(next(search_root.glob(glob), None) is not None for glob in _PLUGIN_CACHE_GLOBS)
+        for search_root in (root_dir, get_home_dir())
+    )

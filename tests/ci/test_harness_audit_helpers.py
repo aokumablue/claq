@@ -47,27 +47,21 @@ _CACHE = "home/.claude/plugins/cache/claq/claq/{}/.claude-plugin/plugin.json"
 @pytest.mark.parametrize(
     ("home", "manifests", "expected"),
     [
-        ("home", [_FLAT], _FLAT),
-        ("", [_FLAT], _FLAT),
-        ("home", [_CACHE.format(v) for v in ("0.9.9", "0.9.10", "1.0")], _CACHE.format("0.9.10")),
-        ("home", [], None),
+        ("home", [_FLAT], True),
+        ("", [_FLAT], True),
+        ("home", [_CACHE.format(v) for v in ("0.9.9", "1.0")], True),
+        ("home", [], False),
     ],
     ids=["root-flat", "root-flat-without-home", "home-marketplace-cache", "none"],
 )
-def test_find_plugin_install(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: str, manifests: list[str], expected: str | None
+def test_has_plugin_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: str, manifests: list[str], expected: bool
 ) -> None:
-    """root 直下の平置きを（HOME が空でも）見つけ、ホームの cache 配置は辞書順で最初の版を返す。
-
-    契約は「辞書順で最初」であって「最新版」ではない。0.9.10 は辞書順で先頭だが最新でも、
-    作成順の先頭・末尾でもない。
-    """
+    """root 直下の平置きを（HOME が空でも）見つけ、ホームのマーケットプレイス配置も見つける。"""
     monkeypatch.setenv("HOME", str(tmp_path / home) if home else "")
     _write_files(tmp_path, dict.fromkeys(manifests, "{}"))
 
-    found = harness_audit.find_plugin_install(tmp_path)
-
-    assert found == (str(tmp_path / expected) if expected else None)
+    assert harness_audit.has_plugin_install(tmp_path) is expected
 
 
 @pytest.mark.parametrize(

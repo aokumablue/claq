@@ -16,8 +16,8 @@ from typing import Any, NamedTuple, NoReturn
 from claq.ci.harness_audit_utils import (
     count_files,
     file_has_content,
-    find_plugin_install,
     has_file_with_extension,
+    has_plugin_install,
     has_python_tests,
     make_check,
     safe_parse_json,
@@ -174,7 +174,7 @@ def _consumer_tool_checks(root_dir: str | Path) -> list[dict[str, Any]]:
             check_id="consumer-plugin-install", category=category, points=4, scopes=["repo"],
             path="~/.claude/plugins/",
             description="プラグインがインストールされている",
-            passed=bool(find_plugin_install(root_dir)),
+            passed=has_plugin_install(root_dir),
             fix="Install the claq plugin for this user or project before auditing project-specific harness quality.",
         ),
         make_check(
@@ -334,16 +334,15 @@ def summarize_category_scores(checks: list[dict[str, Any]]) -> dict[str, dict[st
     return scores
 
 
-def build_report(scope: str, root_dir: str | Path) -> dict[str, Any]:
+def build_report(scope: str, root_dir: Path) -> dict[str, Any]:
     """利用者のプロジェクトを consumer モードで採点したレポートを組み立てる。
 
     Args:
         scope: 監査スコープ。
-        root_dir: 監査対象のルート。
+        root_dir: 監査対象のルート（`run` が解決済みの Path を渡す）。
     """
-    resolved_root = Path(root_dir).resolve()
-    checks = get_consumer_checks(resolved_root, detect_git_hosting_service(resolved_root))
-    return assemble_report(scope, resolved_root, "consumer", checks)
+    checks = get_consumer_checks(root_dir, detect_git_hosting_service(root_dir))
+    return assemble_report(scope, root_dir, "consumer", checks)
 
 
 def assemble_report(
