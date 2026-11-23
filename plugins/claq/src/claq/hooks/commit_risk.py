@@ -15,10 +15,10 @@ from claq.hooks.hook_common import (
     INPLACE_EDIT_EXECUTABLES,
     is_git_executable_token,
     is_inplace_edit_flag,
+    write_command_name,
 )
 from claq.hooks.shell_tokens import (
     WRITE_REDIRECT_OPERATORS,
-    normalize_executable_name,
     split_segments,
     tokenize,
     tokenize_with_status,
@@ -193,8 +193,8 @@ def _segment_mutates_worktree_or_index(segment: list[str]) -> bool:
             continue
 
         # 素の basename（大小区別・`.exe` 残し）で照合すると ``CP evil.py app.py`` や
-        # ``cp.exe`` が語彙から外れ、未検査の内容が commit されるため共有の正規化を通す。
-        name = normalize_executable_name(token)
+        # ``cp.exe``・``Copy-Item`` が語彙から外れ、未検査の内容が commit されるため共有の正規化を通す。
+        name = write_command_name(token)
         if name in _WORKTREE_MUTATING_EXECUTABLES or name in ALWAYS_MUTATING_EDIT_EXECUTABLES:
             return True
         if name in INPLACE_EDIT_EXECUTABLES:

@@ -220,6 +220,49 @@ ALWAYS_MUTATING_EDIT_EXECUTABLES = frozenset({"ed", "red", "ex", "sponge"})
 # `bash_config_protection` と `pre_bash_commit_quality` が共有する。
 INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl", "ruby"})
 
+# PowerShell / cmd のファイル書込み・削除コマンドを、書き込み先の取り方が同じ POSIX 名へ写す表。
+# Windows の Bash ツールは PowerShell で動くため、別名（``ri`` / ``mi`` / ``clc`` は PowerShell の既定
+# エイリアス、``del`` / ``erase`` / ``rd`` / ``copy`` / ``move`` は cmd 組み込み）と長形式 cmdlet を併記する。
+# `bash_config_protection` と `commit_risk` が `write_command_name` を通して共有する。片方だけが
+# PowerShell 名を知っていると、``Copy-Item evil.py app.py; git commit -am x`` が片方のフックだけを素通りする。
+WINDOWS_WRITE_COMMAND_ALIASES = {
+    "copy-item": "cp",
+    "copy": "cp",
+    "cpi": "cp",
+    "move-item": "mv",
+    "move": "mv",
+    "mi": "mv",
+    "remove-item": "rm",
+    "del": "rm",
+    "erase": "rm",
+    "rd": "rm",
+    "ri": "rm",
+    "clear-content": "truncate",
+    "clc": "truncate",
+    "set-content": "tee",
+    "add-content": "tee",
+    "out-file": "tee",
+    "sc": "tee",
+    "ac": "tee",
+    # 非オプション引数をすべて作成先として読む点で `tee` と同じ取り方になる。
+    "new-item": "tee",
+    "ni": "tee",
+}
+
+
+def write_command_name(token: str) -> str:
+    """実行トークンを、書込みコマンドの照合に使う名前（`normalize_executable_name` + Windows 別名の POSIX 化）へ畳む。
+
+    Args:
+        token: 実行位置の 1 トークン。
+
+    Returns:
+        PowerShell / cmd の書込みコマンドなら対応する POSIX 名、それ以外は正規化した名前。
+    """
+    name = normalize_executable_name(token)
+    return WINDOWS_WRITE_COMMAND_ALIASES.get(name, name)
+
+
 # カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
 # 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
 # `bash_config_protection` と `pre_bash_commit_quality` が共有する。
