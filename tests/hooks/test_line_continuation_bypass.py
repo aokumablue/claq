@@ -175,7 +175,7 @@ def test_scan_error_output_carries_sanitized_path(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(scanner, "log", logs.append)
 
     monkeypatch.setattr(scanner, "get_staged_file_content", lambda path: None)
-    unreadable = scanner.find_file_issues(hostile, deadline=scanner.new_secret_scan_deadline())
+    unreadable = scanner.find_file_issues(hostile, repo_root=None, deadline=scanner.new_secret_scan_deadline())
 
     for issue in unreadable:
         assert "\n" not in issue["message"]

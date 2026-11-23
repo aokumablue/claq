@@ -23,7 +23,7 @@ _OVER_1MIB = "x" * (1024 * 1024 + 1)
 def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """INDEX の内容を ``content`` に差し替えて ``find_file_issues`` を満額の予算で呼ぶ。"""
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-    return commit_quality_scanner.find_file_issues(file_path, deadline=_scan_deadline())
+    return commit_quality_scanner.find_file_issues(file_path, repo_root=None, deadline=_scan_deadline())
 
 
 @pytest.mark.parametrize(

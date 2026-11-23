@@ -246,33 +246,23 @@ class Database:
         ).fetchone()
         return Knowledge.from_row(row) if row else None
 
-    def list_knowledge(
-        self,
-        scope: str | None = None,
-        repo_id: str | None = None,
-        status: str | None = None,
-    ) -> list[Knowledge]:
-        """条件に一致する知識カードを更新の新しい順に返す。
+    def list_knowledge(self, scope: str, status: str, repo_id: str | None = None) -> list[Knowledge]:
+        """スコープと status が一致する知識カードを更新の新しい順に返す。
 
         Args:
-            scope: ``global`` / ``repo``。None なら絞り込まない。
-            repo_id: 所属リポジトリ。None なら絞り込まない。
-            status: ``active`` / ``pending`` / ``archived``。None なら絞り込まない。
+            scope: ``global`` / ``repo``。
+            status: ``active`` / ``pending`` / ``archived``。
+            repo_id: 所属リポジトリ。None なら絞り込まない（global スコープの行は repo_id を持たない）。
 
         Returns:
             Knowledge のリスト。該当が無ければ空リスト。
         """
-        clauses: list[str] = []
-        params: list[str] = []
-        for column, value in (("scope", scope), ("repo_id", repo_id), ("status", status)):
-            if value is not None:
-                clauses.append(f"{column} = ?")
-                params.append(value)
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = self.conn.execute(
-            f"SELECT * FROM knowledge{where} ORDER BY updated_at DESC, id DESC",
-            params,
-        ).fetchall()
+        sql = "SELECT * FROM knowledge WHERE scope = ? AND status = ?"
+        params = [scope, status]
+        if repo_id is not None:
+            sql += " AND repo_id = ?"
+            params.append(repo_id)
+        rows = self.conn.execute(f"{sql} ORDER BY updated_at DESC, id DESC", params).fetchall()
         return [Knowledge.from_row(row) for row in rows]
 
     def promote_knowledge(self, knowledge_id: int) -> None:

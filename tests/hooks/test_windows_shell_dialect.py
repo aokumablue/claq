@@ -129,15 +129,15 @@ def test_bypass_flag_in_windows_reading(command: str, expected: bool) -> None:
     [
         # 指標を小文字で持つため、生テキスト側も大小を無視しないと「JSON が壊れているときだけ
         # `Remove-Item` が通る」非対称が残る。保護名も大小無視（macOS/Windows は大小同一視）。
-        ("{broken Remove-Item ruff.toml", "ruff.toml"),
-        ("{broken Get-Content ruff.toml", None),
-        ("{broken rm RUFF.TOML", "ruff.toml"),
-        ("{broken cat RUFF.TOML", None),
+        ("{broken Remove-Item ruff.toml", True),
+        ("{broken Get-Content ruff.toml", False),
+        ("{broken rm RUFF.TOML", True),
+        ("{broken cat RUFF.TOML", False),
     ],
 )
-def test_malformed_input_fallback_matches_case_insensitively(raw_input: str, expected: str | None) -> None:
+def test_malformed_input_fallback_matches_case_insensitively(raw_input: str, expected: bool) -> None:
     """JSON が壊れている縮退経路でも長形式 cmdlet と大文字の保護名を拾う。"""
-    assert _raw_text_write_risk(raw_input) == expected
+    assert _raw_text_write_risk(raw_input) is expected
 
 
 def test_command_name_comparisons_are_case_insensitive() -> None:

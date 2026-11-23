@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 
 import pytest
+
+from claq.lib import env_pointer
 
 _ENV_TEMPLATE = Path(__file__).resolve().parents[2] / "plugins" / "claq" / "runtime" / "env-template.sh"
 
@@ -39,3 +42,9 @@ def _isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("CLAQ_HOME", raising=False)
     return home
+
+
+def _write_env_pointer_for(plugin_root: Path) -> None:
+    """``plugin_root`` を実行中の plugin root とみなして `env_pointer.write_env_pointer` を呼ぶ。"""
+    with mock.patch.object(env_pointer, "get_plugin_root", return_value=plugin_root):
+        env_pointer.write_env_pointer()

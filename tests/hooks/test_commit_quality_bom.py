@@ -65,7 +65,7 @@ def scan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_pa
             "run",
             lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=raw, stderr=b""),
         )
-        return commit_quality_scanner.find_file_issues("notes.txt", deadline=deadline)
+        return commit_quality_scanner.find_file_issues("notes.txt", repo_root=None, deadline=deadline)
 
     return _scan
 

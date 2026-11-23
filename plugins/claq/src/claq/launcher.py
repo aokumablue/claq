@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     # md（agents/commands/skills）がベンダ固有パスを書かずに plugin root を
     # 解決できるよう、全 hook 起動のたびに ~/.claq/env.sh ポインタを更新する。
     # 失敗しても hook 本来の処理は妨げない。
-    write_env_pointer(PLUGIN_ROOT)
+    write_env_pointer()
 
     args = list(sys.argv[1:] if argv is None else argv)
     background = bool(args) and args[0] == "--bg"

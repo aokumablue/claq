@@ -165,13 +165,12 @@ def always_on_description_chars(root_dir: Path) -> int:
     return total
 
 
-def oversized_surfaces(root_dir: Path) -> list[str]:
-    """起動ごとの読み込みコストが上限を超える定義ファイルの相対パスを返す。"""
-    return [
-        str(path.relative_to(root_dir))
+def has_oversized_surface(root_dir: Path) -> bool:
+    """起動ごとの読み込みコストが上限を超える定義ファイルがあるかを返す（最初に見つけた時点で止まる）。"""
+    return any(
+        len(path.read_text(encoding="utf-8", errors="replace")) > _ON_INVOKE_BUDGET_CHARS
         for path in _iter_surface_files(root_dir)
-        if len(path.read_text(encoding="utf-8", errors="replace")) > _ON_INVOKE_BUDGET_CHARS
-    ]
+    )
 
 
 def _hook_modules_resolve(root_dir: Path, hooks_json: str) -> bool:
@@ -453,7 +452,7 @@ def _cost_checks(root_dir: Path) -> list[dict[str, Any]]:
             check_id="cost-no-oversized-surface", category=category, points=3, scopes=["repo"],
             path="skills/, commands/",
             description=f"起動ごとに読まれる定義が 1 件も肥大化していない（各 {_ON_INVOKE_BUDGET_CHARS} 文字以内）",
-            passed=not oversized_surfaces(root_dir),
+            passed=not has_oversized_surface(root_dir),
             fix="Split or trim the oversized SKILL.md / command definitions; each is paid in full on every invocation.",
         ),
         make_check(

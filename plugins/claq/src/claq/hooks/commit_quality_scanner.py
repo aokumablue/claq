@@ -578,7 +578,7 @@ def _scan_error_issue(file_path: str, stage: str, err: Exception) -> dict:
     return _issue("scan_error", message, line=0, severity="error")
 
 
-def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline: float) -> list[dict]:
+def find_file_issues(file_path: str, *, repo_root: Path | None, deadline: float) -> list[dict]:
     """ファイル内容から代表的な問題を検出します。
 
     `repo_root` が None なら INDEX から、渡すと作業ツリー（`git commit -a` の未ステージ

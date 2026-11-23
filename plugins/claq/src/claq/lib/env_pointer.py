@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 
 from claq.lib.constants import BASE_DIR_NAME, RUNTIME_DIR_NAME
-from claq.lib.core_utils import make_private_dirs, unlink_stale_entries
+from claq.lib.core_utils import get_plugin_root, make_private_dirs, unlink_stale_entries
 from claq.lib.subprocess_utils import SUBPROCESS_FAILURES, run_text
 
 _ROOTS_DIRNAME = "roots"
@@ -76,18 +76,16 @@ def ancestor_pointers_supported() -> bool:
     return hasattr(os, "setsid")
 
 
-def write_env_pointer(plugin_root: Path) -> None:
-    """plugin root を ``~/.claq`` 配下のポインタへ書き出す。
+def write_env_pointer() -> None:
+    """このプラグインのソースルート（`core_utils.get_plugin_root`。``launcher.PLUGIN_ROOT`` と同じ値）を
+    ``~/.claq`` 配下のポインタへ書き出す。
 
     hook のあらゆる起動経路から呼ばれるため、失敗（``OSError`` と HOME を決められない
     ``RuntimeError``）で hook 本来の処理を妨げない。ただし無音の機能低下を防ぐため、
     失敗はプロセスごと 1 回だけ stderr へ記録する。
-
-    Args:
-        plugin_root: このプラグインのソースルート（``launcher.PLUGIN_ROOT``）。
     """
     try:
-        _write_env_pointer_unsafe(plugin_root)
+        _write_env_pointer_unsafe(get_plugin_root())
     except (OSError, RuntimeError) as exc:
         _warn_once(str(exc))
 

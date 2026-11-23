@@ -268,7 +268,7 @@ def test_within_repo_root_returns_false_when_repo_root_resolve_fails(tmp_path: P
 )
 def test_malformed_fallback_covers_destructive_verbs(raw_input: str, denied: bool) -> None:
     """malformed JSON fallback は削除・リンク系の verb を拾い、読むだけの verb は拾わない。"""
-    assert (bash_config_protection._raw_text_write_risk(raw_input) is not None) is denied
+    assert bash_config_protection._raw_text_write_risk(raw_input) is denied
 
 
 _BLOCKED_PYPROJECT = "BLOCKED: Modifying pyproject.toml is not allowed."

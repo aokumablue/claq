@@ -590,7 +590,7 @@ def _find_protected_write_in_dialect(command: str, *, _outer_scope_certain: bool
     return None
 
 
-def _raw_text_write_risk(raw_input: str) -> str | None:
+def _raw_text_write_risk(raw_input: str) -> bool:
     """JSON が壊れている場合の fallback: 生テキストに保護対象 basename と書き込み指示が両方見えるかを判定する。
 
     「壊れているというだけで deny」にはせず、保護対象ファイル名と破壊的操作の指示の
@@ -602,18 +602,14 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
         raw_input: フックへ渡された生の入力文字列。
 
     Returns:
-        保護対象ファイル名。該当しなければ None。
+        保護対象ファイル名と書き込み指示の両方が見えれば True。
     """
     # 指標には PowerShell の長形式 cmdlet（`Remove-Item`）が入るため、トークン化経路の
-    # 名前比較と同じ casefold で大小を無視する。
+    # 名前比較と同じ casefold で大小を無視する。`_ALL_PROTECTED_BASENAMES` は既に畳み済み。
     lowered = raw_input.casefold()
-    if not any(indicator in lowered for indicator in _RAW_TEXT_RISK_INDICATORS):
-        return None
-    # `_ALL_PROTECTED_BASENAMES` は既に畳み済み。
-    for name in sorted(_ALL_PROTECTED_BASENAMES):
-        if name in lowered:
-            return name
-    return None
+    return any(indicator in lowered for indicator in _RAW_TEXT_RISK_INDICATORS) and any(
+        name in lowered for name in _ALL_PROTECTED_BASENAMES
+    )
 
 
 _SCAN_BUDGET_MESSAGE = scan_budget_message("pre:bash-config-protection", "command")
