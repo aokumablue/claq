@@ -586,6 +586,17 @@ def test_every_directory_change_command_forces_unconditional_deny(
     assert _run("bash_config_protection", _bash(f"{command} sub && {outside_repo}"), monkeypatch) == 2
 
 
+def test_directory_change_before_shell_wrapper_reaches_the_inner_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """外側の cd は ``sh -c`` の内側にも効くため、内側の書き込み先も cwd 基準で信用しないこと。
+
+    内側だけで cd の有無を判定すると、``cd sub && bash -c '…'`` が包まない形（deny）と割れて素通りする。
+    対照は cd の無いラッパーで、repo ルート外の書き込み先は allow のまま。
+    """
+    outside_repo = "printf x > ../ruff.toml"
+    assert _run("bash_config_protection", _bash(f"bash -c '{outside_repo}'"), monkeypatch) == 0
+    assert _run("bash_config_protection", _bash(f"cd sub && bash -c '{outside_repo}'"), monkeypatch) == 2
+
+
 @pytest.mark.parametrize("header", _EXPECTED_LINT_SECTION_HEADERS)
 def test_every_lint_section_header_is_detected(header: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """`_LINT_SECTION_HEADERS` の全要素が条件付き保護を発火させること（層1・前方一致なので `[tool.ruff` 等は `.sub]` を足す）。"""
