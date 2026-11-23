@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from claq.hooks import conditional_protection
+from claq.hooks import conditional_protection, edit_text
 from claq.hooks.hook_common import scan_memo
 
 from ._support import _edit, _run, _write_content
@@ -221,6 +221,19 @@ def test_conditional_protection(
         pytest.param("apply_patch", 123, None, id="apply-patch-wrong-type"),
         pytest.param("apply_patch", "raw", ["raw"], id="apply-patch-raw-string"),
         pytest.param("MultiEdit", {"edits": "x"}, None, id="multiedit-edits-not-list"),
+        # 断片ごとに本文を走査するため、件数は全文を組み立てる経路と同じ上限で判定不能にする。
+        pytest.param(
+            "MultiEdit",
+            {"edits": [{"old_string": "a", "new_string": "b"}] * (edit_text.MAX_EDITS + 1)},
+            None,
+            id="multiedit-over-edit-limit",
+        ),
+        pytest.param(
+            "MultiEdit",
+            {"edits": [{"old_string": "a", "new_string": "b"}] * edit_text.MAX_EDITS},
+            ["a", "b"] * edit_text.MAX_EDITS,
+            id="multiedit-at-edit-limit",
+        ),
         pytest.param("Edit", {"old_string": 1}, None, id="edit-snippets-not-str"),
         # Edit 系で container が dict でない（想定外の shape）場合は判定不能扱い。
         pytest.param("Edit", "raw string, not dict", None, id="edit-container-not-dict"),
