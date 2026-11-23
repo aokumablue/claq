@@ -534,7 +534,7 @@ _EXPECTED_WINDOWS_WRITE_COMMAND_ALIASES = {
     **dict.fromkeys(("move-item", "move", "mi", "rename-item", "rename", "ren", "rni"), "mv"),
     **dict.fromkeys(("remove-item", "del", "erase", "rd", "rmdir", "ri"), "rm"),
     **dict.fromkeys(("clear-content", "clc"), "truncate"),
-    **dict.fromkeys(("set-content", "add-content", "out-file", "sc", "ac", "new-item", "ni"), "tee"),
+    **dict.fromkeys(("tee-object", "set-content", "add-content", "out-file", "sc", "ac", "new-item", "ni"), "tee"),
 }
 
 

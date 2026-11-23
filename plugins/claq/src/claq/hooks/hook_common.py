@@ -258,6 +258,7 @@ WINDOWS_WRITE_COMMAND_ALIASES = {
     "ri": "rm",
     "clear-content": "truncate",
     "clc": "truncate",
+    "tee-object": "tee",
     "set-content": "tee",
     "add-content": "tee",
     "out-file": "tee",
