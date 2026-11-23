@@ -25,14 +25,13 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 from claq.lib.constants import BASE_DIR_NAME, RUNTIME_DIR_NAME
 from claq.lib.core_utils import make_private_dirs, unlink_stale_entries
-from claq.lib.subprocess_utils import run_text
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES, run_text
 
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
@@ -210,7 +209,7 @@ def _ps_parent_and_lstart(pid: int, deadline: float) -> tuple[int, str] | None:
         proc = run_text(
             ["ps", "-o", "ppid=,lstart=", "-p", str(pid)], timeout=remaining, extra_env={"LC_ALL": "C"}
         )
-    except (OSError, subprocess.SubprocessError):
+    except SUBPROCESS_FAILURES:
         return None
     lines = proc.stdout.splitlines()
     if proc.returncode != 0 or not lines:

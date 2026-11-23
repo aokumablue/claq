@@ -195,7 +195,11 @@ def test_plugin_runtime_is_tracked_asks_git_index(
     assert config_protection._plugin_runtime_is_tracked(repo, _running_root) is expected
 
 
-@pytest.mark.parametrize("error", [FileNotFoundError("git"), subprocess.TimeoutExpired("git", 5)], ids=["no-git", "timeout"])
+@pytest.mark.parametrize(
+    "error",
+    [FileNotFoundError("git"), PermissionError("git"), subprocess.TimeoutExpired("git", 5)],
+    ids=["no-git", "not-executable", "timeout"],
+)
 def test_plugin_runtime_is_tracked_is_false_when_git_fails(
     _running_root: Path, error: Exception, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -205,7 +209,7 @@ def test_plugin_runtime_is_tracked_is_false_when_git_fails(
         """git の起動失敗を模す。"""
         raise error
 
-    monkeypatch.setattr(config_protection.subprocess, "run", _raise)
+    monkeypatch.setattr(subprocess, "run", _raise)
 
     assert config_protection._plugin_runtime_is_tracked(_running_root.parents[1], _running_root) is False
 

@@ -210,7 +210,7 @@ def test_get_unstaged_modified_files_returns_success_output(monkeypatch: pytest.
         assert kwargs["errors"] == "replace"
         return subprocess.CompletedProcess(command, 0, stdout="src/a.py\nsrc/b.py\n", stderr="")
 
-    monkeypatch.setattr(pre_bash_commit_quality.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert pre_bash_commit_quality.get_unstaged_modified_files() == ["src/a.py", "src/b.py"]
 
 
@@ -236,7 +236,7 @@ def test_get_unstaged_modified_files_when_diff_fails(
         ("git", "rev-parse", "--verify"): rev_parse,
     }
     monkeypatch.setattr(
-        pre_bash_commit_quality.subprocess, "run", lambda argv, *args, **kwargs: results[tuple(argv[:3])]
+        subprocess, "run", lambda argv, *args, **kwargs: results[tuple(argv[:3])]
     )
 
     assert pre_bash_commit_quality.get_unstaged_modified_files() == expected
@@ -244,7 +244,7 @@ def test_get_unstaged_modified_files_when_diff_fails(
 
 def test_get_unstaged_modified_files_returns_none_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
     """subprocess が OSError 系例外を投げた場合は None を返すこと（fail-closed）。"""
-    monkeypatch.setattr(pre_bash_commit_quality.subprocess, "run", mock.Mock(side_effect=FileNotFoundError("missing")))
+    monkeypatch.setattr(subprocess, "run", mock.Mock(side_effect=FileNotFoundError("missing")))
     assert pre_bash_commit_quality.get_unstaged_modified_files() is None
 
 

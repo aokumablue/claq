@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 from claq.lib.core_utils import log
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES
 
 # deny 出力へ載せる不信データ（ステージされたファイルの行内容）の最大文字数。
 # stderr はモデルへ提示されるチャネルなので、長さ無制限の抜粋はコンテキストを
@@ -315,7 +316,7 @@ def get_staged_file_content(file_path: str) -> str | None:
             check=False,
             timeout=5,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return None
     if result.returncode != 0:
         return None

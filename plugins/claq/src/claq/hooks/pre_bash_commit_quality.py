@@ -37,7 +37,6 @@ commit より前の ``cd`` / ``pushd`` 等）は
 from __future__ import annotations
 
 import re
-import subprocess
 from collections import Counter
 from pathlib import Path
 
@@ -81,7 +80,7 @@ from claq.lib.stdin_io import (
     stdin_unreadable_message,
     truncated_input_message,
 )
-from claq.lib.subprocess_utils import run_text
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES, run_text
 
 # raw stdin が JSON として壊れているが、生文字列上に git commit が見える場合の
 # deny 理由。matcher は Bash 全体なので、malformed というだけでは deny しない。
@@ -232,7 +231,7 @@ def _git_name_only(git_args: list[str]) -> list[str] | None:
     """
     try:
         result = run_text(git_args, timeout=5)
-    except (OSError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return None
     if result.returncode != 0:
         return None
@@ -262,7 +261,7 @@ def _head_exists() -> bool | None:
     """
     try:
         result = run_text(["git", "rev-parse", "--verify", "--quiet", "HEAD"], timeout=5)
-    except (OSError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return None
     if result.returncode == 0:
         return True

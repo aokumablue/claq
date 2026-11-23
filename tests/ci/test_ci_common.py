@@ -26,3 +26,17 @@ def test_non_empty_predicates() -> None:
     assert ci_common.is_non_empty_string(" ") is False
     assert ci_common.is_non_empty_string_array(["x", "y"]) is True
     assert ci_common.is_non_empty_string_array([]) is False
+
+
+def test_read_json_wraps_too_deep_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """深すぎる入れ子で JSON 解析が RecursionError を送出しても、ファイル名付きの ValueError にする。"""
+    path = tmp_path / "hooks.json"
+    path.write_text("[[[]]]", encoding="utf-8")
+
+    def _raise_recursion(_text: str) -> object:
+        """深い入れ子の JSON 解析と同じく RecursionError を送出する。"""
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(ci_common.json, "loads", _raise_recursion)
+    with pytest.raises(ValueError, match="hooks.json の JSON 形式が不正です"):
+        ci_common.read_json(path)

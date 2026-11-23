@@ -38,9 +38,10 @@ def test_session_start_output(context: str, capsys: pytest.CaptureFixture[str]) 
         # タイムアウト・git 実行ファイル自体が無い場合も非ブロッキングで None。
         (subprocess.TimeoutExpired(cmd="git", timeout=5), None),
         (FileNotFoundError("no git"), None),
+        (PermissionError("not executable"), None),
         (subprocess.CompletedProcess([], 0, stdout="/repo/root\n", stderr=""), Path("/repo/root")),
     ],
-    ids=["git-fails", "empty-output", "timeout", "git-missing", "success"],
+    ids=["git-fails", "empty-output", "timeout", "git-missing", "git-not-executable", "success"],
 )
 def test_resolve_repo_root(monkeypatch: pytest.MonkeyPatch, outcome: object, expected: Path | None) -> None:
     """git rev-parse の結果ごとの解決値を返し、同一プロセス内では git を 1 回しか起動しないこと（lru_cache）。"""

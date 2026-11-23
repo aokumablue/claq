@@ -12,7 +12,6 @@ launcher は stdin を代読しないため、入力切り捨て時のブロッ�
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +44,7 @@ from claq.lib.stdin_io import (
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
 )
-from claq.lib.subprocess_utils import run_text
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES, run_text
 
 # matcher（hooks.json）は書込み系ツールに限定されているが、matcher の綴りがズレても
 # 本体側で書込み系以外を早期 return する多重防御。
@@ -323,7 +322,7 @@ def _plugin_runtime_is_tracked(repo_root: Path, plugin_root: Path) -> bool:
             ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / RUNTIME_DIR_NAME / HOOK_ENTRYPOINT)],
             timeout=5,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return False
     return result.returncode == 0
 

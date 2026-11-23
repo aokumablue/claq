@@ -20,6 +20,7 @@ from typing import TextIO
 from claq.hooks.shell_tokens import basename_any_separator, normalize_executable_name
 from claq.lib.core_utils import get_home_dir
 from claq.lib.output_adapter import adapt_deny_output
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES
 
 # `scan_memo` の with の中でだけ使う、引数ごとの結果の置き場。with の外では None（毎回計算する）。
 _scan_memo: dict[tuple[object, ...], object] | None = None
@@ -93,7 +94,7 @@ def resolve_repo_root() -> Path | None:
             timeout=5,
             check=False,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return None
     top = os.fsdecode(result.stdout).strip()
     return Path(top) if result.returncode == 0 and top else None

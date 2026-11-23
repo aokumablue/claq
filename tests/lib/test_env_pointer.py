@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import threading
 from pathlib import Path
@@ -482,12 +483,12 @@ class TestResolveAncestorChain:
 
     @pytest.mark.parametrize(
         "exc",
-        [FileNotFoundError("ps not found"), mod.subprocess.TimeoutExpired(cmd="ps", timeout=5)],
+        [FileNotFoundError("ps not found"), subprocess.TimeoutExpired(cmd="ps", timeout=5)],
         ids=["ps-missing", "ps-timeout"],
     )
     def test_empty_when_ps_cannot_run(self, monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
         """`ps` の起動失敗・タイムアウトは空チェーン（fail-open）。"""
-        monkeypatch.setattr(mod.subprocess, "run", _raise(exc))
+        monkeypatch.setattr(subprocess, "run", _raise(exc))
         assert mod._resolve_ancestor_chain() == []
 
     @pytest.mark.parametrize(
@@ -542,7 +543,7 @@ class TestResolveAncestorChain:
             row = rows.get(args[-1])
             return _PsResult(returncode, row) if row is not None else _PsResult(1, "")
 
-        monkeypatch.setattr(mod.subprocess, "run", _ps)
+        monkeypatch.setattr(subprocess, "run", _ps)
         monkeypatch.setattr(mod, "_MAX_ANCESTOR_DEPTH", depth)
 
         chain = mod._resolve_ancestor_chain()
@@ -560,7 +561,7 @@ class TestResolveAncestorChain:
             return _PsResult(0, "5000 t0\n")
 
         monkeypatch.setattr(mod.time, "monotonic", lambda: next(clock))
-        monkeypatch.setattr(mod.subprocess, "run", _ps)
+        monkeypatch.setattr(subprocess, "run", _ps)
         monkeypatch.setattr(mod, "_MAX_ANCESTOR_DEPTH", 4)
 
         assert mod._resolve_ancestor_chain() == [(os.getppid(), "t0")]
