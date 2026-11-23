@@ -222,7 +222,7 @@ INPLACE_EDIT_EXECUTABLES = frozenset({"sed", "perl", "ruby"})
 
 # PowerShell / cmd のファイル書込み・削除コマンドを、書き込み先の取り方が同じ POSIX 名へ写す表。
 # Windows の Bash ツールは PowerShell で動くため、別名（``ri`` / ``mi`` / ``clc`` は PowerShell の既定
-# エイリアス、``del`` / ``erase`` / ``rd`` / ``copy`` / ``move`` は cmd 組み込み）と長形式 cmdlet を併記する。
+# エイリアス、``del`` / ``erase`` / ``rd`` / ``copy`` / ``move`` / ``rename`` は cmd 組み込み）と長形式 cmdlet を併記する。
 # `bash_config_protection` と `commit_risk` が `write_command_name` を通して共有する。片方だけが
 # PowerShell 名を知っていると、``Copy-Item evil.py app.py; git commit -am x`` が片方のフックだけを素通りする。
 WINDOWS_WRITE_COMMAND_ALIASES = {
@@ -232,10 +232,16 @@ WINDOWS_WRITE_COMMAND_ALIASES = {
     "move-item": "mv",
     "move": "mv",
     "mi": "mv",
+    # 改名は元の名前を消して新しい名前で作る（保護対象を別名へ逃がすのは削除と同じ）。
+    "rename-item": "mv",
+    "rename": "mv",
+    "ren": "mv",
+    "rni": "mv",
     "remove-item": "rm",
     "del": "rm",
     "erase": "rm",
     "rd": "rm",
+    "rmdir": "rm",
     "ri": "rm",
     "clear-content": "truncate",
     "clc": "truncate",
@@ -264,9 +270,12 @@ def write_command_name(token: str) -> str:
 
 
 # カレントディレクトリを移動するコマンド。これらが現れたコマンドでは、cwd 基準の
-# 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。
+# 相対パス解決が実行時の位置とずれるため repo スコープ判定を信用しない。PowerShell の
+# ``Set-Location`` / ``Push-Location`` / ``Pop-Location`` と別名 ``sl`` も同じ移動になる。
 # `bash_config_protection` と `pre_bash_commit_quality` が共有する。
-DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
+DIRECTORY_CHANGE_COMMANDS = frozenset(
+    {"cd", "pushd", "popd", "chdir", "set-location", "sl", "push-location", "pop-location"}
+)
 
 # sed の GNU 長形式 in-place フラグの名前（長形式の短縮は意図して組み立てる回避形なので見ない）。
 _LONG_INPLACE_OPTION_NAME = "in-place"

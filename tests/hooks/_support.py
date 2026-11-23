@@ -312,7 +312,9 @@ _EXPECTED_CONDITIONALLY_PROTECTED_FILES = frozenset({
 })
 
 # `hook_common.DIRECTORY_CHANGE_COMMANDS` の期待内容（層2）。
-_EXPECTED_DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
+_EXPECTED_DIRECTORY_CHANGE_COMMANDS = frozenset(
+    {"cd", "pushd", "popd", "chdir", "set-location", "sl", "push-location", "pop-location"}
+)
 # `bash_config_protection._LEADING_SHELL_KEYWORDS` の期待内容（ディレクトリ移動の前に読み飛ばす語）。
 _EXPECTED_LEADING_SHELL_KEYWORDS = frozenset(
     {"{", "(", "!", "if", "then", "elif", "else", "while", "until", "do", "builtin"}
@@ -430,6 +432,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             sorted(
                 _EXPECTED_REMOVE_COMMANDS
                 | {"clc", "clear-content", "del", "erase", "mi", "move", "move-item", "rd", "remove-item", "ri"}
+                | {"ren", "rename", "rename-item", "rmdir", "rni"}
             )
         )
         + tuple(sorted(_EXPECTED_MODE_COMMANDS))
