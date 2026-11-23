@@ -10,6 +10,26 @@ from typing import Any
 from claq.lib.constants import PLUGIN_NAME
 from claq.lib.core_utils import get_home_dir
 
+# 採点カテゴリの名前。consumer モード（harness_audit）と repo モード（claq_dev.harness_repo_checks）が同じ名前で
+# 集計するため、ここ 1 か所に置く。
+TOOL_COVERAGE = "Tool Coverage"
+CONTEXT_EFFICIENCY = "Context Efficiency"
+QUALITY_GATES = "Quality Gates"
+MEMORY_PERSISTENCE = "Memory Persistence"
+EVAL_COVERAGE = "Eval Coverage"
+SECURITY_GUARDRAILS = "Security Guardrails"
+COST_EFFICIENCY = "Cost Efficiency"
+
+CATEGORIES = [
+    TOOL_COVERAGE,
+    CONTEXT_EFFICIENCY,
+    QUALITY_GATES,
+    MEMORY_PERSISTENCE,
+    EVAL_COVERAGE,
+    SECURITY_GUARDRAILS,
+    COST_EFFICIENCY,
+]
+
 
 def make_check(
     *,

@@ -98,5 +98,7 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
         "status": "active",
     }
     fields.update(overrides)
+    knowledge = Knowledge(**fields)
     with Database(tmp_path / "mem.db") as db:
-        return db.upsert_knowledge(Knowledge(**fields))
+        db.upsert_knowledge(knowledge)
+        return db.get_knowledge_by_key(knowledge.key, knowledge.repo_id)

@@ -188,7 +188,7 @@ class Database:
 
     # --- knowledge ---
 
-    def upsert_knowledge(self, knowledge: Knowledge) -> Knowledge:
+    def upsert_knowledge(self, knowledge: Knowledge) -> None:
         """知識カードを挿入または更新する。
 
         衝突解決は式インデックス ``(COALESCE(repo_id,''), key)`` で行う。
@@ -206,11 +206,8 @@ class Database:
 
         Args:
             knowledge: 登録したい知識カード。
-
-        Returns:
-            DB に格納された最新状態の Knowledge。
         """
-        row = self._returning(
+        self.conn.execute(
             """INSERT INTO knowledge
                  (key, scope, repo_id, kind, title, body, domain, confidence,
                   status, source, source_ref, superseded_by, created_at, updated_at)
@@ -226,8 +223,7 @@ class Database:
                  source = excluded.source,
                  source_ref = excluded.source_ref,
                  superseded_by = excluded.superseded_by,
-                 updated_at = excluded.updated_at
-               RETURNING *""",
+                 updated_at = excluded.updated_at""",
             (
                 knowledge.key,
                 knowledge.scope,
@@ -245,7 +241,7 @@ class Database:
                 knowledge.updated_at,
             ),
         )
-        return Knowledge.from_row(row)
+        self.conn.commit()
 
     def get_knowledge_by_key(self, key: str, repo_id: str | None = None) -> Knowledge | None:
         """``key`` と所属リポジトリで知識カードを 1 件取得する。

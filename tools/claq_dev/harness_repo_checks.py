@@ -10,6 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from claq.ci.harness_audit_utils import (
+    CONTEXT_EFFICIENCY,
+    COST_EFFICIENCY,
+    EVAL_COVERAGE,
+    MEMORY_PERSISTENCE,
+    QUALITY_GATES,
+    SECURITY_GUARDRAILS,
+    TOOL_COVERAGE,
     count_files,
     file_has_content,
     make_check,
@@ -253,7 +260,7 @@ def _declares_preflight_hook(hooks_json: str) -> bool:
 
 def _tool_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Tool Coverage カテゴリのチェックを返す。"""
-    category = "Tool Coverage"
+    category = TOOL_COVERAGE
     return [
         make_check(
             check_id="tool-hooks-config", category=category, points=2, scopes=["repo", "hooks"],
@@ -295,7 +302,7 @@ def _tool_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
 
 def _context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Context Efficiency カテゴリのチェックを返す。"""
-    category = "Context Efficiency"
+    category = CONTEXT_EFFICIENCY
     return [
         make_check(
             check_id="context-model-route", category=category, points=2, scopes=["repo", "commands"],
@@ -316,7 +323,7 @@ def _context_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _quality_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Quality Gates カテゴリのチェックを返す。"""
-    category = "Quality Gates"
+    category = QUALITY_GATES
     dev_root = _dev_root(root_dir)
     pyproject_toml = safe_read(dev_root, "pyproject.toml")
     validators_test = safe_read(dev_root, "tests/ci/test_validators.py")
@@ -347,7 +354,7 @@ def _quality_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _memory_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Memory Persistence カテゴリのチェックを返す。"""
-    category = "Memory Persistence"
+    category = MEMORY_PERSISTENCE
     return [
         make_check(
             check_id="memory-hooks-lifecycle", category=category, points=4, scopes=["repo", "hooks"],
@@ -376,7 +383,7 @@ def _memory_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Eval Coverage カテゴリのチェックを返す。"""
-    category = "Eval Coverage"
+    category = EVAL_COVERAGE
     return [
         make_check(
             check_id="eval-skill", category=category, points=4, scopes=["repo", "skills"],
@@ -405,7 +412,7 @@ def _eval_checks(root_dir: str | Path) -> list[dict[str, Any]]:
 
 def _security_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Security Guardrails カテゴリのチェックを返す。"""
-    category = "Security Guardrails"
+    category = SECURITY_GUARDRAILS
     return [
         make_check(
             check_id="security-review-skill", category=category, points=3, scopes=["repo", "skills"],
@@ -440,7 +447,7 @@ def _security_checks(root_dir: str | Path, hooks_json: str) -> list[dict[str, An
 
 def _cost_checks(root_dir: str | Path) -> list[dict[str, Any]]:
     """repo モードの Cost Efficiency カテゴリのチェックを返す。"""
-    category = "Cost Efficiency"
+    category = COST_EFFICIENCY
     return [
         make_check(
             check_id="cost-no-oversized-surface", category=category, points=3, scopes=["repo"],

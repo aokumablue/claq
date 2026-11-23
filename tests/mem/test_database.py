@@ -213,7 +213,8 @@ class TestKnowledge:
 
     def test_upsert_inserts_global_knowledge(self, db: Database) -> None:
         """global スコープの知識カードを挿入する。"""
-        stored = db.upsert_knowledge(_knowledge())
+        db.upsert_knowledge(_knowledge())
+        stored = db.get_knowledge_by_key("use-python3")
         assert stored.id is not None
         assert stored.repo_id is None
         assert stored.status == "active"
@@ -225,8 +226,9 @@ class TestKnowledge:
         """同一スコープ（同一 repo）で同じ key の再投入は 1 行に集約し、id と created_at を保持して内容を更新する。"""
         db.upsert_repo(_repo())
         repo_id = "claq-dev" if scope == "repo" else None
-        first = db.upsert_knowledge(_knowledge(scope=scope, repo_id=repo_id))
-        second = db.upsert_knowledge(
+        db.upsert_knowledge(_knowledge(scope=scope, repo_id=repo_id))
+        first = db.get_knowledge_by_key("use-python3", repo_id)
+        db.upsert_knowledge(
             _knowledge(
                 scope=scope,
                 repo_id=repo_id,
@@ -236,6 +238,7 @@ class TestKnowledge:
                 updated_at="2026-02-02T00:00:00+00:00",
             )
         )
+        second = db.get_knowledge_by_key("use-python3", repo_id)
         assert second.id == first.id
         assert second.created_at == _TS
         assert second.updated_at == "2026-02-02T00:00:00+00:00"
@@ -256,8 +259,9 @@ class TestKnowledge:
     def test_upsert_persists_all_optional_columns(self, db: Database) -> None:
         """任意カラムがすべて往復する。"""
         db.upsert_repo(_repo())
-        base = db.upsert_knowledge(_knowledge("old-way"))
-        stored = db.upsert_knowledge(
+        db.upsert_knowledge(_knowledge("old-way"))
+        base = db.get_knowledge_by_key("old-way")
+        db.upsert_knowledge(
             _knowledge(
                 "new-way",
                 kind="pitfall",
@@ -270,6 +274,7 @@ class TestKnowledge:
                 superseded_by=base.id,
             )
         )
+        stored = db.get_knowledge_by_key("new-way")
         assert stored.kind == "pitfall"
         assert stored.body == "理由の説明"
         assert stored.domain == "testing"
@@ -299,7 +304,8 @@ class TestKnowledge:
 
     def test_promote_updates_row(self, db: Database) -> None:
         """status を active にし、updated_at を現在時刻にする。"""
-        stored = db.upsert_knowledge(_knowledge(status="pending"))
+        db.upsert_knowledge(_knowledge(status="pending"))
+        stored = db.get_knowledge_by_key("use-python3")
         before = utc_now_iso()
         db.promote_knowledge(stored.id)
         after = db.get_knowledge_by_key("use-python3")
