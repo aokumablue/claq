@@ -163,10 +163,13 @@ CONDITIONALLY_PROTECTED_FILES_FOLDED = frozenset(
 
 # 実行中の plugin root から見て守るディレクトリ。`runtime/` は hooks.json が起動する
 # `claq-hook`、`src/claq/` はフック本体で、書き換えると次のツール呼び出しから全保護フックが外れる。
-_RUNNING_PLUGIN_GUARDED_DIRS = (("runtime",), ("src", "claq"))
+_RUNNING_PLUGIN_RUNTIME_DIR_NAME = "runtime"
+_RUNNING_PLUGIN_GUARDED_DIRS = ((_RUNNING_PLUGIN_RUNTIME_DIR_NAME,), ("src", "claq"))
 
 # 上の表示名。`blocked_message_for_file` がブロック文言を選ぶ鍵（Edit/Write と Bash で共有）。
 RUNNING_PLUGIN_DISPLAY_NAMES = frozenset("/".join(segments) + "/" for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
+# `cd` を含むコマンドで起動ファイルの basename に当たったときの表示名（`host_guard_targets` が返す）。
+RUNNING_PLUGIN_RUNTIME_DISPLAY = f"{_RUNNING_PLUGIN_RUNTIME_DIR_NAME}/"
 
 
 def protected_path_segment(file_path: str) -> str | None:

@@ -35,6 +35,7 @@ from pathlib import Path
 
 from claq.hooks.config_protection import (
     PLUGIN_HOOKS_JSON_SEGMENT,
+    RUNNING_PLUGIN_RUNTIME_DISPLAY,
     protected_path_segment,
     running_plugin_guarded_dir,
     running_plugin_root_is_guarded,
@@ -55,7 +56,6 @@ _HOOKS_JSON_NAME = "hooks.json"
 # `cd` を含むコマンドで basename だけで塞ぐ、実行中のランタイムの起動ファイル（hooks.json が起動する）。
 # ``runtime`` 単独の basename までは広げない（一般的な名前で誤検出が過大になる）。
 _RUNTIME_ENTRYPOINT_NAMES = (HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD)
-_RUNTIME_DIR_DISPLAY = "runtime/"
 
 # ホスト設定の置き場（``.claude/`` 直下）と名前の構造一致。
 _HOST_SETTINGS_PATH_SEGMENTS = ((".claude", "settings.json"), (".claude", "settings.local.json"))
@@ -118,7 +118,7 @@ def find_host_guard_match(token: str, *, scope_certain: bool) -> str | None:
         if name == _HOOKS_JSON_NAME:
             return PLUGIN_HOOKS_JSON_SEGMENT
         if name in _RUNTIME_ENTRYPOINT_NAMES and running_plugin_root_is_guarded():
-            return _RUNTIME_DIR_DISPLAY
+            return RUNNING_PLUGIN_RUNTIME_DISPLAY
     resolved = resolve_effective_target(token)
     candidates = [Path(token).parts] if resolved is None else [Path(token).parts, resolved.parts]
     for parts in candidates:
