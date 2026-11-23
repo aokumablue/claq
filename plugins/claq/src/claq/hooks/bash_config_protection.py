@@ -473,6 +473,7 @@ def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
     return is_path_prefix(root_parts, fold_path_parts(resolved.parts))
 
 
+@memoized_in_scan
 def find_protected_write(command: str, *, _outer_scope_certain: bool | None = None) -> str | None:
     """コマンド文字列内に保護対象への書き込みがあればその表示名を返す。
 
