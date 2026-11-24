@@ -137,22 +137,23 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     return path
 
 
-def unlink_stale_entries(directory: Path, matches: Callable[[str], bool], cutoff: float) -> None:
-    """``directory`` 直下で名前が ``matches`` に当たり、mtime が ``cutoff`` より古いエントリを消す。
+def unlink_stale_entries(directory: Path, cutoff_for: Callable[[str], float | None]) -> None:
+    """``directory`` 直下で、mtime が名前ごとの期限 ``cutoff_for(name)`` より古いエントリを消す。
 
     iterdir/stat/unlink の失敗は無視する（回収は次回の起動でやり直せる）。
 
     Args:
         directory: 走査するディレクトリ。
-        matches: エントリ名を受け取り、回収対象なら True を返す関数。
-        cutoff: これより古い mtime（epoch 秒）のエントリだけを消す。
+        cutoff_for: エントリ名を受け取り、これより古い mtime（epoch 秒）なら消す期限を返す関数。
+            回収対象でない名前には None を返す。
     """
     try:
         entries = list(directory.iterdir())
     except OSError:
         return
     for entry in entries:
-        if not matches(entry.name):
+        cutoff = cutoff_for(entry.name)
+        if cutoff is None:
             continue
         try:
             if entry.stat().st_mtime < cutoff:
