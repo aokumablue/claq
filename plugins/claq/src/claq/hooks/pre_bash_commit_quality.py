@@ -475,13 +475,13 @@ def _evaluate_confirmed_commit(commit_args: list[str]) -> str | None:
             log("[Hook] ERROR: could not enumerate worktree changes for `git commit -a`.")
             return _WORKTREE_FILES_UNAVAILABLE_MESSAGE
 
+        # `_partition_commit_all_files` は 2 つを重ならないように分ける（index 側は worktree 側を引いた残り）。
         index_files, worktree_files = partitioned
-        all_files = sorted(set(index_files) | set(worktree_files))
-        if not all_files:
+        if not index_files and not worktree_files:
             log('[Hook] No staged files found. Use "git add" to stage files first.')
             return None
 
-        log(f"[Hook] Checking {len(all_files)} staged file(s)...")
+        log(f"[Hook] Checking {len(index_files) + len(worktree_files)} staged file(s)...")
 
         index_targets = _scan_targets(index_files)
         worktree_targets = _scan_targets(worktree_files)
