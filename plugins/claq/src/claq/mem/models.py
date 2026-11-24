@@ -55,9 +55,9 @@ class Repo(_RowModel):
     id: str
     identity_key: str
     root_path: str
-    remote_url: str | None = None
-    first_seen_at: str = field(default_factory=utc_now_iso)
-    last_seen_at: str = field(default_factory=utc_now_iso)
+    remote_url: str | None
+    first_seen_at: str
+    last_seen_at: str
 
 
 @dataclass
@@ -115,12 +115,12 @@ class Knowledge(_RowModel):
     title: str
     source: str
     status: str
-    repo_id: str | None = None
-    body: str = ""
-    domain: str | None = None
-    confidence: float = 0.5
-    source_ref: str | None = None
+    repo_id: str | None
+    body: str
+    domain: str | None
+    confidence: float
+    source_ref: str | None
+    created_at: str
+    updated_at: str
     superseded_by: int | None = None
-    created_at: str = field(default_factory=utc_now_iso)
-    updated_at: str = field(default_factory=utc_now_iso)
     id: int | None = None

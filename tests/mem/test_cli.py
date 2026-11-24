@@ -11,7 +11,7 @@ import pytest
 
 from claq.mem import cli, command_support
 from claq.mem.database import Database
-from claq.mem.models import Repo
+from claq.mem.models import Repo, utc_now_iso
 
 from ._support import _raising, _run_cli, _seed
 
@@ -138,7 +138,7 @@ class TestInit:
         """既存 DB と sidecar を破棄して空の DB を作り直す。"""
         db_path = tmp_path / "mem.db"
         with Database(db_path) as db:
-            db.upsert_repo(Repo(id="old", identity_key="key-old", root_path="/tmp/old"))
+            db.upsert_repo(Repo(id="old", identity_key="key-old", root_path="/tmp/old", remote_url=None, first_seen_at=utc_now_iso(), last_seen_at=utc_now_iso()))
         for suffix in ("-wal", "-shm", "-journal"):
             (tmp_path / f"mem.db{suffix}").write_text("stale", encoding="utf-8")
 

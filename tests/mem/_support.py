@@ -15,7 +15,7 @@ import pytest
 from claq.mem import cli, cmd_context
 from claq.mem import settings as settings_mod
 from claq.mem.database import Database
-from claq.mem.models import Knowledge
+from claq.mem.models import Knowledge, utc_now_iso
 from claq.mem.repo_identity import resolve_repo
 
 
@@ -96,6 +96,13 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
         # status は必須引数（既定値なし）。list/search の既定絞り込みが 'active'
         # なので、ヘルパの既定も 'active' に置く。
         "status": "active",
+        "repo_id": None,
+        "body": "",
+        "domain": None,
+        "confidence": 0.5,
+        "source_ref": None,
+        "created_at": utc_now_iso(),
+        "updated_at": utc_now_iso(),
     }
     fields.update(overrides)
     knowledge = Knowledge(**fields)
