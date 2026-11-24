@@ -285,6 +285,16 @@ DIRECTORY_CHANGE_COMMANDS = frozenset(
 # index）が共有する。片方だけが知っていると、``env -C plugins rm ../ruff.toml`` が片方を素通りする。
 WRAPPER_CHDIR_OPTION_RE = re.compile(r"^(?:-C|-D|--chdir(?:=|$))")
 
+# git の値を必ず取る short オプション文字（global の ``-C <dir>`` / ``-c <key=value>`` と、commit の ``-m`` /
+# ``-F`` / ``-C`` / ``-c`` / ``-t``）。結合形（``-mmsg``）なら残りが値、クラスタ末尾（``-am``）なら次トークンが値。
+# `block_no_verify`（バイパスフラグの検出）と `commit_risk`（``-a`` の検出）が共有する。片方だけが値と読むと、
+# ``-mAll`` の後ろをフラグと読むかがフック間でずれる。
+GIT_VALUE_SHORT_OPTIONS = frozenset("CcmFt")
+
+# git の値が省略可能で、指定するなら結合形だけの short オプション文字（``-uno`` / ``-Skeyid``）。
+# 次トークンは値として消費しない。`GIT_VALUE_SHORT_OPTIONS` と同じく 2 つのフックが共有する。
+GIT_OPTIONAL_VALUE_SHORT_OPTIONS = frozenset("uS")
+
 # sed の GNU 長形式 in-place フラグの名前（長形式の短縮は意図して組み立てる回避形なので見ない）。
 _LONG_INPLACE_OPTION_NAME = "in-place"
 

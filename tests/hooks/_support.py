@@ -483,9 +483,9 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "--version",
         }
     ),
-    "block_no_verify._VALUE_SHORT_OPTIONS": frozenset("CcmFt"),
+    "hook_common.GIT_VALUE_SHORT_OPTIONS": frozenset("CcmFt"),
     "block_no_verify._BOOLEAN_GLOBAL_SHORT_OPTIONS": frozenset("pPvh"),
-    "block_no_verify._OPTIONAL_VALUE_SHORT_OPTIONS": frozenset("uS"),
+    "hook_common.GIT_OPTIONAL_VALUE_SHORT_OPTIONS": frozenset("uS"),
     "git_config_text._SENSITIVE_CONFIG_KEY_PREFIXES": (
         "core.hookspath",
         "include.path",
@@ -614,8 +614,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "unlink",
         }
     ),
-    # 結合短形式の中で現れたら、残りの文字をその値として読む短形式。
-    "commit_risk._SHORT_OPTIONS_WITH_VALUE": frozenset("CcFmStu"),
 }
 
 # 完全一致で固定**しない**語彙と、その代わりに何が固定しているか。

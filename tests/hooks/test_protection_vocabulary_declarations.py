@@ -238,9 +238,9 @@ _VOCABULARY_DENY_ALLOW_CASES = (
 _VOCABULARY_ALLOW_ONLY_CASES = (
     ("block_no_verify._VALUE_LONG_OPTIONS", "block_no_verify", "git commit {item} --no-verify", _NO_VERIFY),
     ("block_no_verify._BOOLEAN_GLOBAL_LONG_OPTIONS", "block_no_verify", "git {item} log -n 5", "git --future-global-option v commit -n"),
-    ("block_no_verify._VALUE_SHORT_OPTIONS", "block_no_verify", "git commit -{item} --no-verify", _NO_VERIFY),
+    ("hook_common.GIT_VALUE_SHORT_OPTIONS", "block_no_verify", "git commit -{item} --no-verify", _NO_VERIFY),
     ("block_no_verify._BOOLEAN_GLOBAL_SHORT_OPTIONS", "block_no_verify", "git -{item} log -n 5", "git -Z log -n 5"),
-    ("block_no_verify._OPTIONAL_VALUE_SHORT_OPTIONS", "block_no_verify", "git -{item} log -n 5", "git -Z log -n 5"),
+    ("hook_common.GIT_OPTIONAL_VALUE_SHORT_OPTIONS", "block_no_verify", "git -{item} log -n 5", "git -Z log -n 5"),
     ("block_no_verify._GIT_CONFIG_READ_ONLY_FLAGS", "block_no_verify", "git config {item} core.hooksPath", "git config --add core.hooksPath x"),
     ("block_no_verify._GIT_CONFIG_NEW_READ_OPS", "block_no_verify", "git config {item} core.hooksPath", "git config set core.hooksPath x"),
     # 行コメントの開始条件。直前文字が語彙に無ければ `#` は語の一部なので deny。
@@ -521,7 +521,13 @@ def test_every_minified_suffix_skips_secret_scan(suffix: str) -> None:
     assert commit_quality_scanner.should_scan_secrets("dist/bundle.js")
 
 
-@pytest.mark.parametrize("flag", sorted(_EXPECTED_VOCABULARIES["commit_risk._SHORT_OPTIONS_WITH_VALUE"]))
+@pytest.mark.parametrize(
+    "flag",
+    sorted(
+        _EXPECTED_VOCABULARIES["hook_common.GIT_VALUE_SHORT_OPTIONS"]
+        | _EXPECTED_VOCABULARIES["hook_common.GIT_OPTIONAL_VALUE_SHORT_OPTIONS"]
+    ),
+)
 def test_short_options_with_value_take_the_rest_of_the_cluster(flag: str) -> None:
     """値を取る短形式の後ろの文字をフラグと読まないこと（層1・単体）。値を取らない `-q` に替えると `a` は `-a` になる。"""
     assert not commit_risk.is_commit_all_flag([f"-{flag}all"])
@@ -575,7 +581,6 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
         "commit_quality_scanner._JS_COMMENT_LINE_PREFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",
-        "commit_risk._SHORT_OPTIONS_WITH_VALUE",
     }
     declared = (
         {case[0] for case in _VOCABULARY_DENY_ALLOW_CASES}
