@@ -175,7 +175,6 @@ _VOCABULARY_DENY_ALLOW_CASES = (
         "{item} src.txt app.py",
     ),
     ("bash_config_protection._TOUCH_COMMANDS", "bash_config_protection", "{item} ruff.toml", "{item} app.py"),
-    ("bash_config_protection._LN_COMMANDS", "bash_config_protection", "{item} -s weak.toml ruff.toml", "{item} -s weak.toml app.py"),
     ("bash_config_protection._DD_COMMANDS", "bash_config_protection", "{item} if=/dev/null of=ruff.toml", "{item} if=/dev/null of=app.py"),
     # wrapper は「実行位置に無ければ allow」を対にする（実行位置の判定軸）。
     ("bash_config_protection._COMMAND_POSITION_WRAPPERS", "bash_config_protection", "{item} rm ruff.toml", "echo {item} rm ruff.toml"),

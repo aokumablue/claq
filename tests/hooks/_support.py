@@ -387,11 +387,10 @@ def _folded(names: frozenset[str]) -> frozenset[str]:
 _EXPECTED_VOCABULARIES: dict[str, Any] = {
     # --- bash_config_protection ---
     "bash_config_protection._BASH_TOOL_NAMES": frozenset({"bash"}),
-    "bash_config_protection._LAST_ARG_WRITE_COMMANDS": frozenset({"cp", "install", "mv"}),
+    "bash_config_protection._LAST_ARG_WRITE_COMMANDS": frozenset({"cp", "install", "ln", "mv"}),
     "bash_config_protection._REMOVE_COMMANDS": _EXPECTED_REMOVE_COMMANDS,
     "bash_config_protection._MODE_COMMANDS": _EXPECTED_MODE_COMMANDS,
     "bash_config_protection._TEE_COMMANDS": frozenset({"tee"}),
-    "bash_config_protection._LN_COMMANDS": frozenset({"ln"}),
     "bash_config_protection._DD_COMMANDS": frozenset({"dd"}),
     "bash_config_protection._TOUCH_COMMANDS": _EXPECTED_TOUCH_COMMANDS,
     "bash_config_protection._LEADING_SHELL_KEYWORDS": _EXPECTED_LEADING_SHELL_KEYWORDS,

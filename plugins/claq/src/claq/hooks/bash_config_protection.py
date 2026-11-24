@@ -126,8 +126,9 @@ _BASH_TOOL_NAMES = frozenset({"bash"})
 # 以下の書込みコマンド名は POSIX 名だけを持つ。PowerShell / cmd の名前は `write_command_name` が
 # `WINDOWS_WRITE_COMMAND_ALIASES` で POSIX 名へ写してから照合する。
 
-# 末尾引数が書き込み先になるコマンド。
-_LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install"})
+# 末尾引数が書き込み先になるコマンド。`ln` は `-f` の有無で区別しない。保護対象がまだ無い状態での
+# `ln -s weak.toml ruff.toml` も、その名前を読む処理をリンク先の内容へ差し替える実質的な書き込みである。
+_LAST_ARG_WRITE_COMMANDS = frozenset({"cp", "mv", "install", "ln"})
 
 # ファイルを消す／空にするコマンド群。リンタ設定を消せばルールごと無効化できるため、
 # 上書きと同じ強さの弱体化として扱う。`mv` は移動元も対象にする（実質削除）。`cp` の
@@ -141,9 +142,6 @@ _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
 
 # 非オプション引数がすべて書き込み先になるコマンド。
 _TEE_COMMANDS = frozenset({"tee"})
-# `-f` の有無で区別しない。保護対象がまだ無い状態での `ln -s weak.toml ruff.toml` も、
-# その名前を読む処理をリンク先の内容へ差し替える実質的な書き込みである。
-_LN_COMMANDS = frozenset({"ln"})
 _DD_COMMANDS = frozenset({"dd"})
 
 # 保護対象の名前を空で新規作成するだけで検査を無効化できる（多くの linter は設定
@@ -413,7 +411,6 @@ _EXECUTED_COMMAND_TARGET_RULES = (
     (_LAST_ARG_WRITE_COMMANDS, _last_non_option_arg),
     (_REMOVE_COMMANDS, _non_option_args),
     (_MODE_COMMANDS, _non_option_args),
-    (_LN_COMMANDS, _last_non_option_arg),
     (_DD_COMMANDS, _dd_of_args),
 )
 
