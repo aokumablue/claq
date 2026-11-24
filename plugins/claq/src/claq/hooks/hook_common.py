@@ -282,8 +282,12 @@ DIRECTORY_CHANGE_COMMANDS = frozenset(
 # wrapper の作業ディレクトリ指定（``env -C <dir>`` / ``env --chdir[=]<dir>`` / ``sudo -D <dir>`` /
 # ``sudo --chdir[=]<dir>``）。`DIRECTORY_CHANGE_COMMANDS` と同じく cwd を動かす。
 # `bash_config_protection`（cwd 基準の解決を信用するか）と `pre_bash_commit_quality`（commit の対象
-# index）が共有する。片方だけが知っていると、``env -C plugins rm ../ruff.toml`` が片方を素通りする。
-WRAPPER_CHDIR_OPTION_RE = re.compile(r"^(?:-C|-D|--chdir(?:=|$))")
+# index）が共有し、`bash_config_protection` は wrapper の実行位置を探すときに値を取るオプションとしても使う。
+# 片方だけが知っていると、``env -C plugins rm ../ruff.toml`` が片方を素通りする。
+# 短形式は結合形（``-Cplugins``）も指定になり、長形式は ``=`` か単独のときだけ指定になる。
+WRAPPER_CHDIR_SHORT_OPTIONS = ("-C", "-D")
+WRAPPER_CHDIR_LONG_OPTION = "--chdir"
+WRAPPER_CHDIR_OPTION_RE = re.compile(rf"^(?:{'|'.join(WRAPPER_CHDIR_SHORT_OPTIONS)}|{WRAPPER_CHDIR_LONG_OPTION}(?:=|$))")
 
 # git の値を必ず取る short オプション文字（global の ``-C <dir>`` / ``-c <key=value>`` と、commit の ``-m`` /
 # ``-F`` / ``-C`` / ``-c`` / ``-t``）。結合形（``-mmsg``）なら残りが値、クラスタ末尾（``-am``）なら次トークンが値。

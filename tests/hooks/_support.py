@@ -414,6 +414,7 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
         }
     ),
     "bash_config_protection._WRAPPER_VALUE_SHORT_OPTIONS": frozenset({"-u", "-C", "-D", "--chdir"}),
+    "hook_common.WRAPPER_CHDIR_SHORT_OPTIONS": ("-C", "-D"),
     "bash_config_protection._HOME_LOG_PATH_SEGMENTS": ((".claq", "logs"),),
     "host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS": (
         (".claude", "settings.json"),

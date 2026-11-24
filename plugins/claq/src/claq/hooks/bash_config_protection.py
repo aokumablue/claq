@@ -77,7 +77,9 @@ from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
     INPLACE_EDIT_EXECUTABLES,
     WINDOWS_WRITE_COMMAND_ALIASES,
+    WRAPPER_CHDIR_LONG_OPTION,
     WRAPPER_CHDIR_OPTION_RE,
+    WRAPPER_CHDIR_SHORT_OPTIONS,
     basename,
     effective_basename,
     emit_block_output,
@@ -250,7 +252,7 @@ _COMMAND_POSITION_WRAPPERS = frozenset(
 
 # wrapper 自身が値を取るオプション（`env -u NAME` / `sudo -u user`、作業ディレクトリ指定の
 # `env -C dir` / `env --chdir dir` / `sudo -D dir`）。値をコマンド名と取り違えない。
-_WRAPPER_VALUE_SHORT_OPTIONS = frozenset({"-u", "-C", "-D", "--chdir"})
+_WRAPPER_VALUE_SHORT_OPTIONS = frozenset({"-u", *WRAPPER_CHDIR_SHORT_OPTIONS, WRAPPER_CHDIR_LONG_OPTION})
 
 # wrapper がコマンド名より前に取る positional 引数（``timeout 5 rm`` の秒数、
 # ``chrt 99 rm`` の優先度、``taskset 0x3 rm`` のマスク）。いずれも数字で始まり、実行
