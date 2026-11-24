@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from claq.hooks.commit_risk import short_option_flags
+from claq.hooks.hook_common import short_option_flags
 
 # Conventional Commits 1.0.0: type・任意の scope・破壊的変更を表す任意の `!`・コロン。
 _CONVENTIONAL_COMMIT = re.compile(
