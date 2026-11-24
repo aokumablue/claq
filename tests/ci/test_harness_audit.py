@@ -187,9 +187,15 @@ def test_build_report_top_actions_pick_highest_failing_points(monkeypatch: pytes
     ],
     ids=["consumer", "repo"],
 )
-def test_check_categories_are_declared(get_checks: Callable[[Path], list[dict[str, Any]]], tmp_path: Path) -> None:
-    """全チェックのカテゴリが CATEGORIES に載る（カテゴリ集計が取りこぼさず、合計が overall_score と一致する前提）。"""
-    assert {check["category"] for check in get_checks(tmp_path)} <= set(harness_audit.CATEGORIES)
+def test_check_categories_and_scopes_are_declared(get_checks: Callable[[Path], list[dict[str, Any]]], tmp_path: Path) -> None:
+    """全チェックのカテゴリが CATEGORIES に、スコープが VALID_SCOPES に載る。
+
+    カテゴリ集計が取りこぼさず合計が overall_score と一致する前提と、スコープの綴り違い（``"skill"``）で
+    その項目が黙って採点から消えないことの両方を固定する。
+    """
+    checks = get_checks(tmp_path)
+    assert {check["category"] for check in checks} <= set(harness_audit.CATEGORIES)
+    assert {scope for check in checks for scope in check["scopes"]} <= harness_audit.VALID_SCOPES
 
 
 _CHECKS_WITH_FAILURE = [
@@ -262,10 +268,9 @@ def test_main_text_lists_top_actions_only_when_failing(
 def test_main_help_exits_zero_and_errors_return_one(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`--help` は exit 0 で抜け、レポート組み立ての失敗は stderr に出して 1 を返す。"""
-    with pytest.raises(SystemExit) as excinfo:
-        harness_audit.main(["--help"])
-    assert excinfo.value.code == 0
+    """`--help` は使い方を出して 0 を返し、レポート組み立ての失敗は stderr に出して 1 を返す。"""
+    assert harness_audit.main(["--help"]) == 0
+    assert "Usage" in capsys.readouterr().out
 
     def _boom(*_args: object, **_kwargs: object) -> None:
         """常に ValueError を送出する build_report の代役。"""

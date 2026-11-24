@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
@@ -19,6 +20,7 @@ from typing import TextIO
 from claq.hooks.shell_tokens import basename_any_separator, normalize_executable_name
 from claq.lib.core_utils import get_home_dir
 from claq.lib.output_adapter import adapt_deny_output
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES
 
 # `scan_memo` の with の中でだけ使う、引数ごとの結果の置き場。with の外では None（毎回計算する）。
 _scan_memo: dict[tuple[object, ...], object] | None = None
@@ -92,36 +94,10 @@ def resolve_repo_root() -> Path | None:
             timeout=5,
             check=False,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return None
     top = os.fsdecode(result.stdout).strip()
     return Path(top) if result.returncode == 0 and top else None
-
-
-def write_stdout(text: str) -> None:
-    """標準出力にテキストを書き出します。
-
-    Args:
-        text: 出力するテキストです。
-
-    Raises:
-        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
-        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
-    """
-    sys.stdout.write(text)
-
-
-def write_stderr(text: str) -> None:
-    """標準エラーにテキストを書き出します。
-
-    Args:
-        text: 出力するテキストです。
-
-    Raises:
-        OSError: パイプが閉じている場合（BrokenPipeError を含む）。
-        UnicodeEncodeError: 出力先のエンコーディングで表現できない場合。
-    """
-    sys.stderr.write(text)
 
 
 def basename(path: str) -> str:
@@ -178,6 +154,19 @@ def is_path_prefix(prefix: tuple[str, ...], parts: tuple[str, ...]) -> bool:
     return parts[: len(prefix)] == prefix
 
 
+@functools.cache
+def _folded_candidates(candidates: tuple[tuple[str, ...], ...]) -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
+    """定数の候補表を (畳む前, 畳んだ後) の組にして返す（候補表はモジュール定数なのでプロセス内で 1 回だけ畳む）。
+
+    Args:
+        candidates: `match_folded_path_window` に渡す候補表。
+
+    Returns:
+        候補ごとの (畳む前の綴り, 畳んだ要素列)。
+    """
+    return tuple((segments, fold_path_parts(segments)) for segments in candidates)
+
+
 def match_folded_path_window(
     parts: tuple[str, ...], candidates: tuple[tuple[str, ...], ...]
 ) -> tuple[str, ...] | None:
@@ -193,8 +182,7 @@ def match_folded_path_window(
         一致した候補（畳む前の綴り）。一致しなければ None。
     """
     folded_parts = fold_path_parts(parts)
-    for segments in candidates:
-        folded_segments = fold_path_parts(segments)
+    for segments, folded_segments in _folded_candidates(candidates):
         width = len(folded_segments)
         for index in range(len(folded_parts) - width + 1):
             window = folded_parts[index : index + width]
@@ -258,6 +246,7 @@ WINDOWS_WRITE_COMMAND_ALIASES = {
     "ri": "rm",
     "clear-content": "truncate",
     "clc": "truncate",
+    "tee-object": "tee",
     "set-content": "tee",
     "add-content": "tee",
     "out-file": "tee",
@@ -289,6 +278,12 @@ def write_command_name(token: str) -> str:
 DIRECTORY_CHANGE_COMMANDS = frozenset(
     {"cd", "pushd", "popd", "chdir", "set-location", "sl", "push-location", "pop-location"}
 )
+
+# wrapper の作業ディレクトリ指定（``env -C <dir>`` / ``env --chdir[=]<dir>`` / ``sudo -D <dir>`` /
+# ``sudo --chdir[=]<dir>``）。`DIRECTORY_CHANGE_COMMANDS` と同じく cwd を動かす。
+# `bash_config_protection`（cwd 基準の解決を信用するか）と `pre_bash_commit_quality`（commit の対象
+# index）が共有する。片方だけが知っていると、``env -C plugins rm ../ruff.toml`` が片方を素通りする。
+WRAPPER_CHDIR_OPTION_RE = re.compile(r"^(?:-C|-D|--chdir(?:=|$))")
 
 # sed の GNU 長形式 in-place フラグの名前（長形式の短縮は意図して組み立てる回避形なので見ない）。
 _LONG_INPLACE_OPTION_NAME = "in-place"
@@ -441,8 +436,8 @@ def emit_block_output(reason: str) -> int:
         フックが返すべき終了コード。
     """
     with contextlib.suppress(Exception):
-        write_stdout(adapt_deny_output(reason))
-        write_stderr(reason + "\n")
+        sys.stdout.write(adapt_deny_output(reason))
+        sys.stderr.write(reason + "\n")
     _flush_or_discard(sys.stdout)
     _flush_or_discard(sys.stderr)
     return 2

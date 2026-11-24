@@ -21,7 +21,7 @@ import pytest
 from claq.lib import env_pointer as mod
 from claq.lib.constants import BASE_DIR_NAME
 
-from ._support import _ENV_TEMPLATE, _make_plugin_root, _raise
+from ._support import _ENV_TEMPLATE, _make_plugin_root, _raise, _write_env_pointer_for
 from ._support import _isolate_home as _isolate_home
 
 _PAST_GRACE = mod._DEAD_PID_GRACE_SECONDS + 60
@@ -397,7 +397,7 @@ class TestEnvShRealExecution:
         monkeypatch.setenv("LANG", "ja_JP.UTF-8")
         monkeypatch.delenv("LC_ALL", raising=False)
 
-        mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
+        _write_env_pointer_for(_make_plugin_root(tmp_path / "plugin"))
 
         _assert_resolved(_run_env_sh(_isolate_home))  # env は HOME/PATH のみ（LANG 無し）
 
@@ -443,7 +443,7 @@ class TestEnvShRealExecution:
 
     def test_end_to_end_via_write_env_pointer(self, tmp_path: Path, _isolate_home: Path) -> None:
         """write_env_pointer が書いた env.sh をそのまま source して解決できる（統合確認）。"""
-        mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
+        _write_env_pointer_for(_make_plugin_root(tmp_path / "plugin"))
 
         _assert_resolved(_run_env_sh(_isolate_home))
 

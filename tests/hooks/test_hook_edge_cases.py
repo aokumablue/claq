@@ -193,7 +193,7 @@ def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
 
         content = raw.decode("utf-8", errors="replace")
         with mock.patch.object(commit_quality_scanner, "get_staged_file_content", return_value=content):
-            issues = commit_quality_scanner.find_file_issues(rel_path, deadline=_scan_deadline())
+            issues = commit_quality_scanner.find_file_issues(rel_path, repo_root=None, deadline=_scan_deadline())
 
         secret_hits.extend(f"{rel_path}:{issue['line']}" for issue in issues if issue["type"] == "secret")
 

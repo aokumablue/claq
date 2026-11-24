@@ -16,9 +16,11 @@ from claq.lib.harness import normalize_tool_name
 # 超えたら検査できないとして呼び出し側が deny する（hook が host timeout で kill されると許可へ倒れるため）。
 FULL_TEXT_MAX_BYTES = 256 * 1024
 
-# MultiEdit の編集件数の上限。置換 1 件ごとに全文を走査するため、件数でも検査時間を抑える
+# MultiEdit の編集件数の上限。置換 1 件ごと・断片 1 つごとに全文を走査するため、件数でも検査時間を抑える
 # （上限が無いと 1 MiB の payload に 13,981 件入り、256 KiB の全文で 5.2 秒かかった。64 件なら数 ms）。
-_MAX_EDITS = 64
+# `conditional_protection` の断片検査も同じ上限を使う（約 1 MB の本文に 15,000 件で 13.5 秒かかり、
+# hook の timeout に近づいた）。
+MAX_EDITS = 64
 
 
 def read_current_text(file_path: str) -> str:
@@ -72,7 +74,7 @@ def text_after_edit(tool_name: str, container: Any, before: str) -> str | None:
     """書込み系入力を適用した後の全文を組み立てる。
 
     Write は content。Edit は置換を当てた全文、MultiEdit は編集を順に当てた全文（件数は
-    `_MAX_EDITS` まで）。対象が空・存在しない・読めない場合は、Write と同じく new_string だけを
+    `MAX_EDITS` まで）。対象が空・存在しない・読めない場合は、Write と同じく new_string だけを
     断片として扱う。内容のあるファイルで置換対象が見つからない場合は、実際のツールが一致させる
     可能性（引用符の正規化など）を排除できないため全文を作らない。apply_patch も全文を作れない。
 
@@ -91,7 +93,7 @@ def text_after_edit(tool_name: str, container: Any, before: str) -> str | None:
         content = container.get("content")
         return content if isinstance(content, str) else None
     edits = container.get("edits") if normalized == "multiedit" else [container]
-    if not isinstance(edits, list) or not 0 < len(edits) <= _MAX_EDITS:
+    if not isinstance(edits, list) or not 0 < len(edits) <= MAX_EDITS:
         return None
     if not all(isinstance(edit, dict) and isinstance(edit.get("new_string"), str) for edit in edits):
         return None

@@ -488,9 +488,9 @@ def test_every_javascript_suffix_gets_the_statement_checks(suffix: str, monkeypa
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: "debugger")  # nosec
     deadline = commit_quality_scanner.new_secret_scan_deadline()
 
-    issues = commit_quality_scanner.find_file_issues(f"src/app{suffix}", deadline=deadline)
+    issues = commit_quality_scanner.find_file_issues(f"src/app{suffix}", repo_root=None, deadline=deadline)
     assert [issue["type"] for issue in issues] == ["debugger"]  # nosec
-    assert commit_quality_scanner.find_file_issues("src/app.py", deadline=deadline) == []
+    assert commit_quality_scanner.find_file_issues("src/app.py", repo_root=None, deadline=deadline) == []
 
 
 @pytest.mark.parametrize("prefix", _EXPECTED_VOCABULARIES["commit_quality_scanner._JS_COMMENT_LINE_PREFIXES"])
@@ -534,7 +534,7 @@ _EXPECTED_WINDOWS_WRITE_COMMAND_ALIASES = {
     **dict.fromkeys(("move-item", "move", "mi", "rename-item", "rename", "ren", "rni"), "mv"),
     **dict.fromkeys(("remove-item", "del", "erase", "rd", "rmdir", "ri"), "rm"),
     **dict.fromkeys(("clear-content", "clc"), "truncate"),
-    **dict.fromkeys(("set-content", "add-content", "out-file", "sc", "ac", "new-item", "ni"), "tee"),
+    **dict.fromkeys(("tee-object", "set-content", "add-content", "out-file", "sc", "ac", "new-item", "ni"), "tee"),
 }
 
 

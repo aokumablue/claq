@@ -515,6 +515,8 @@ class TestCommitAgainstAnotherIndex:
             "git commit -m 'cd into GIT_DIR=x'",
             # commit より後ろの `cd` はその commit の対象を変えない。
             "git commit -m x && cd ..",
+            # `sh -c` の文字列は外側のセグメントに残さない（commit 自身のメッセージを前のコマンドとして読まない）。
+            "bash -c \"git commit -m 'docs: explain core.worktree'\"",
         ],
     )
     def test_commit_against_cwd_index_is_scanned(self, command: str) -> None:

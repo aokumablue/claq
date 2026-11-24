@@ -23,7 +23,7 @@ _OVER_1MIB = "x" * (1024 * 1024 + 1)
 def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """INDEX の内容を ``content`` に差し替えて ``find_file_issues`` を満額の予算で呼ぶ。"""
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-    return commit_quality_scanner.find_file_issues(file_path, deadline=_scan_deadline())
+    return commit_quality_scanner.find_file_issues(file_path, repo_root=None, deadline=_scan_deadline())
 
 
 @pytest.mark.parametrize(
@@ -267,9 +267,10 @@ def test_get_staged_file_content(
     assert commit_quality_scanner.get_staged_file_content("src/app.js") == expected
 
 
-def test_get_staged_file_content_returns_none_when_git_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """git を起動できない（FileNotFoundError）ときも None（検査不能）を返すこと。"""
-    monkeypatch.setattr(commit_quality_scanner.subprocess, "run", mock.Mock(side_effect=FileNotFoundError("missing")))
+@pytest.mark.parametrize("error", [FileNotFoundError("missing"), PermissionError("denied")], ids=["missing", "not-executable"])
+def test_get_staged_file_content_returns_none_when_git_cannot_start(monkeypatch: pytest.MonkeyPatch, error: OSError) -> None:
+    """git を起動できない（不在・実行権限なし）ときも None（検査不能）を返すこと。"""
+    monkeypatch.setattr(commit_quality_scanner.subprocess, "run", mock.Mock(side_effect=error))
 
     assert commit_quality_scanner.get_staged_file_content("src/app.js") is None
 

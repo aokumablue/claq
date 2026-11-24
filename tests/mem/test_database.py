@@ -12,6 +12,7 @@ import pytest
 from claq.mem.database import Database, DatabaseError
 from claq.mem.models import Knowledge, Repo, Session, utc_now_iso
 
+from ._support import _all_knowledge
 from ._support import db as db
 
 _TS = "2026-01-01T00:00:00+00:00"
@@ -109,7 +110,7 @@ class TestSchema:
         db.start_session(Session(session_uid="uid-1", repo_id="claq-dev"))
         db.conn.execute("DELETE FROM repos WHERE id = ?", ("claq-dev",))
         db.conn.commit()
-        assert db.list_knowledge() == []
+        assert _all_knowledge(db) == []
         assert db.conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
 
@@ -243,14 +244,14 @@ class TestKnowledge:
         assert second.created_at == _TS
         assert second.updated_at == "2026-02-02T00:00:00+00:00"
         assert second.confidence == 0.9
-        assert [row.title for row in db.list_knowledge()] == ["上書き"]
+        assert [row.title for row in _all_knowledge(db)] == ["上書き"]
 
     def test_same_key_coexists_across_scopes_and_get_by_key_picks_scope(self, db: Database) -> None:
         """global と repo で同じ key を並存でき（式インデックスの境界）、get は repo_id でスコープを選ぶ。"""
         db.upsert_repo(_repo())
         db.upsert_knowledge(_knowledge(scope="repo", repo_id="claq-dev", title="repo 側"))
         db.upsert_knowledge(_knowledge(title="global 側"))
-        assert len(db.list_knowledge()) == 2
+        assert len(_all_knowledge(db)) == 2
         global_row = db.get_knowledge_by_key("use-python3")
         assert (global_row.scope, global_row.title) == ("global", "global 側")
         assert db.get_knowledge_by_key("use-python3", repo_id="claq-dev").title == "repo 側"
@@ -284,12 +285,12 @@ class TestKnowledge:
         assert stored.source_ref.endswith("database.py")
         assert stored.superseded_by == base.id
 
-    def test_list_without_filters_returns_all_newest_first(self, db: Database) -> None:
-        """絞り込み無しは全件を更新の新しい順で返す（挿入順・id 順とは独立）。"""
+    def test_list_returns_newest_first(self, db: Database) -> None:
+        """一致した行を更新の新しい順で返す（挿入順・id 順とは独立）。"""
         db.upsert_knowledge(_knowledge("a", updated_at=_TS))
         db.upsert_knowledge(_knowledge("b", updated_at="2026-03-01T00:00:00+00:00"))
         db.upsert_knowledge(_knowledge("c", updated_at="2026-02-01T00:00:00+00:00"))
-        assert [row.key for row in db.list_knowledge()] == ["b", "c", "a"]
+        assert [row.key for row in db.list_knowledge(scope="global", status="active")] == ["b", "c", "a"]
 
     def test_list_with_all_filters(self, db: Database) -> None:
         """scope・repo_id・status のすべてで絞り込む。"""

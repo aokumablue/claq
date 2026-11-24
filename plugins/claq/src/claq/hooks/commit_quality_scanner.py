@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 from claq.lib.core_utils import log
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES
 
 # deny 出力へ載せる不信データ（ステージされたファイルの行内容）の最大文字数。
 # stderr はモデルへ提示されるチャネルなので、長さ無制限の抜粋はコンテキストを
@@ -315,7 +316,7 @@ def get_staged_file_content(file_path: str) -> str | None:
             check=False,
             timeout=5,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return None
     if result.returncode != 0:
         return None
@@ -577,7 +578,7 @@ def _scan_error_issue(file_path: str, stage: str, err: Exception) -> dict:
     return _issue("scan_error", message, line=0, severity="error")
 
 
-def find_file_issues(file_path: str, *, repo_root: Path | None = None, deadline: float) -> list[dict]:
+def find_file_issues(file_path: str, *, repo_root: Path | None, deadline: float) -> list[dict]:
     """ファイル内容から代表的な問題を検出します。
 
     `repo_root` が None なら INDEX から、渡すと作業ツリー（`git commit -a` の未ステージ

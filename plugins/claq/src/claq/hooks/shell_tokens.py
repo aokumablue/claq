@@ -95,10 +95,12 @@ class ShellWrapperCall(NamedTuple):
             ``env HOME=/tmp/h sh -c '...'`` の ``HOME=/tmp/h`` は内側のコマンドにも環境として渡る。
             ``-c`` の文字列より後ろの位置引数（``sh -c '...' HOME=/tmp/h``）は環境ではないため含めない。
         command: ``-c`` に続く、ラップされた文字列コマンド。
+        command_index: ``command`` のセグメント内位置。外側のセグメントから文字列を除くときに使う。
     """
 
     prefix: tuple[str, ...]
     command: str
+    command_index: int
 
 
 def extract_shell_wrapper_call(segment: list[str]) -> ShellWrapperCall | None:
@@ -121,7 +123,7 @@ def extract_shell_wrapper_call(segment: list[str]) -> ShellWrapperCall | None:
         return None
     for position in range(start + 1, len(segment) - 1):
         if _SHELL_COMMAND_FLAG_RE.fullmatch(segment[position]):
-            return ShellWrapperCall(tuple(segment[:start]), segment[position + 1])
+            return ShellWrapperCall(tuple(segment[:start]), segment[position + 1], position + 1)
     return None
 
 

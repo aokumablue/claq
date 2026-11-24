@@ -18,10 +18,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from claq.lib.constants import PLUGIN_NAME
 
-def installed_plugins_dir(home: Path) -> Path:
-    """``home`` 配下の ``.grok/installed-plugins`` のパスを返す。"""
-    return home / ".grok" / "installed-plugins"
+# Grok がプラグインを展開するディレクトリ名の接頭辞（``installed-plugins/claq-<hash>``）。
+_INSTALLED_DIR_PREFIX = f"{PLUGIN_NAME}-"
 
 
 def is_grok_installed_plugin_root(path: Path | str) -> bool:
@@ -33,7 +33,7 @@ def is_grok_installed_plugin_root(path: Path | str) -> bool:
         return False
     if grok_index + 2 >= len(parts) or parts[grok_index + 1] != "installed-plugins":
         return False
-    return parts[grok_index + 2].startswith("claq-")
+    return parts[grok_index + 2].startswith(_INSTALLED_DIR_PREFIX)
 
 
 def _has_launcher(root: Path) -> bool:
@@ -64,7 +64,7 @@ def find_latest_installed_claq(installed_dir: Path) -> Path | None:
     ``FileNotFoundError`` が起きるので、消えた候補は除外する。
 
     Args:
-        installed_dir: 探索先（``installed_plugins_dir`` の値）。
+        installed_dir: 探索先（``~/.grok/installed-plugins``）。
 
     Returns:
         最新ディレクトリ。無ければ None（全候補が消えていた場合も None）。
@@ -76,7 +76,7 @@ def find_latest_installed_claq(installed_dir: Path) -> Path | None:
         return None
     candidates: list[tuple[float, Path]] = []
     for path in installed_dir.iterdir():
-        if not (path.is_dir() and path.name.startswith("claq-") and _has_launcher(path)):
+        if not (path.is_dir() and path.name.startswith(_INSTALLED_DIR_PREFIX) and _has_launcher(path)):
             continue
         mtime = _mtime_or_none(path)
         if mtime is not None:
@@ -103,7 +103,7 @@ def ensure_grok_plugin_root_symlink() -> Path | None:
     target = _resolve_symlink_target(home)
     if target is None:
         return None
-    return _ensure_symlink(home / ".grok" / "plugins" / "claq", target)
+    return _ensure_symlink(home / ".grok" / "plugins" / PLUGIN_NAME, target)
 
 
 def _resolve_symlink_target(home: Path) -> Path | None:
@@ -111,7 +111,7 @@ def _resolve_symlink_target(home: Path) -> Path | None:
     env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
     if env_root and (target := _installed_target(env_root)) is not None:
         return target
-    found = find_latest_installed_claq(installed_plugins_dir(home))
+    found = find_latest_installed_claq(home / ".grok" / "installed-plugins")
     if found is None:
         return None
     return found.resolve()

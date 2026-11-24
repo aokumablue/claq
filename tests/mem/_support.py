@@ -102,3 +102,9 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
     with Database(tmp_path / "mem.db") as db:
         db.upsert_knowledge(knowledge)
         return db.get_knowledge_by_key(knowledge.key, knowledge.repo_id)
+
+
+def _all_knowledge(db: Database) -> list[Knowledge]:
+    """knowledge の全行を更新の新しい順に返す（本番の list_knowledge はスコープと status で必ず絞る）。"""
+    rows = db.conn.execute("SELECT * FROM knowledge ORDER BY updated_at DESC, id DESC").fetchall()
+    return [Knowledge.from_row(row) for row in rows]

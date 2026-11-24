@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime, timedelta
 
-from claq.lib.constants import HOOK_ENTRYPOINT_CMD
+from claq.lib.constants import HOOK_ENTRYPOINT_CMD, RUNTIME_DIR_NAME
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.detach import recent_bg_failure_notice
 from claq.lib.env_pointer import ancestor_pointers_supported
@@ -110,6 +110,22 @@ def _neutralize_handoff_structure(text: str) -> str:
     return "\n".join(f" {line.lstrip()}" if _is_handoff_structure_line(line) else line for line in text.split("\n"))
 
 
+def _sanitize_stored(text: str) -> str:
+    """DB から読んだ値（知識カードの title / body・引き継ぎ本文）を注入枠へ載せる前に無害化する。
+
+    ``keep_allowed_chars_for_injection`` で許可した文字だけを残してから ``strip_tags`` で信頼境界タグを
+    倒し、前後の空白を落とす。順序を逆にすると、不可視文字で分断したタグが除去で再結合して
+    ``strip_tags`` をすり抜ける（書き込み側の ``handoff.sanitize_freeform`` と同じく、合成を 1 か所に閉じる）。
+
+    Args:
+        text: DB から読んだ値。
+
+    Returns:
+        無害化した値。
+    """
+    return strip_tags(keep_allowed_chars_for_injection(text).strip())
+
+
 def _format_injected_item(row: Knowledge) -> str:
     """知識カード 1 件を注入用の 1 行へ整形する。
 
@@ -128,8 +144,8 @@ def _format_injected_item(row: Knowledge) -> str:
     """
     # 入口で畳んでいても、既に DB にある行や将来の別経路を信用しない。返り値が
     # 「改行を含まない 1 行」であることは、この関数が自分で保証する。
-    head = f"- [{row.kind}] {_one_line(strip_tags(keep_allowed_chars_for_injection(row.title)))}"
-    body = _one_line(strip_tags(keep_allowed_chars_for_injection(row.body).strip()))
+    head = f"- [{row.kind}] {_one_line(_sanitize_stored(row.title))}"
+    body = _one_line(_sanitize_stored(row.body))
     if not body:
         return head
     combined = f"{head} — {body}"
@@ -175,7 +191,7 @@ def _handoff_section(db: Database, repo_id: str) -> str:
     session = db.get_latest_session(repo_id)
     if session is None:
         return ""
-    handoff = _neutralize_handoff_structure(strip_tags(keep_allowed_chars_for_injection(session.handoff).strip()))
+    handoff = _neutralize_handoff_structure(_sanitize_stored(session.handoff))
     if not handoff:
         return ""
     stamp = datetime.fromisoformat(session.ended_at).astimezone().strftime("%Y-%m-%d %H:%M")
@@ -233,7 +249,7 @@ def _shell_bootstrap_section() -> str:
     """
     if ancestor_pointers_supported():
         return ""
-    wrapper = get_plugin_root() / "runtime" / HOOK_ENTRYPOINT_CMD
+    wrapper = get_plugin_root() / RUNTIME_DIR_NAME / HOOK_ENTRYPOINT_CMD
     return (
         "## claq の呼び出し\n"
         'この OS では `. "$HOME/.claq/env.sh"` は解決できない。md 中の '

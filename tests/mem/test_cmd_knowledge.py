@@ -12,7 +12,7 @@ from claq.mem import cmd_knowledge, command_support
 from claq.mem.database import Database
 from claq.mem.models import Knowledge
 
-from ._support import _repo_id, _run_cli, _seed
+from ._support import _all_knowledge, _repo_id, _run_cli, _seed
 
 # learn の自己承認拒否テストが共有する、それ自体は正当な payload。
 _OBSERVED = {"scope": "global", "kind": "fact", "title": "observed"}
@@ -42,7 +42,7 @@ class TestLearn:
         assert (stdout, stderr, exit_code) == ("learned: run-pytest-with-pipefail\n", "", 0)
 
         with Database(tmp_path / "mem.db") as db:
-            rows = db.list_knowledge()
+            rows = _all_knowledge(db)
         assert len(rows) == 1
         assert (rows[0].scope, rows[0].status, rows[0].source, rows[0].body) == ("repo", "pending", "agent", "why")
         assert rows[0].repo_id is not None
@@ -109,7 +109,7 @@ class TestLearn:
         assert len(stderr.splitlines()) == 1
         assert expected in stderr
         with Database(tmp_path / "mem.db") as db:
-            assert db.list_knowledge() == []
+            assert _all_knowledge(db) == []
 
     def test_same_key_updates_instead_of_duplicating(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """同じ key の再投入は更新に落ちる。"""
@@ -118,7 +118,7 @@ class TestLearn:
         _run_cli(monkeypatch, tmp_path, ["learn"], {**base, "title": "second"})
 
         with Database(tmp_path / "mem.db") as db:
-            rows = db.list_knowledge()
+            rows = _all_knowledge(db)
         assert [row.title for row in rows] == ["second"]
 
 

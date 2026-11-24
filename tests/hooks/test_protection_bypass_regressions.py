@@ -586,6 +586,18 @@ def test_every_directory_change_command_forces_unconditional_deny(
     assert _run("bash_config_protection", _bash(f"{command} sub && {outside_repo}"), monkeypatch) == 2
 
 
+@pytest.mark.parametrize("prefix", ["env -C sub", "env --chdir=sub", "env --chdir sub", "sudo -D sub"])
+def test_wrapper_chdir_option_forces_unconditional_deny(prefix: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """wrapper の作業ディレクトリ指定は cd と同じく cwd を動かすため、repo スコープ判定を放棄させること。
+
+    commit 品質フックは同じ語彙（`hook_common.WRAPPER_CHDIR_OPTION_RE`）で commit の対象 index を疑う。
+    値（``sub``）をコマンド名と取り違えず、その後ろの書込みコマンドを実行位置として読む。
+    """
+    outside_repo = "rm ../ruff.toml"
+    assert _run("bash_config_protection", _bash(outside_repo), monkeypatch) == 0
+    assert _run("bash_config_protection", _bash(f"{prefix} {outside_repo}"), monkeypatch) == 2
+
+
 def test_directory_change_before_shell_wrapper_reaches_the_inner_command(monkeypatch: pytest.MonkeyPatch) -> None:
     """外側の cd は ``sh -c`` の内側にも効くため、内側の書き込み先も cwd 基準で信用しないこと。
 

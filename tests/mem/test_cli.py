@@ -148,16 +148,11 @@ class TestInit:
         with Database(db_path) as db:
             assert db.list_repos() == []
 
-    def test_remove_db_artifacts_tolerates_missing_files(self, tmp_path: Path) -> None:
-        """存在しないファイルがあっても例外を出さない。"""
-        db_path = tmp_path / "mem.db"
-        db_path.write_text("db", encoding="utf-8")
-        (tmp_path / "mem.db-journal").write_text("stale", encoding="utf-8")
-
-        cli._remove_db_artifacts(db_path)
-
-        assert not db_path.exists()
-        assert not (tmp_path / "mem.db-journal").exists()
+    def test_creates_database_when_nothing_exists(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """DB も sidecar も無い状態でも例外を出さず、空の DB を作る。"""
+        assert _run_cli(monkeypatch, tmp_path, ["init"]) == ("", "", 0)
+        with Database(tmp_path / "mem.db") as db:
+            assert db.list_repos() == []
 
 
 class TestArgvAndStdin:

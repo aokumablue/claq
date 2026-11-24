@@ -92,6 +92,8 @@ from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     emit_block_output,
     is_git_executable_token,
+    memoized_in_scan,
+    scan_memo,
 )
 from claq.hooks.shell_tokens import (
     ENV_ASSIGNMENT_RE,
@@ -488,6 +490,7 @@ class _GitScan:
         return self._words_up_to_two[args_start] >= 2
 
 
+@memoized_in_scan
 def has_bypass_flag(command: str, *, _recursed: bool = False, _inherited_prefix: tuple[str, ...] = ()) -> bool:
     """コマンド文字列に git フックバイパスフラグが含まれるかを判定する。
 
@@ -625,8 +628,11 @@ def main() -> int:
     # argv 配列の要素の走査が積み上がらないよう、全候補を走査する前に検査する。
     if any(command_exceeds_scan_budget(command) for command in commands):
         return emit_block_output(_SCAN_BUDGET_MESSAGE)
-    if any(has_bypass_flag(command) for command in commands):
-        return emit_block_output(_BYPASS_BLOCKED_MESSAGE)
+    # 方言の読み方 2 通りや argv 配列の要素と結合文字列が同じ ``sh -c`` の内側を持つため、1 回の判定の間は
+    # `has_bypass_flag` の結果を使い回す。
+    with scan_memo():
+        if any(has_bypass_flag(command) for command in commands):
+            return emit_block_output(_BYPASS_BLOCKED_MESSAGE)
     return 0
 
 

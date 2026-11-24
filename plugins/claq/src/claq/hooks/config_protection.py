@@ -12,7 +12,6 @@ launcher は stdin を代読しないため、入力切り捨て時のブロッ�
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +29,7 @@ from claq.hooks.hook_common import (
     resolve_repo_root,
     scan_memo,
 )
-from claq.lib.constants import HOOK_ENTRYPOINT
+from claq.lib.constants import HOOK_ENTRYPOINT, RUNTIME_DIR_NAME
 from claq.lib.core_utils import get_plugin_root
 from claq.lib.harness import (
     extract_file_paths,
@@ -45,7 +44,7 @@ from claq.lib.stdin_io import (
     read_raw_stdin_with_truncation,
     stdin_unreadable_message,
 )
-from claq.lib.subprocess_utils import run_text
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES, run_text
 
 # matcher（hooks.json）は書込み系ツールに限定されているが、matcher の綴りがズレても
 # 本体側で書込み系以外を早期 return する多重防御。
@@ -117,10 +116,13 @@ PROTECTED_FILES = frozenset({
 # Edit で全部を無効化できる。片側だけ塞ぐと、塞いだ経路の存在が誤った安心になる。
 # basename ``hooks.json`` では判定しない（consumer 側の ``.claude/hooks.json`` は
 # `/harness --apply` が正当に書き込む先）。
-_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), ("hooks", "hooks.json"))
+_PLUGIN_HOOKS_DIR_NAME = "hooks"
+PLUGIN_HOOKS_JSON_NAME = "hooks.json"
+_PROTECTED_PATH_SEGMENTS = ((".git", "hooks"), (_PLUGIN_HOOKS_DIR_NAME, PLUGIN_HOOKS_JSON_NAME))
 
 # 保護 path のうちファイルのもの。表示名に末尾の ``/`` を付けない（`protected_path_display_name`）。
-PLUGIN_HOOKS_JSON_SEGMENT = "hooks/hooks.json"
+# `host_guard_targets` は plugin root に連ねた実体パスにも使う。
+PLUGIN_HOOKS_JSON_SEGMENT = f"{_PLUGIN_HOOKS_DIR_NAME}/{PLUGIN_HOOKS_JSON_NAME}"
 
 # 内容次第で保護する git config のパス。remote / branch / user の通常編集が正当にあるため
 # 無条件では塞がず、置換後の全文を解析して ``core.hooksPath`` / ``include`` / ``alias`` のように
@@ -164,13 +166,12 @@ CONDITIONALLY_PROTECTED_FILES_FOLDED = frozenset(
 
 # 実行中の plugin root から見て守るディレクトリ。`runtime/` は hooks.json が起動する
 # `claq-hook`、`src/claq/` はフック本体で、書き換えると次のツール呼び出しから全保護フックが外れる。
-_RUNNING_PLUGIN_RUNTIME_DIR_NAME = "runtime"
-_RUNNING_PLUGIN_GUARDED_DIRS = ((_RUNNING_PLUGIN_RUNTIME_DIR_NAME,), ("src", "claq"))
+_RUNNING_PLUGIN_GUARDED_DIRS = ((RUNTIME_DIR_NAME,), ("src", "claq"))
 
 # 上の表示名。`blocked_message_for_file` がブロック文言を選ぶ鍵（Edit/Write と Bash で共有）。
 RUNNING_PLUGIN_DISPLAY_NAMES = frozenset("/".join(segments) + "/" for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
 # `cd` を含むコマンドで起動ファイルの basename に当たったときの表示名（`host_guard_targets` が返す）。
-RUNNING_PLUGIN_RUNTIME_DISPLAY = f"{_RUNNING_PLUGIN_RUNTIME_DIR_NAME}/"
+RUNNING_PLUGIN_RUNTIME_DISPLAY = f"{RUNTIME_DIR_NAME}/"
 
 
 def protected_path_segment(file_path: str) -> str | None:
@@ -318,10 +319,10 @@ def _plugin_runtime_is_tracked(repo_root: Path, plugin_root: Path) -> bool:
     """
     try:
         result = run_text(
-            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / "runtime" / HOOK_ENTRYPOINT)],
+            ["git", "-C", str(repo_root), "ls-files", "--error-unmatch", "--", str(plugin_root / RUNTIME_DIR_NAME / HOOK_ENTRYPOINT)],
             timeout=5,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return False
     return result.returncode == 0
 
@@ -340,11 +341,23 @@ def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> st
         開発用 checkout で保護しない場合は None。
     """
     target = fold_path_parts(resolved.parts)
-    for segments in _RUNNING_PLUGIN_GUARDED_DIRS:
-        guarded = fold_path_parts(_running_plugin_root().joinpath(*segments).parts)
+    for segments, guarded in _folded_running_plugin_guarded_dirs():
         if is_path_prefix(guarded, target) or (include_ancestors and is_path_prefix(target, guarded)):
             return "/".join(segments) + "/" if running_plugin_root_is_guarded() else None
     return None
+
+
+@memoized_in_scan
+def _folded_running_plugin_guarded_dirs() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
+    """実行中の plugin root の保護ディレクトリを (要素列, 畳んだ実体パス) の組で返す。
+
+    書込み先トークンごとに畳み直さないよう、`scan_memo` の間は 1 回だけ作る。
+
+    Returns:
+        `_RUNNING_PLUGIN_GUARDED_DIRS` の各要素と、plugin root に連ねて畳んだ要素列。
+    """
+    root = _running_plugin_root()
+    return tuple((segments, fold_path_parts(root.joinpath(*segments).parts)) for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
 
 
 def _running_plugin_blocked_message(display_name: str) -> str:

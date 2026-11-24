@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import threading
 from pathlib import Path
@@ -20,7 +21,7 @@ import pytest
 from claq.lib import env_pointer as mod
 from claq.lib.constants import BASE_DIR_NAME
 
-from ._support import _ENV_TEMPLATE, _make_plugin_root, _raise
+from ._support import _ENV_TEMPLATE, _make_plugin_root, _raise, _write_env_pointer_for
 from ._support import _isolate_home as _isolate_home
 
 
@@ -54,7 +55,7 @@ class TestWriteEnvPointer:
         """roots/<ppid> は shell 代入形式ではなく root + lstart の 2 行のみであること。"""
         plugin_root = _make_plugin_root(tmp_path / "plugin")
 
-        mod.write_env_pointer(plugin_root)
+        _write_env_pointer_for(plugin_root)
 
         claq_dir = _isolate_home / BASE_DIR_NAME
         pid_file = _pointer_file(_isolate_home)
@@ -79,7 +80,7 @@ class TestWriteEnvPointer:
         monkeypatch.setattr(mod, "ancestor_pointers_supported", lambda: False)
         monkeypatch.setattr(mod, "_resolve_ancestor_chain", lambda: called.append(1) or [])
 
-        mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
+        _write_env_pointer_for(_make_plugin_root(tmp_path / "plugin"))
 
         claq_dir = _isolate_home / BASE_DIR_NAME
         assert called == []
@@ -94,7 +95,7 @@ class TestWriteEnvPointer:
         ことだけを見る。「2 段目も確かに書かれる」ことは合成チェーンを与える
         :meth:`test_writes_every_pid_in_the_resolved_ancestor_chain` が担う。
         """
-        mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
+        _write_env_pointer_for(_make_plugin_root(tmp_path / "plugin"))
 
         written = _pid_entries(_isolate_home / BASE_DIR_NAME / "roots")
         assert str(os.getppid()) in written
@@ -114,7 +115,7 @@ class TestWriteEnvPointer:
         monkeypatch.setattr(mod, "_resolve_ancestor_chain", lambda: list(chain))
         plugin_root = _make_plugin_root(tmp_path / "plugin")
 
-        mod.write_env_pointer(plugin_root)
+        _write_env_pointer_for(plugin_root)
 
         roots_dir = _isolate_home / BASE_DIR_NAME / "roots"
         assert mod._MAX_ANCESTOR_DEPTH == 2
@@ -131,18 +132,18 @@ class TestWriteEnvPointer:
         writer が書く祖先 PID は host インスタンス専有（最大 2 段）で他 host と共有されないため、
         同一 PID に別の root が観測されるのは同一 host のアップグレードだけで、上書きが正しい。
         """
-        mod.write_env_pointer(_make_plugin_root(tmp_path / "first"))
-        mod.write_env_pointer(_make_plugin_root(tmp_path / second))
+        _write_env_pointer_for(_make_plugin_root(tmp_path / "first"))
+        _write_env_pointer_for(_make_plugin_root(tmp_path / second))
 
         assert _pointer_file(_isolate_home).read_text(encoding="utf-8").split("\n")[0] == str(tmp_path / second)
 
     def test_rejects_root_containing_newline(self, tmp_path: Path, _isolate_home: Path) -> None:
         """改行を含む root は書き込まれず、既存の有効ポインタも壊されない。"""
-        mod.write_env_pointer(_make_plugin_root(tmp_path / "good"))
+        _write_env_pointer_for(_make_plugin_root(tmp_path / "good"))
         pid_file = _pointer_file(_isolate_home)
         before = pid_file.read_text(encoding="utf-8")
 
-        mod.write_env_pointer(tmp_path / "evil\nCLAQ_INJECTED=1")  # 例外を送出しない（握り潰す）
+        _write_env_pointer_for(tmp_path / "evil\nCLAQ_INJECTED=1")  # 例外を送出しない（握り潰す）
 
         assert pid_file.read_text(encoding="utf-8") == before
 
@@ -151,7 +152,7 @@ class TestWriteEnvPointer:
         plugin_root = tmp_path / "plugin-without-template"
         plugin_root.mkdir()
 
-        mod.write_env_pointer(plugin_root)
+        _write_env_pointer_for(plugin_root)
 
         assert not (_isolate_home / BASE_DIR_NAME / "env.sh").exists()
 
@@ -175,8 +176,8 @@ class TestWriteEnvPointer:
         monkeypatch.setattr(target, name, _raise(OSError(reason)))
         plugin_root = _make_plugin_root(tmp_path / "plugin")
 
-        mod.write_env_pointer(plugin_root)
-        mod.write_env_pointer(plugin_root)
+        _write_env_pointer_for(plugin_root)
+        _write_env_pointer_for(plugin_root)
 
         payload = _single_warning(capsys.readouterr().err)
         assert payload["claqEnvPointerWriteFailed"] is True
@@ -218,7 +219,7 @@ class TestWriteEnvPointer:
         monkeypatch.setattr(mod, "_DEAD_PID_GRACE_SECONDS", 0)
         plugin_root = _make_plugin_root(tmp_path / "plugin")
 
-        mod.write_env_pointer(plugin_root)
+        _write_env_pointer_for(plugin_root)
 
         assert _pointer_file(_isolate_home).read_text(encoding="utf-8").split("\n")[0] == str(plugin_root)
 
@@ -250,7 +251,7 @@ class TestStateHome:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(mod.Path, "home", classmethod(_raise(RuntimeError("no home"))))
 
-        mod.write_env_pointer(_make_plugin_root(tmp_path / "plugin"))
+        _write_env_pointer_for(_make_plugin_root(tmp_path / "plugin"))
 
         assert not (tmp_path / BASE_DIR_NAME).exists()
         assert _single_warning(capsys.readouterr().err)["claqEnvPointerWriteFailed"] is True
@@ -438,13 +439,13 @@ class TestWriteTextIfChanged:
         「書いていない」ことを示す。
         """
         plugin_root = _make_plugin_root(tmp_path / "plugin")
-        mod.write_env_pointer(plugin_root)
+        _write_env_pointer_for(plugin_root)
         env_sh = _isolate_home / BASE_DIR_NAME / mod._ENV_FILENAME
         before = env_sh.stat()
         os.utime(env_sh, (before.st_atime - 100, before.st_mtime - 100))
         stale = env_sh.stat()
 
-        mod.write_env_pointer(plugin_root)
+        _write_env_pointer_for(plugin_root)
 
         after = env_sh.stat()
         assert (after.st_ino, after.st_mtime) == (stale.st_ino, stale.st_mtime)
@@ -453,10 +454,10 @@ class TestWriteTextIfChanged:
     def test_changed_template_is_written_on_the_next_call(self, tmp_path: Path, _isolate_home: Path) -> None:
         """テンプレートが変われば（プラグイン更新）次の呼び出しで反映されること。"""
         plugin_root = _make_plugin_root(tmp_path / "plugin")
-        mod.write_env_pointer(plugin_root)
+        _write_env_pointer_for(plugin_root)
 
         (plugin_root / "runtime" / "env-template.sh").write_text("# v2\n", encoding="utf-8")
-        mod.write_env_pointer(plugin_root)
+        _write_env_pointer_for(plugin_root)
 
         assert (_isolate_home / BASE_DIR_NAME / mod._ENV_FILENAME).read_text(encoding="utf-8") == "# v2\n"
 
@@ -482,12 +483,12 @@ class TestResolveAncestorChain:
 
     @pytest.mark.parametrize(
         "exc",
-        [FileNotFoundError("ps not found"), mod.subprocess.TimeoutExpired(cmd="ps", timeout=5)],
+        [FileNotFoundError("ps not found"), subprocess.TimeoutExpired(cmd="ps", timeout=5)],
         ids=["ps-missing", "ps-timeout"],
     )
     def test_empty_when_ps_cannot_run(self, monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
         """`ps` の起動失敗・タイムアウトは空チェーン（fail-open）。"""
-        monkeypatch.setattr(mod.subprocess, "run", _raise(exc))
+        monkeypatch.setattr(subprocess, "run", _raise(exc))
         assert mod._resolve_ancestor_chain() == []
 
     @pytest.mark.parametrize(
@@ -542,7 +543,7 @@ class TestResolveAncestorChain:
             row = rows.get(args[-1])
             return _PsResult(returncode, row) if row is not None else _PsResult(1, "")
 
-        monkeypatch.setattr(mod.subprocess, "run", _ps)
+        monkeypatch.setattr(subprocess, "run", _ps)
         monkeypatch.setattr(mod, "_MAX_ANCESTOR_DEPTH", depth)
 
         chain = mod._resolve_ancestor_chain()
@@ -560,7 +561,7 @@ class TestResolveAncestorChain:
             return _PsResult(0, "5000 t0\n")
 
         monkeypatch.setattr(mod.time, "monotonic", lambda: next(clock))
-        monkeypatch.setattr(mod.subprocess, "run", _ps)
+        monkeypatch.setattr(subprocess, "run", _ps)
         monkeypatch.setattr(mod, "_MAX_ANCESTOR_DEPTH", 4)
 
         assert mod._resolve_ancestor_chain() == [(os.getppid(), "t0")]

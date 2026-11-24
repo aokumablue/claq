@@ -37,7 +37,6 @@ commit より前の ``cd`` / ``pushd`` 等）は
 from __future__ import annotations
 
 import re
-import subprocess
 from collections import Counter
 from pathlib import Path
 
@@ -61,6 +60,7 @@ from claq.hooks.commit_risk import (
 from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
+    WRAPPER_CHDIR_OPTION_RE,
     emit_block_output,
     resolve_repo_root,
     scan_memo,
@@ -80,7 +80,7 @@ from claq.lib.stdin_io import (
     stdin_unreadable_message,
     truncated_input_message,
 )
-from claq.lib.subprocess_utils import run_text
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES, run_text
 
 # raw stdin が JSON として壊れているが、生文字列上に git commit が見える場合の
 # deny 理由。matcher は Bash 全体なので、malformed というだけでは deny しない。
@@ -150,11 +150,11 @@ _REPOSITORY_ENV_RE = re.compile(
 )
 
 # 別のリポジトリ・作業ツリーへ移る git のグローバルオプション（``-C <dir>`` /
-# ``--git-dir[=]<dir>`` / ``--work-tree[=]<dir>``）と、wrapper の作業ディレクトリ指定
-# （``env -C`` / ``env --chdir`` / ``sudo -D`` / ``sudo --chdir``）。commit セグメントの commit より
-# 前だけで照合する（commit 自身の ``-C <commit>`` はメッセージの再利用で、対象 index を変えない）。
+# ``--git-dir[=]<dir>`` / ``--work-tree[=]<dir>``）。wrapper の作業ディレクトリ指定
+# （`hook_common.WRAPPER_CHDIR_OPTION_RE`）と合わせ、commit セグメントの commit より前だけで照合する
+# （commit 自身の ``-C <commit>`` はメッセージの再利用で、対象 index を変えない）。
 # 大小を区別する（``git -c`` は設定の指定で、別に ``core.worktree`` だけを見る）。
-_REPOSITORY_OPTION_RE = re.compile(r"^(?:-C|-D|--chdir(?:=|$)|--git-dir(?:=|$)|--work-tree(?:=|$))")
+_GIT_REPOSITORY_OPTION_RE = re.compile(r"^(?:-C|--git-dir(?:=|$)|--work-tree(?:=|$))")
 
 # ``--work-tree`` と同じ効果を持つ設定 key。``git -c`` / ``--config-env`` の値や ``git config`` の
 # 引数として現れる。git の key は大小無視なので畳んでから部分一致で見る。
@@ -199,7 +199,10 @@ def _commit_target_risk(command: str) -> str | None:
                 return _COMMIT_TARGET_UNVERIFIABLE_MESSAGE
             continue
         before_commit = segment[: len(segment) - len(commit_args) - 1]
-        if any(_points_git_elsewhere(token) or _REPOSITORY_OPTION_RE.match(token) for token in before_commit):
+        if any(
+            _points_git_elsewhere(token) or _GIT_REPOSITORY_OPTION_RE.match(token) or WRAPPER_CHDIR_OPTION_RE.match(token)
+            for token in before_commit
+        ):
             return _COMMIT_TARGET_UNVERIFIABLE_MESSAGE
         return None
     return None
@@ -228,7 +231,7 @@ def _git_name_only(git_args: list[str]) -> list[str] | None:
     """
     try:
         result = run_text(git_args, timeout=5)
-    except (OSError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return None
     if result.returncode != 0:
         return None
@@ -258,7 +261,7 @@ def _head_exists() -> bool | None:
     """
     try:
         result = run_text(["git", "rev-parse", "--verify", "--quiet", "HEAD"], timeout=5)
-    except (OSError, subprocess.TimeoutExpired):
+    except SUBPROCESS_FAILURES:
         return None
     if result.returncode == 0:
         return True
@@ -567,74 +570,62 @@ def evaluate(raw_input: str) -> str | None:
     理由に検査を迂回させないため deny する。commit と確定した入力は
     `_evaluate_confirmed_commit` に委譲し、以降は fail-closed で扱う。
 
-    Args:
-        raw_input: フックに渡された生の入力文字列です。
-
     1 回の評価の間は `scan_memo` で解析結果を使い回す。commit 検出・複合判定・対象 index の判定が
     同じコマンドを `analysis_segments` で解析するため。
+
+    Args:
+        raw_input: フックに渡された生の入力文字列です。
 
     Returns:
         ブロックする場合は理由、通す場合は None。
     """
     with scan_memo():
-        return _evaluate_in_scan(raw_input)
+        try:
+            payload = parse_json_object(raw_input)
+            if payload is None:
+                return _malformed_input_reason(raw_input)
 
+            # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める。先に判定できた
+            # コンテナの結論を返すと、先頭が「通る commit」のときに後続キーの commit が
+            # 検査されない。
+            groups = [
+                tuple(strip_data_heredoc_bodies(command) for command in group)
+                for group in iter_bash_command_groups(payload)
+            ]
+            # 予算は全候補を走査する前に検査する。候補ごとに走査と交互に検査すると、上限内の要素を
+            # 並べた argv 配列で要素の走査が積み上がり、上限を超える結合候補に着く前に timeout に
+            # 近づく（4,999 トークンの要素 45 個で 7.45 秒）。
+            if any(command_exceeds_scan_budget(command) for group in groups for command in group):
+                return _SCAN_BUDGET_MESSAGE
+            commits = [commit for group in groups for commit in _detect_group_commits(group)]
+            if not commits:
+                return None
 
-def _evaluate_in_scan(raw_input: str) -> str | None:
-    """`evaluate` の本体。`scan_memo` の中で呼ぶ。
+            # 複数コンテナに commit が散っている場合、どれがどの順で実行されるかは実行前に
+            # 確定できないため、1 コマンド内の複数 commit と同じく検査不能として deny する。
+            if len(commits) > 1:
+                log("[Hook] ERROR: commit content cannot be inspected before execution.")
+                return MULTIPLE_COMMITS_MESSAGE
 
-    Args:
-        raw_input: フックに渡された生の入力文字列です。
+            command, commit_args = commits[0]
+            compound_risk = next(filter(None, map(compound_commit_risk, command_dialect_variants(command))), None)
+            if compound_risk is not None:
+                log("[Hook] ERROR: commit content cannot be inspected before execution.")
+                return compound_risk
 
-    Returns:
-        ブロックする場合は理由、通す場合は None。
-    """
-    try:
-        payload = parse_json_object(raw_input)
-        if payload is None:
-            return _malformed_input_reason(raw_input)
+            target_risk = _commit_target_risk(command)
+            if target_risk is not None:
+                log("[Hook] ERROR: the commit may record an index other than the one scanned.")
+                return target_risk
 
-        # コンテナキーは 1 つも取りこぼさず走査し、commit を**全て**集める。先に判定できた
-        # コンテナの結論を返すと、先頭が「通る commit」のときに後続キーの commit が
-        # 検査されない。
-        groups = [
-            tuple(strip_data_heredoc_bodies(command) for command in group)
-            for group in iter_bash_command_groups(payload)
-        ]
-        # 予算は全候補を走査する前に検査する。候補ごとに走査と交互に検査すると、上限内の要素を
-        # 並べた argv 配列で要素の走査が積み上がり、上限を超える結合候補に着く前に timeout に
-        # 近づく（4,999 トークンの要素 45 個で 7.45 秒）。
-        if any(command_exceeds_scan_budget(command) for group in groups for command in group):
-            return _SCAN_BUDGET_MESSAGE
-        commits = [commit for group in groups for commit in _detect_group_commits(group)]
-        if not commits:
-            return None
+            return _evaluate_confirmed_commit(commit_args)
 
-        # 複数コンテナに commit が散っている場合、どれがどの順で実行されるかは実行前に
-        # 確定できないため、1 コマンド内の複数 commit と同じく検査不能として deny する。
-        if len(commits) > 1:
-            log("[Hook] ERROR: commit content cannot be inspected before execution.")
-            return MULTIPLE_COMMITS_MESSAGE
+        except Exception as err:
+            # commit と確定する前の例外は非ブロッキング。確定後の例外は
+            # _evaluate_confirmed_commit 側で fail-closed にする。
+            log(f"[Hook] Error: {err}")
 
-        command, commit_args = commits[0]
-        compound_risk = next(filter(None, map(compound_commit_risk, command_dialect_variants(command))), None)
-        if compound_risk is not None:
-            log("[Hook] ERROR: commit content cannot be inspected before execution.")
-            return compound_risk
-
-        target_risk = _commit_target_risk(command)
-        if target_risk is not None:
-            log("[Hook] ERROR: the commit may record an index other than the one scanned.")
-            return target_risk
-
-        return _evaluate_confirmed_commit(commit_args)
-
-    except Exception as err:
-        # commit と確定する前の例外は非ブロッキング。確定後の例外は
-        # _evaluate_confirmed_commit 側で fail-closed にする。
-        log(f"[Hook] Error: {err}")
-
-    return None
+        return None
 
 
 def main() -> int:

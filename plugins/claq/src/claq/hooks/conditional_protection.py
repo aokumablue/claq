@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, NoReturn
 
-from claq.hooks.edit_text import FULL_TEXT_MAX_BYTES, read_current_text, text_after_edit
+from claq.hooks.edit_text import FULL_TEXT_MAX_BYTES, MAX_EDITS, read_current_text, text_after_edit
 from claq.hooks.git_config_text import GitConfigParseError, adds_sensitive_entries
 from claq.hooks.hook_common import memoized_in_scan, normalize_protected_name
 from claq.lib.harness import normalize_tool_name
@@ -75,12 +75,11 @@ _TOX_COMMAND_KEY_PATTERN = re.compile(
 )
 
 
-
 def _editable_text(tool_name: str, container: Any) -> list[str] | None:
     """書込み系入力から検査対象テキスト（新規/変更内容）の断片リストを取り出す。
 
     apply_patch はパッチ本文全体、Write は content、Edit/search_replace は
-    old_string+new_string、MultiEdit は edits[].old_string+new_string を
+    old_string+new_string、MultiEdit は edits[].old_string+new_string（`MAX_EDITS` 件まで）を
     それぞれ 1 断片として返す。apply_patch は normalize_tool_name で
     "Edit" に正規化されてしまうため、判定は正規化前の生ツール名で行う。
 
@@ -106,7 +105,9 @@ def _editable_text(tool_name: str, container: Any) -> list[str] | None:
 
     # MultiEdit は edits[]、edit / search_replace 等はコンテナ自身を 1 つの Edit 相当として扱う。
     edits = container.get("edits") if normalized == "multiedit" else [container]
-    if not isinstance(edits, list):
+    # 断片ごとにディスクの本文を走査するため、件数は全文を組み立てる経路（`text_after_edit`）と同じ
+    # `MAX_EDITS` までに抑える。超えたら判定不能として fail-closed にする。
+    if not isinstance(edits, list) or len(edits) > MAX_EDITS:
         return None
     snippets = [
         snippet

@@ -61,7 +61,7 @@ def test_lint_budget_exhaustion_is_scan_error_and_skips_secret_scan(
         commit_quality_scanner, "_scan_secret_issues", lambda *args, **kwargs: called.append("secret") or []
     )
 
-    issues = commit_quality_scanner.find_file_issues("src/app.js", deadline=0.0)
+    issues = commit_quality_scanner.find_file_issues("src/app.js", repo_root=None, deadline=0.0)
 
     assert called == []
     assert [(issue["type"], issue["severity"]) for issue in issues] == [("scan_error", "error")]

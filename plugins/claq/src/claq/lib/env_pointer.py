@@ -25,19 +25,18 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
 
-from claq.lib.constants import BASE_DIR_NAME
-from claq.lib.core_utils import make_private_dirs, unlink_stale_entries
-from claq.lib.subprocess_utils import run_text
+from claq.lib.constants import BASE_DIR_NAME, RUNTIME_DIR_NAME
+from claq.lib.core_utils import get_plugin_root, make_private_dirs, unlink_stale_entries
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES, run_text
 
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
 _ENV_TMP_PREFIX = f"{_ENV_FILENAME}.tmp."
-_ENV_TEMPLATE_RELATIVE = Path("runtime") / "env-template.sh"
+_ENV_TEMPLATE_RELATIVE = Path(RUNTIME_DIR_NAME) / "env-template.sh"
 
 _MAX_ANCESTOR_DEPTH = 2
 """writer が祖先 PID へポインタを書く最大段数。resolver の祖先 walk と同じ深さに揃える。"""
@@ -77,18 +76,16 @@ def ancestor_pointers_supported() -> bool:
     return hasattr(os, "setsid")
 
 
-def write_env_pointer(plugin_root: Path) -> None:
-    """plugin root を ``~/.claq`` 配下のポインタへ書き出す。
+def write_env_pointer() -> None:
+    """このプラグインのソースルート（`core_utils.get_plugin_root`。``launcher.PLUGIN_ROOT`` と同じ値）を
+    ``~/.claq`` 配下のポインタへ書き出す。
 
     hook のあらゆる起動経路から呼ばれるため、失敗（``OSError`` と HOME を決められない
     ``RuntimeError``）で hook 本来の処理を妨げない。ただし無音の機能低下を防ぐため、
     失敗はプロセスごと 1 回だけ stderr へ記録する。
-
-    Args:
-        plugin_root: このプラグインのソースルート（``launcher.PLUGIN_ROOT``）。
     """
     try:
-        _write_env_pointer_unsafe(plugin_root)
+        _write_env_pointer_unsafe(get_plugin_root())
     except (OSError, RuntimeError) as exc:
         _warn_once(str(exc))
 
@@ -210,7 +207,7 @@ def _ps_parent_and_lstart(pid: int, deadline: float) -> tuple[int, str] | None:
         proc = run_text(
             ["ps", "-o", "ppid=,lstart=", "-p", str(pid)], timeout=remaining, extra_env={"LC_ALL": "C"}
         )
-    except (OSError, subprocess.SubprocessError):
+    except SUBPROCESS_FAILURES:
         return None
     lines = proc.stdout.splitlines()
     if proc.returncode != 0 or not lines:

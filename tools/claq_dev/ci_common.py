@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from claq.lib.core_utils import get_plugin_root
+from claq.lib.harness import JSON_PARSE_FAILURES
 from claq_dev.frontmatter import FrontmatterError, parse_yaml, split_frontmatter
 
 PLUGIN_ROOT = get_plugin_root()
@@ -75,7 +76,7 @@ def read_json(file_path: str | Path) -> Any:
     path = Path(file_path)
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+    except JSON_PARSE_FAILURES as error:
         raise ValueError(f"{path.name} の JSON 形式が不正です: {error}") from error
 
 

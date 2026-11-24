@@ -77,6 +77,7 @@ from claq.hooks.hook_common import (
     DIRECTORY_CHANGE_COMMANDS,
     INPLACE_EDIT_EXECUTABLES,
     WINDOWS_WRITE_COMMAND_ALIASES,
+    WRAPPER_CHDIR_OPTION_RE,
     basename,
     effective_basename,
     emit_block_output,
@@ -103,6 +104,7 @@ from claq.hooks.shell_tokens import (
     split_segments,
     tokenize,
 )
+from claq.lib.constants import BASE_DIR_NAME, LOG_DIR_NAME
 from claq.lib.harness import (
     extract_raw_tool_name,
     is_known_tool_outside,
@@ -148,9 +150,10 @@ _DD_COMMANDS = frozenset({"dd"})
 # arity 表を持つより誤検出側を選ぶ。``New-Item`` は `tee` へ写す（`WINDOWS_WRITE_COMMAND_ALIASES`）。
 _TOUCH_COMMANDS = frozenset({"touch"})
 
-# ディレクトリ移動の判定で、コマンド名より前に来うるシェルの予約語・グループ化と `builtin`。
+# 実行位置の特定（`_command_index`）で、コマンド名より前に来うるシェルの予約語・グループ化と `builtin`。
 # ``{ cd x; …}`` / ``if cd x; then …`` / ``builtin cd x`` の ``cd`` を見落とすと、cwd 基準の解決を
-# 信用したまま相対パスの書込み先を判定してしまう。
+# 信用したまま相対パスの書込み先を判定してしまう。``then rm ruff.toml`` / ``do tee ruff.toml`` の
+# 書込みコマンドも同じ位置にあるため、書込み先の抽出と cd の判定が同じ読み飛ばしを使う。
 _LEADING_SHELL_KEYWORDS = frozenset({"{", "(", "!", "if", "then", "elif", "else", "while", "until", "do", "builtin"})
 
 _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILES_FOLDED
@@ -159,7 +162,7 @@ _ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILE
 # がログ末尾行を次回 SessionStart のコンテキストへ注入するため、自由な追記はプロンプト
 # 注入の永続化経路になる。保護の範囲を「Bash からの直接追記の拒否」に限るため、
 # `config_protection` の保護 path（Edit/Write にも効く）へは足さず本モジュールに閉じる。
-_HOME_LOG_PATH_SEGMENTS = ((".claq", "logs"),)
+_HOME_LOG_PATH_SEGMENTS = ((BASE_DIR_NAME, LOG_DIR_NAME),)
 
 # 未展開のまま ``~/.gitconfig`` 等を指せる、書込み先トークン先頭の ``$HOME`` / ``$XDG_CONFIG_HOME``（``{}`` 付き可）。
 _HOME_VARIABLE_PREFIX_RE = re.compile(r"^\$(?:\{HOME\}|HOME)(?=/|$)")
@@ -245,8 +248,9 @@ _COMMAND_POSITION_WRAPPERS = frozenset(
     }
 )
 
-# wrapper 自身が値を取る short オプション（`env -u NAME` / `sudo -u user`）。
-_WRAPPER_VALUE_SHORT_OPTIONS = frozenset({"-u"})
+# wrapper 自身が値を取るオプション（`env -u NAME` / `sudo -u user`、作業ディレクトリ指定の
+# `env -C dir` / `env --chdir dir` / `sudo -D dir`）。値をコマンド名と取り違えない。
+_WRAPPER_VALUE_SHORT_OPTIONS = frozenset({"-u", "-C", "-D", "--chdir"})
 
 # wrapper がコマンド名より前に取る positional 引数（``timeout 5 rm`` の秒数、
 # ``chrt 99 rm`` の優先度、``taskset 0x3 rm`` のマスク）。いずれも数字で始まり、実行
@@ -258,7 +262,8 @@ _WRAPPER_POSITIONAL_VALUE_RE = re.compile(r"^[0-9]")
 def _command_index(segment: list[str]) -> int | None:
     """セグメント内で実際に実行される executable トークンの index を返す。
 
-    先頭から連続する literal 環境変数代入（``NAME=value``）と `_COMMAND_POSITION_WRAPPERS`
+    先頭のシェル予約語（`_LEADING_SHELL_KEYWORDS`）を読み飛ばした後、
+    連続する literal 環境変数代入（``NAME=value``）と `_COMMAND_POSITION_WRAPPERS`
     の実行 wrapper（値を取る wrapper 自身のオプションは値ごと）を消費し、最初にそれ以外の
     形になったトークンの index を返す。wrapper 通過後に限り、数字で始まる非オプション語を
     wrapper の positional 値として読み飛ばす（``5foo ruff.toml`` の実行位置はずらさない）。
@@ -272,6 +277,8 @@ def _command_index(segment: list[str]) -> int | None:
         wrapper/オプションで実行対象が特定できない場合は None。
     """
     index = 0
+    while index < len(segment) and segment[index] in _LEADING_SHELL_KEYWORDS:
+        index += 1
     seen_wrapper = False
     while index < len(segment):
         token = segment[index]
@@ -441,14 +448,13 @@ def _changes_working_directory(segment: list[str]) -> bool:
         segment: 区切りトークンを含まない 1 セグメント分のトークン列。
 
     Returns:
-        先頭の `_LEADING_SHELL_KEYWORDS` を除いた実行位置のコマンドが `DIRECTORY_CHANGE_COMMANDS`
-        に属するなら True。
+        実行位置のコマンド（`_command_index`）が `DIRECTORY_CHANGE_COMMANDS` に属するか、その前の
+        wrapper が作業ディレクトリを指定する（`WRAPPER_CHDIR_OPTION_RE`）なら True。
     """
-    start = 0
-    while start < len(segment) and segment[start] in _LEADING_SHELL_KEYWORDS:
-        start += 1
-    index = _command_index(segment[start:])
-    return index is not None and normalize_executable_name(segment[start + index]) in DIRECTORY_CHANGE_COMMANDS
+    index = _command_index(segment)
+    if any(WRAPPER_CHDIR_OPTION_RE.match(token) for token in segment[: len(segment) if index is None else index]):
+        return True
+    return index is not None and normalize_executable_name(segment[index]) in DIRECTORY_CHANGE_COMMANDS
 
 
 def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
@@ -468,6 +474,7 @@ def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
     return is_path_prefix(root_parts, fold_path_parts(resolved.parts))
 
 
+@memoized_in_scan
 def find_protected_write(command: str, *, _outer_scope_certain: bool | None = None) -> str | None:
     """コマンド文字列内に保護対象への書き込みがあればその表示名を返す。
 
@@ -583,7 +590,7 @@ def _find_protected_write_in_dialect(command: str, *, _outer_scope_certain: bool
     return None
 
 
-def _raw_text_write_risk(raw_input: str) -> str | None:
+def _raw_text_write_risk(raw_input: str) -> bool:
     """JSON が壊れている場合の fallback: 生テキストに保護対象 basename と書き込み指示が両方見えるかを判定する。
 
     「壊れているというだけで deny」にはせず、保護対象ファイル名と破壊的操作の指示の
@@ -595,18 +602,14 @@ def _raw_text_write_risk(raw_input: str) -> str | None:
         raw_input: フックへ渡された生の入力文字列。
 
     Returns:
-        保護対象ファイル名。該当しなければ None。
+        保護対象ファイル名と書き込み指示の両方が見えれば True。
     """
     # 指標には PowerShell の長形式 cmdlet（`Remove-Item`）が入るため、トークン化経路の
-    # 名前比較と同じ casefold で大小を無視する。
+    # 名前比較と同じ casefold で大小を無視する。`_ALL_PROTECTED_BASENAMES` は既に畳み済み。
     lowered = raw_input.casefold()
-    if not any(indicator in lowered for indicator in _RAW_TEXT_RISK_INDICATORS):
-        return None
-    # `_ALL_PROTECTED_BASENAMES` は既に畳み済み。
-    for name in sorted(_ALL_PROTECTED_BASENAMES):
-        if name in lowered:
-            return name
-    return None
+    return any(indicator in lowered for indicator in _RAW_TEXT_RISK_INDICATORS) and any(
+        name in lowered for name in _ALL_PROTECTED_BASENAMES
+    )
 
 
 _SCAN_BUDGET_MESSAGE = scan_budget_message("pre:bash-config-protection", "command")
