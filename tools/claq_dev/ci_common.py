@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-from claq.lib.core_utils import get_plugin_root
+from claq.lib.core_utils import get_plugin_root, log
 from claq.lib.harness import JSON_PARSE_FAILURES
 from claq_dev.frontmatter import FrontmatterError, parse_yaml, split_frontmatter
 
@@ -18,7 +17,7 @@ PLUGIN_ROOT = get_plugin_root()
 
 def emit_error(message: str) -> None:
     """stderr にエラー行を書き出す。"""
-    print(f"エラー: {message}", file=sys.stderr)
+    log(f"エラー: {message}")
 
 
 def report_errors(messages: Iterable[str]) -> bool:

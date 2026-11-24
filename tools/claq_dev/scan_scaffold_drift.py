@@ -42,13 +42,12 @@ from __future__ import annotations
 
 import argparse
 import re
-import sys
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-from claq.lib.core_utils import read_tail_text
+from claq.lib.core_utils import log, read_tail_text
 from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, normalize_user_message
 from claq.lib.tag_stripping import STRIPPED_TAGS, drop_known_tag_blocks
 from claq.mem.handoff import (
@@ -241,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     roots = [Path(root).expanduser() for root in args.root] or list(trusted_transcript_roots())
     paths = iter_transcripts(roots, args.limit)
     if not paths:
-        print("走査できる transcript がありません（ドリフトなしとは区別されます）", file=sys.stderr)
+        log("走査できる transcript がありません（ドリフトなしとは区別されます）")
         return EXIT_NOTHING_SCANNED
 
     counts = scan(paths)
@@ -249,13 +248,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(paths)} 本を走査: 未知の足場タグはありません")
         return EXIT_OK
 
-    print(f"{len(paths)} 本を走査: 未知の足場タグを検出しました", file=sys.stderr)
+    log(f"{len(paths)} 本を走査: 未知の足場タグを検出しました")
     for name, files in counts.most_common(_REPORT_LIMIT):
-        print(f"  {name}: {files} ファイル", file=sys.stderr)
-    print(
+        log(f"  {name}: {files} ファイル")
+    log(
         "足場なら lib/harness.py の SCAFFOLD_TAGS へ、依頼本文に現れる良性タグなら"
-        " tools/claq_dev/scan_scaffold_drift.py の BENIGN_TAGS へ追加してください。",
-        file=sys.stderr,
+        " tools/claq_dev/scan_scaffold_drift.py の BENIGN_TAGS へ追加してください。"
     )
     return EXIT_DRIFT
 

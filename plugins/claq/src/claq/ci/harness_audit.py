@@ -29,6 +29,7 @@ from claq.ci.harness_audit_utils import (
     make_check,
     safe_read,
 )
+from claq.lib.core_utils import log
 from claq.lib.git_hosting import GITHUB, GITLAB, SERVICE_LABELS, detect_git_hosting_service
 from claq.lib.stdin_io import parse_json_object
 
@@ -433,7 +434,7 @@ def run(argv: Sequence[str] | None, build: Callable[[str, Path], dict[str, Any]]
             print_text(report)
         return int(any(not check["pass"] for check in report["checks"]))
     except (OSError, RuntimeError, ValueError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        log(f"Error: {error}")
         return 1
 
 
