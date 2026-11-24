@@ -30,6 +30,7 @@ import pytest
 from claq.hooks import (
     bash_config_protection,
     block_no_verify,
+    commit_message,
     commit_quality_scanner,
     commit_risk,
     config_protection,
@@ -55,7 +56,7 @@ def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[list
         validated.append(commit_args)
         return []
 
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", _spy)
+    monkeypatch.setattr(commit_message, "validate_commit_message", _spy)
     return validated
 
 

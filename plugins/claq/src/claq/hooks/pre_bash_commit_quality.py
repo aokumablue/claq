@@ -40,14 +40,6 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from claq.hooks.commit_message import validate_commit_message
-from claq.hooks.commit_quality_scanner import (
-    find_file_issues,
-    new_secret_scan_deadline,
-    sanitize_untrusted_path,
-    should_lint_file,
-    should_scan_secrets,
-)
 from claq.hooks.commit_risk import (
     MULTIPLE_COMMITS_MESSAGE,
     RAW_GIT_COMMIT_RE,
@@ -320,6 +312,10 @@ def _scan_targets(files: list[str]) -> list[str]:
     Returns:
         スキャン対象のファイルパス。
     """
+    # 検査器（正規表現の事前コンパイルを含む）は commit と確定した後にしか要らない。commit 以外の全 Bash 起動で
+    # import 時間を払わないよう、commit 確定後の経路（ここと `_count_file_issues` ほか）で遅延 import する。
+    from claq.hooks.commit_quality_scanner import should_lint_file, should_scan_secrets
+
     return [path for path in files if should_lint_file(path) or should_scan_secrets(path)]
 
 
@@ -366,6 +362,8 @@ def _count_file_issues(files_to_check: list[str], repo_root: Path | None = None,
     Returns:
         severity（``error`` / ``warning`` / ``info``）ごとの問題数です。
     """
+    from claq.hooks.commit_quality_scanner import find_file_issues, sanitize_untrusted_path
+
     counts: Counter[str] = Counter()
 
     for file_path in files_to_check:
@@ -390,6 +388,8 @@ def _log_commit_message_issues(commit_args: list[str]) -> int:
     Returns:
         メッセージの問題の件数を返します。すべて警告として数える件数です。
     """
+    from claq.hooks.commit_message import validate_commit_message
+
     issues = validate_commit_message(commit_args)
     if not issues:
         return 0
@@ -488,6 +488,8 @@ def _evaluate_confirmed_commit(commit_args: list[str]) -> str | None:
 
         # secret scan の実時間予算はフック 1 回の起動につき 1 本。ファイル単位や集計単位で
         # 作ると、その数だけの実時間を許して hook timeout に達しうる。
+        from claq.hooks.commit_quality_scanner import new_secret_scan_deadline
+
         secret_scan_deadline = new_secret_scan_deadline()
 
         index_counts = _count_file_issues(index_targets, deadline=secret_scan_deadline)

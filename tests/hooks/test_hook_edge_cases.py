@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_quality_scanner, commit_risk, pre_bash_commit_quality
+from claq.hooks import commit_message, commit_quality_scanner, commit_risk, pre_bash_commit_quality
 
 from ._support import _scan_deadline
 
@@ -71,8 +71,8 @@ def test_evaluate_counts_issues_by_severity(
     monkeypatch.setattr(pre_bash_commit_quality, "log", logs.append)
     monkeypatch.setattr(pre_bash_commit_quality, "parse_json_object", lambda raw: {"tool_input": {"command": _COMMIT}})
     monkeypatch.setattr(pre_bash_commit_quality, "get_staged_files", lambda: ["src/app.js"])
-    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", lambda path, *, repo_root=None, deadline: file_issues)
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", _validate)
+    monkeypatch.setattr(commit_quality_scanner, "find_file_issues", lambda path, *, repo_root=None, deadline: file_issues)
+    monkeypatch.setattr(commit_message, "validate_commit_message", _validate)
 
     result = pre_bash_commit_quality.evaluate("payload")
 
@@ -154,7 +154,7 @@ def test_count_file_issues_sanitizes_the_logged_path(monkeypatch: pytest.MonkeyP
     """ログへ出すファイルパスは、タグと制御文字を無害化する（パスは攻撃者が選べる）。"""
     logged: list[str] = []
     monkeypatch.setattr(
-        pre_bash_commit_quality,
+        commit_quality_scanner,
         "find_file_issues",
         lambda path, *, repo_root=None, deadline: [{"severity": "info", "line": 1, "message": "x"}],
     )
