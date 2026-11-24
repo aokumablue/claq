@@ -169,7 +169,7 @@ def _read_section_index(file_path: str) -> tuple[str, list[int], list[str | None
     return text, line_starts, headers_before
 
 
-def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None:
+def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool:
     """`file_path` をディスクから読み、`snippet` が属するセクションが lint 系か判定する。
 
     値行だけの Edit（見出しが old_string/new_string に含まれない）でも、ディスク上の
@@ -181,19 +181,18 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
         snippet: 所属セクションを調べたいテキスト断片。
 
     Returns:
-        True: lint 系セクションに属すると判定できた。
-        False: 読めた上で lint 系セクションではないと判定できた。
-        None: 読めない・見つからない等、判定不能。
+        lint 系セクションに属すると判定できたら True。lint 系ではない・読めない・見つからない等は False
+        （判定不能は副判定に任せる）。
     """
     if not snippet:
-        return None
+        return False
     section_index = _read_section_index(file_path)
     if section_index is None:
-        return None
+        return False
     text, line_starts, headers_before = section_index
     index = text.find(snippet)
     if index < 0:
-        return None
+        return False
     # 全 hook の起動に載せないよう（import で約 0.3 ms）、ここへ到達したときだけ読み込む。
     from bisect import bisect_right
 
@@ -420,7 +419,7 @@ def conditional_block_reason(tool_name: str, container: Any, file_path: str, fil
     if snippets is None:
         return _unverifiable_conditional_message(file_name)
 
-    in_lint_section = any(_resolve_lint_section_from_disk(file_path, snippet) is True for snippet in snippets)
+    in_lint_section = any(_resolve_lint_section_from_disk(file_path, snippet) for snippet in snippets)
     if in_lint_section or _text_has_protected_signal("\n".join(snippets), file_name):
         return _conditional_blocked_message(file_name)
     if is_write_tool(tool_name) and _current_text_has_protected_signal(file_path, file_name):
