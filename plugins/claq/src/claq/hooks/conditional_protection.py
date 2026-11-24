@@ -18,7 +18,7 @@ from typing import Any, NoReturn
 
 from claq.hooks.edit_text import FULL_TEXT_MAX_BYTES, MAX_EDITS, read_current_text, text_after_edit
 from claq.hooks.git_config_text import GitConfigParseError, adds_sensitive_entries
-from claq.hooks.hook_common import memoized_in_scan, normalize_protected_name
+from claq.hooks.hook_common import HOST_SETTINGS_FILES, memoized_in_scan, normalize_protected_name
 from claq.lib.harness import normalize_tool_name
 from claq.lib.stdin_io import MAX_STDIN_BYTES
 
@@ -413,7 +413,7 @@ def conditional_block_reason(tool_name: str, container: Any, file_path: str, fil
     Returns:
         ブロック理由。問題なければ None。
     """
-    if normalize_protected_name(file_name) in ("settings.json", "settings.local.json"):
+    if normalize_protected_name(file_name) in HOST_SETTINGS_FILES:
         return _settings_block_reason(tool_name, container, file_path, file_name)
     snippets = _editable_text(tool_name, container)
     if snippets is None:

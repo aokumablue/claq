@@ -295,6 +295,7 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "bash_config_protection._BASH_TOOL_NAMES": "_HARNESS_CASES の copilot bash 危険 / 通常",
     "bash_config_protection._ALL_PROTECTED_BASENAMES": "test_every_protected_file_is_denied_on_bash_write",
     "hook_common.DIRECTORY_CHANGE_COMMANDS": "test_every_directory_change_command_forces_unconditional_deny",
+    "hook_common.HOST_SETTINGS_FILES": "config_protection.CONDITIONALLY_PROTECTED_FILES と host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS の層1（同じ要素を流す）",
     "hook_common.WRAPPER_CHDIR_SHORT_OPTIONS": "bash_config_protection._WRAPPER_VALUE_SHORT_OPTIONS の deny/allow 対（同じ要素を流す）",
     "bash_config_protection._LEADING_SHELL_KEYWORDS": "test_directory_change_behind_shell_keywords_is_not_trusted (test_bash_config_protection_boundaries.py)",
     "bash_config_protection._HOME_LOG_PATH_SEGMENTS": "test_tilde_form_is_blocked / test_absolute_form_is_blocked / test_relative_after_cd_is_blocked (TestHomeLogDirectoryProtection)",

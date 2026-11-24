@@ -279,6 +279,12 @@ DIRECTORY_CHANGE_COMMANDS = frozenset(
     {"cd", "pushd", "popd", "chdir", "set-location", "sl", "push-location", "pop-location"}
 )
 
+# ホスト設定のファイル名（``.claude/`` 直下）。保護フックを止める手段を持つ（`hooks` の差し替え、プラグインの
+# 無効化、インタプリタ解決を乗っ取る `env`）。`config_protection`（条件付き保護の名前）・`conditional_protection`
+# （全文比較へ振り分ける名前）・`host_guard_targets`（Bash の書込み先の構造一致）が共有する。片方だけに足すと、
+# そのファイルが lint 設定の判定に回って全文比較が効かない。
+HOST_SETTINGS_FILES = ("settings.json", "settings.local.json")
+
 # wrapper の作業ディレクトリ指定（``env -C <dir>`` / ``env --chdir[=]<dir>`` / ``sudo -D <dir>`` /
 # ``sudo --chdir[=]<dir>``）。`DIRECTORY_CHANGE_COMMANDS` と同じく cwd を動かす。
 # `bash_config_protection`（cwd 基準の解決を信用するか）と `pre_bash_commit_quality`（commit の対象

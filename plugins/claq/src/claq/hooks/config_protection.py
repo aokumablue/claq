@@ -18,6 +18,7 @@ from typing import Any
 from claq.hooks.conditional_protection import conditional_block_reason, git_config_block_reason
 from claq.hooks.git_config_text import GLOBAL_GIT_CONFIG_DISPLAY_NAMES, global_git_config_path
 from claq.hooks.hook_common import (
+    HOST_SETTINGS_FILES,
     effective_basename,
     emit_block_output,
     fold_path_parts,
@@ -150,11 +151,9 @@ CONDITIONALLY_PROTECTED_FILES = frozenset({
     "setup.cfg",
     "tox.ini",
     "package.json",
-    # ホスト設定。保護フックを止める手段を持つ（`hooks` の差し替え、プラグインの無効化、
-    # インタプリタ解決を乗っ取る `env`）。`model` / `permissions` / `env` の `DEBUG` 等の正当な
-    # 編集を壊さないよう、置換前後の全文で `conditional_protection._SETTINGS_GUARDED_*` が変わるときだけ塞ぐ。
-    "settings.json",
-    "settings.local.json",
+    # ホスト設定。`model` / `permissions` / `env` の `DEBUG` 等の正当な編集を壊さないよう、
+    # 置換前後の全文で `conditional_protection._SETTINGS_GUARDED_*` が変わるときだけ塞ぐ。
+    *HOST_SETTINGS_FILES,
 })
 
 # 上 2 集合の大小無視の照合用複製。判定は必ずこちらを使う（`bash_config_protection` も

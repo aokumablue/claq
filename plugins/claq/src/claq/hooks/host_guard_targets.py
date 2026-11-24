@@ -42,6 +42,7 @@ from claq.hooks.config_protection import (
     running_plugin_root_is_guarded,
 )
 from claq.hooks.hook_common import (
+    HOST_SETTINGS_FILES,
     basename,
     fold_path_parts,
     is_path_prefix,
@@ -58,7 +59,7 @@ from claq.lib.core_utils import get_home_dir, get_plugin_root
 _RUNTIME_ENTRYPOINT_NAMES = (HOOK_ENTRYPOINT, HOOK_ENTRYPOINT_CMD)
 
 # ホスト設定の置き場（``.claude/`` 直下）と名前の構造一致。
-_HOST_SETTINGS_PATH_SEGMENTS = ((".claude", "settings.json"), (".claude", "settings.local.json"))
+_HOST_SETTINGS_PATH_SEGMENTS = tuple((".claude", name) for name in HOST_SETTINGS_FILES)
 
 # 上の表示名。`bash_config_protection._blocked_message` が文言を選ぶ鍵。
 HOST_SETTINGS_DISPLAY_NAMES = frozenset("/".join(segments) for segments in _HOST_SETTINGS_PATH_SEGMENTS)
