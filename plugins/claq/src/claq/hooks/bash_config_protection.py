@@ -57,9 +57,9 @@ import re
 from pathlib import Path
 
 from claq.hooks.config_protection import (
-    CONDITIONALLY_PROTECTED_FILES_FOLDED,
+    CONDITIONALLY_PROTECTED_FILES,
     GIT_CONFIG_DISPLAY_NAMES,
-    PROTECTED_FILES_FOLDED,
+    PROTECTED_FILES,
     blocked_message_for_file,
     hook_control_blocked_message,
     protected_path_display_name,
@@ -158,7 +158,7 @@ _TOUCH_COMMANDS = frozenset({"touch"})
 # 書込みコマンドも同じ位置にあるため、書込み先の抽出と cd の判定が同じ読み飛ばしを使う。
 _LEADING_SHELL_KEYWORDS = frozenset({"{", "(", "!", "if", "then", "elif", "else", "while", "until", "do", "builtin"})
 
-_ALL_PROTECTED_BASENAMES = PROTECTED_FILES_FOLDED | CONDITIONALLY_PROTECTED_FILES_FOLDED
+_ALL_PROTECTED_BASENAMES = PROTECTED_FILES | CONDITIONALLY_PROTECTED_FILES
 
 # ~/.claq/logs/ 配下（bg 失敗ログ）をディレクトリ構造で保護する。`detach.recent_bg_failure_notice`
 # がログ末尾行を次回 SessionStart のコンテキストへ注入するため、自由な追記はプロンプト

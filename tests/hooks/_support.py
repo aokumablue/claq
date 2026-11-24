@@ -538,10 +538,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection._WRITE_TOOL_NAMES": frozenset({"edit", "multiedit", "write"}),
     "config_protection.PROTECTED_FILES": _EXPECTED_PROTECTED_FILES,
     "config_protection.CONDITIONALLY_PROTECTED_FILES": _EXPECTED_CONDITIONALLY_PROTECTED_FILES,
-    "config_protection.PROTECTED_FILES_FOLDED": _folded(_EXPECTED_PROTECTED_FILES),
-    "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": _folded(
-        _EXPECTED_CONDITIONALLY_PROTECTED_FILES
-    ),
     "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": _EXPECTED_RUNNING_PLUGIN_GUARDED_DIRS,
     # 派生: 上の表示名（`blocked_message_for_file` が文言を選ぶ鍵）。
     "config_protection.RUNNING_PLUGIN_DISPLAY_NAMES": frozenset(

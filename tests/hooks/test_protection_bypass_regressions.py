@@ -519,18 +519,13 @@ def test_protected_vocabulary_is_exactly_as_declared(actual: Any, expected: Any)
     assert actual == expected
 
 
-def test_folded_protected_sets_cover_every_declared_name() -> None:
-    """判定に使う畳み済み集合が、宣言側の全要素を漏れなく・余計なく含むこと。
+def test_protected_sets_are_written_in_folded_form() -> None:
+    """保護ファイル名の集合が、畳んだ形（`normalize_protected_name` の結果）だけで書かれていること。
 
-    判定は `*_FOLDED` 側でのみ行われる。期待値は実装の集合ではなく `_EXPECTED_*` から組み立てる
-    （実装から同じ式で作ると、宣言側と畳み込み側が揃って壊れた場合に緑のまま通る）。
+    判定は畳んだ basename との所属で行うので、畳んでいない綴りを足すとその要素は一致しない。
     """
-    for expected, folded in (
-        (_EXPECTED_PROTECTED_FILES, config_protection.PROTECTED_FILES_FOLDED),
-        (_EXPECTED_CONDITIONALLY_PROTECTED_FILES, config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED),
-    ):
-        assert folded == frozenset(normalize_protected_name(name) for name in expected)
-        assert len(folded) == len(expected)
+    for names in (config_protection.PROTECTED_FILES, config_protection.CONDITIONALLY_PROTECTED_FILES):
+        assert all(normalize_protected_name(name) == name for name in names)
 
 
 @pytest.mark.parametrize("name", sorted(_EXPECTED_PROTECTED_FILES))

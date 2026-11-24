@@ -86,7 +86,7 @@ def _declared_vocabularies(module: ModuleType) -> dict[str, Any]:
     """モジュール**自身が定義した**語彙集合を返す。
 
     `vars(module)` だけを見ると import した名前（`bash_config_protection` へ
-    import された `PROTECTED_FILES_FOLDED` 等）まで数え上げ、同じ集合が定義元と
+    import された `PROTECTED_FILES` 等）まで数え上げ、同じ集合が定義元と
     参照側の両方で期待値を要求されてしまう。ソースを AST で読み、モジュール
     トップレベルの代入文で束縛された名前だけに絞り、``{定数名: 値}`` を返す。
     """
@@ -302,8 +302,6 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS": "test_tilde_form_is_blocked の settings-redirect / settings-local-append (TestHostGuardFilesOutsideRepo)",
     "config_protection.PROTECTED_FILES": "test_every_protected_file_is_denied_on_write",
     "config_protection.CONDITIONALLY_PROTECTED_FILES": "test_every_conditionally_protected_file_denies_only_lint_signals",
-    "config_protection.PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
-    "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "conditional_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
     "conditional_protection._LINT_KEYS": "test_every_lint_key_is_detected",
     "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": "test_every_running_plugin_guarded_dir_is_denied_on_write_and_bash (test_running_plugin_protection)",

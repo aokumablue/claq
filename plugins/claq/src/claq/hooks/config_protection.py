@@ -57,9 +57,8 @@ _WRITE_TOOL_NAMES = frozenset({"write", "edit", "multiedit"})
 _UNDECIDABLE_TARGET_MESSAGE = "BLOCKED: Could not determine target files from tool input."
 
 
-# frozenset で持つ。判定に使うのは下の `*_FOLDED`（import 時に 1 回だけ畳んだ複製）で、
-# 実行時にこちらへ追加しても保護は増えない。その食い違いを黙って通さないよう、
-# 変更を AttributeError で落ちる形にしておく。
+# 要素は `normalize_protected_name` で畳んだ形（大小を畳んだ basename）で書き、判定は畳んだ名前との
+# 所属で行う（`bash_config_protection` も同じ集合を import して、両フックの判定軸を 1 本に保つ）。
 PROTECTED_FILES = frozenset({
     ".eslintrc",
     ".eslintrc.js",
@@ -155,13 +154,6 @@ CONDITIONALLY_PROTECTED_FILES = frozenset({
     # 置換前後の全文で `conditional_protection._SETTINGS_GUARDED_*` が変わるときだけ塞ぐ。
     *HOST_SETTINGS_FILES,
 })
-
-# 上 2 集合の大小無視の照合用複製。判定は必ずこちらを使う（`bash_config_protection` も
-# 畳み済みの側を import して、両フックの判定軸を 1 本に保つ）。
-PROTECTED_FILES_FOLDED = frozenset(normalize_protected_name(name) for name in PROTECTED_FILES)
-CONDITIONALLY_PROTECTED_FILES_FOLDED = frozenset(
-    normalize_protected_name(name) for name in CONDITIONALLY_PROTECTED_FILES
-)
 
 # 実行中の plugin root から見て守るディレクトリ。`runtime/` は hooks.json が起動する
 # `claq-hook`、`src/claq/` はフック本体で、書き換えると次のツール呼び出しから全保護フックが外れる。
@@ -408,9 +400,9 @@ def _block_reason_for_file(tool_name: str, container: Any, file_path: str) -> st
     # 判定は畳んだ名前、メッセージは観測した綴り（利用者が書いた通りの名前が
     # 出ないと、なぜ止まったのかが読み取れなくなる）。
     folded_name = normalize_protected_name(file_name)
-    if folded_name in PROTECTED_FILES_FOLDED:
+    if folded_name in PROTECTED_FILES:
         return blocked_message_for_file(file_name)
-    if folded_name in CONDITIONALLY_PROTECTED_FILES_FOLDED:
+    if folded_name in CONDITIONALLY_PROTECTED_FILES:
         return conditional_block_reason(tool_name, container, file_path, file_name)
     return None
 
