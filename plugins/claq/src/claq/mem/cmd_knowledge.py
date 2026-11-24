@@ -20,7 +20,6 @@ from claq.mem.database import Database
 from claq.mem.knowledge_input import (
     KINDS,
     STATUSES,
-    KnowledgeInputError,
     parse_knowledge_payload,
     validate_choice,
 )
@@ -108,13 +107,10 @@ def handle_learn(settings: Settings, args: CommandArgs) -> None:
         args: コマンド引数と stdin JSON。
 
     Raises:
-        CommandError: payload が不正な場合、または同じ key の既存カードが
-            既に ``active`` の場合。
+        KnowledgeInputError: payload が不正な場合。
+        CommandError: 同じ key の既存カードが既に ``active`` の場合。
     """
-    try:
-        draft = parse_knowledge_payload(args.stdin_data)
-    except KnowledgeInputError as e:
-        raise CommandError(str(e)) from e
+    draft = parse_knowledge_payload(args.stdin_data)
 
     with Database(settings.db_path) as db:
         repo_id = resolve_repo(None, db).id if draft.scope == "repo" else None
@@ -135,15 +131,12 @@ def _list_filters(args: CommandArgs) -> tuple[str, str | None]:
         status（既定は ``active``）と kind（未指定なら None）の組。
 
     Raises:
-        CommandError: 列挙値が不正な場合。
+        KnowledgeInputError: 列挙値が不正な場合。
     """
-    try:
-        status = validate_choice("status", args.values.get("--status", "active"), STATUSES)
-        kind = args.values.get("--kind")
-        if kind is not None:
-            validate_choice("kind", kind, KINDS)
-    except KnowledgeInputError as e:
-        raise CommandError(str(e)) from e
+    status = validate_choice("status", args.values.get("--status", "active"), STATUSES)
+    kind = args.values.get("--kind")
+    if kind is not None:
+        validate_choice("kind", kind, KINDS)
     return status, kind
 
 
@@ -171,7 +164,8 @@ def _collect_list_rows(
         整列して ``--limit`` 件で切った Knowledge のリスト。
 
     Raises:
-        CommandError: 列挙値・件数が不正な場合。
+        KnowledgeInputError: 列挙値が不正な場合。
+        CommandError: 件数が不正な場合。
     """
     status, kind = _list_filters(args)
     limit = coerce_limit(args.values.get("--limit"), default_limit)
@@ -322,7 +316,8 @@ def handle_search(settings: Settings, args: CommandArgs) -> None:
         args: コマンド引数。位置引数の連結が検索クエリ。
 
     Raises:
-        CommandError: 検索クエリが空、またはオプション値が不正な場合。
+        KnowledgeInputError: 列挙値が不正な場合。
+        CommandError: 検索クエリが空、または件数が不正な場合。
     """
     terms = _query_terms(" ".join(args.positionals))
     now = datetime.now(UTC)

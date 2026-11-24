@@ -49,6 +49,7 @@ from claq.mem.cmd_knowledge import (
 )
 from claq.mem.command_support import CommandArgs, CommandError, CommandHandler
 from claq.mem.database import Database
+from claq.mem.knowledge_input import KnowledgeInputError
 from claq.mem.settings import Settings
 
 log = mem_logger.get("CLI")
@@ -293,7 +294,8 @@ def main() -> int:
 
     try:
         additional_context = spec.handler(settings, args)
-    except CommandError as e:
+    # 入力の誤りは利用者向けの 1 行だけを出し、ファイルの記録は残さない。
+    except (CommandError, KnowledgeInputError) as e:
         print(str(e), file=sys.stderr)
         return 1
     except Exception as e:
@@ -302,7 +304,7 @@ def main() -> int:
         print(f"コマンド {command} 失敗: {e}", file=sys.stderr)
         return 1
 
-    if command == "context":  # SessionStart フックは JSON 出力が必須
+    if additional_context is not None:  # context の SessionStart フックは JSON 出力が必須
         print_session_start_output(additional_context)
     return 0
 
