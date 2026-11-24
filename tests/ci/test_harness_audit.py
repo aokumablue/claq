@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -279,6 +280,18 @@ def test_main_help_exits_zero_and_errors_return_one(
     monkeypatch.setattr(harness_audit, "build_report", _boom)
     assert harness_audit.main(["--scope", "repo", "--format=json"]) == 1
     assert "Error: boom" in capsys.readouterr().err
+
+
+def test_main_reports_git_timeout_as_error(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """origin の判定で git が時間切れになっても、トレースバックではなく Error 行を出して 1 を返す。"""
+
+    def _timeout(*_args: object, **_kwargs: object) -> None:
+        """常に git の時間切れを送出する build_report の代役。"""
+        raise subprocess.TimeoutExpired(["git", "remote", "get-url", "origin"], 5)
+
+    monkeypatch.setattr(harness_audit, "build_report", _timeout)
+    assert harness_audit.main(["--scope", "repo"]) == 1
+    assert "Error: Command" in capsys.readouterr().err
 
 
 def test_main_entrypoint_exits_with_audit_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
