@@ -98,6 +98,7 @@ def ensure_grok_plugin_root_symlink() -> Path | None:
 
     Raises:
         OSError: 解決・リンクの作成に失敗した場合（原因を ``scripts/grok.sh`` が表示する）。
+        RuntimeError: ホームディレクトリを決められない場合（``Path.home()``。``HOME`` が無くユーザー DB にも無い）。
     """
     home = Path.home()
     target = _resolve_symlink_target(home)
