@@ -18,7 +18,6 @@ from claq_dev.ci_common import (
 )
 from claq_dev.frontmatter import FrontmatterError, MissingFrontmatterError, parse_yaml, split_frontmatter
 
-DEFAULT_ROOT_DIR = PLUGIN_ROOT
 DEFAULT_COMMANDS_DIR = PLUGIN_ROOT / "commands"
 DEFAULT_AGENTS_DIR = PLUGIN_ROOT / "agents"
 DEFAULT_SKILLS_DIR = PLUGIN_ROOT / "skills"
@@ -132,7 +131,6 @@ def _validate_command_file(
 
 
 def validate_commands(
-    root_dir: str | Path,
     commands_dir: str | Path,
     agents_dir: str | Path,
     skills_dir: str | Path,
@@ -143,7 +141,6 @@ def validate_commands(
     全件合格なら検証したファイル数（警告があればその件数も）を stdout へ表示する。
 
     Args:
-        root_dir: 相対指定の各ディレクトリを解決する基準。
         commands_dir: コマンドディレクトリ。
         agents_dir: エージェントディレクトリ。
         skills_dir: スキルディレクトリ。
@@ -151,9 +148,7 @@ def validate_commands(
     Returns:
         終了コード（0 = 合格、1 = 不合格）。
     """
-    # 絶対パスとの結合は右辺がそのまま残るので、相対指定だけが root_dir 基準になる。
-    root = Path(root_dir)
-    commands_path, agents_path, skills_path = root / commands_dir, root / agents_dir, root / skills_dir
+    commands_path, agents_path, skills_path = Path(commands_dir), Path(agents_dir), Path(skills_dir)
     if not commands_path.exists():
         return report_missing("commands ディレクトリ", commands_path)
 
@@ -180,12 +175,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_validator_args(
         "Validate command markdown files",
         argv,
-        root_dir=DEFAULT_ROOT_DIR,
         commands_dir=DEFAULT_COMMANDS_DIR,
         agents_dir=DEFAULT_AGENTS_DIR,
         skills_dir=DEFAULT_SKILLS_DIR,
     )
-    return validate_commands(args.root_dir, args.commands_dir, args.agents_dir, args.skills_dir)
+    return validate_commands(args.commands_dir, args.agents_dir, args.skills_dir)
 
 
 if __name__ == "__main__":

@@ -395,7 +395,7 @@ class TestContext:
         """別リポジトリの引き継ぎは混ざらない。"""
         _repo_id(tmp_path)
         with Database(tmp_path / "mem.db") as db:
-            db.upsert_repo(Repo(id="other", identity_key="key-other", root_path="/tmp/other"))
+            db.upsert_repo(Repo(id="other", identity_key="key-other", root_path="/tmp/other", remote_url=None, first_seen_at=utc_now_iso(), last_seen_at=utc_now_iso()))
         self._seed_session(tmp_path, "other", handoff="別リポジトリの続き")
 
         assert _inject(monkeypatch, tmp_path) == ""

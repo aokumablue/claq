@@ -244,13 +244,13 @@ def test_editable_text(tool_name: str, container: Any, expected: list[str] | Non
     assert conditional_protection._editable_text(tool_name, container) == expected
 
 
-def test_resolve_lint_section_empty_snippet_is_undetermined() -> None:
-    """空の断片はディスク上のセクションを判定できない。"""
-    assert conditional_protection._resolve_lint_section_from_disk("pyproject.toml", "") is None
+def test_resolve_lint_section_empty_snippet_is_not_lint() -> None:
+    """空の断片はディスク上のセクションを判定できず、lint 系とは読まない（副判定に任せる）。"""
+    assert conditional_protection._resolve_lint_section_from_disk("pyproject.toml", "") is False
 
 
-def test_resolve_lint_section_read_failure_is_undetermined(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """読み取りが失敗したら判定不能（読み取りは open + 上限付き read で行う）。"""
+def test_resolve_lint_section_read_failure_is_not_lint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """読み取りが失敗したら lint 系とは読まない（読み取りは open + 上限付き read で行う）。"""
     target = tmp_path / "pyproject.toml"
     target.write_text("[project]\nname = 'x'\n", encoding="utf-8")
 
@@ -259,7 +259,7 @@ def test_resolve_lint_section_read_failure_is_undetermined(monkeypatch: pytest.M
         raise OSError("permission denied")
 
     monkeypatch.setattr("pathlib.Path.open", _boom)
-    assert conditional_protection._resolve_lint_section_from_disk(str(target), "name") is None
+    assert conditional_protection._resolve_lint_section_from_disk(str(target), "name") is False
 
 
 def test_resolve_lint_section_read_is_capped_at_max_stdin_bytes(

@@ -30,7 +30,7 @@ def _raise_oserror_on_read(monkeypatch: pytest.MonkeyPatch, broken_file: Path) -
 
 def _run_commands(root: Path, **kwargs: bool) -> int:
     """root 直下の commands / agents / skills を対象に validate_commands を呼ぶ。"""
-    return validate_commands.validate_commands(root, root / "commands", root / "agents", root / "skills", **kwargs)
+    return validate_commands.validate_commands(root / "commands", root / "agents", root / "skills", **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -363,18 +363,6 @@ def test_validate_commands_accepts_files_the_parser_treats_as_without_frontmatte
     assert "plain.md" not in capsys.readouterr().err
 
 
-def test_validate_commands_resolves_relative_dirs_via_root_dir(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """相対指定のディレクトリは root_dir 基準で解決すること。"""
-    (tmp_path / "agents").mkdir()
-    (tmp_path / "skills").mkdir()
-    _write_files(tmp_path, {"commands/test.md": "Test command.\n"})
-
-    assert validate_commands.validate_commands(tmp_path, "commands", "agents", "skills") == 0
-    assert "1 個のコマンドファイルを検証しました" in capsys.readouterr().out
-
-
 # --- CLI エントリポイント -----------------------------------------------------
 
 
@@ -383,7 +371,7 @@ def test_validate_commands_resolves_relative_dirs_via_root_dir(
     [
         pytest.param(validate_skills, ("skills",), "スキルディレクトリ", id="skills"),
         pytest.param(validate_agents, ("agents",), "エージェントファイル", id="agents"),
-        pytest.param(validate_commands, ("root", "commands", "agents", "skills"), "コマンドファイル", id="commands"),
+        pytest.param(validate_commands, ("commands", "agents", "skills"), "コマンドファイル", id="commands"),
     ],
 )
 def test_main_and_module_entrypoint_succeed(
@@ -403,7 +391,7 @@ def test_main_and_module_entrypoint_succeed(
             "commands/alpha.md": "Use `/alpha`.\n",
         },
     )
-    argv = [arg for name in dirs for arg in (f"--{name}-dir", str(tmp_path if name == "root" else tmp_path / name))]
+    argv = [arg for name in dirs for arg in (f"--{name}-dir", str(tmp_path / name))]
 
     assert module.main(argv) == 0
     assert f"1 個の{noun}を検証しました" in capsys.readouterr().out

@@ -12,7 +12,7 @@ from unittest import mock
 
 import pytest
 
-from claq.hooks import commit_quality_scanner, pre_bash_commit_quality
+from claq.hooks import commit_quality_scanner
 
 from ._support import _SECRET_LINE, _scan_deadline
 
@@ -235,7 +235,7 @@ def test_should_lint_file_by_extension() -> None:
 )
 def test_should_scan_secrets(file_path: str, expected: bool) -> None:
     """secret スキャン対象はロックファイルと圧縮生成物を除く全ファイルであること。"""
-    assert pre_bash_commit_quality.should_scan_secrets(file_path) is expected
+    assert commit_quality_scanner.should_scan_secrets(file_path) is expected
 
 
 @pytest.mark.parametrize(

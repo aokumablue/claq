@@ -90,6 +90,8 @@ import re
 from claq.hooks.git_config_text import is_sensitive_config_key
 from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
+    GIT_OPTIONAL_VALUE_SHORT_OPTIONS,
+    GIT_VALUE_SHORT_OPTIONS,
     emit_block_output,
     is_git_executable_token,
     memoized_in_scan,
@@ -165,18 +167,10 @@ _BOOLEAN_GLOBAL_LONG_OPTIONS = frozenset(
     }
 )
 
-# 値を必ず取る short オプション文字。結合形（``-mmsg``）なら残りが値、
-# クラスタ末尾（``-am``）なら次トークンが値になります。
-_VALUE_SHORT_OPTIONS = frozenset("CcmFt")
-
 # 値を取らないことが確定している git グローバル short オプション文字
 # （``git -p log -n 5``）。long 側と同じく、未知の文字はサブコマンド解決を
 # 信用できない印として扱います。
 _BOOLEAN_GLOBAL_SHORT_OPTIONS = frozenset("pPvh")
-
-# 値が省略可能で、指定する場合は結合形のみ許される short オプション文字
-# （``-uno`` / ``-Skeyid``）。次トークンは値として消費しません。
-_OPTIONAL_VALUE_SHORT_OPTIONS = frozenset("uS")
 
 # フックバイパスに直結する long フラグ。サブコマンドを問わずブロックします。
 _BYPASS_LONG_FLAG = "--no-verify"
@@ -240,11 +234,11 @@ def _consume_short_option(
     unknown = False
     for index, char in enumerate(token[1:], start=1):
         flags.append(f"-{char}")
-        if char in _OPTIONAL_VALUE_SHORT_OPTIONS:
+        if char in GIT_OPTIONAL_VALUE_SHORT_OPTIONS:
             if index < last_index:
                 return 0, unknown
             continue
-        if char in _VALUE_SHORT_OPTIONS:
+        if char in GIT_VALUE_SHORT_OPTIONS:
             if index < last_index:
                 value, consumed = token[index + 1 :], 0
             else:

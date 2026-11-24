@@ -13,6 +13,8 @@ import re
 from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
+    GIT_OPTIONAL_VALUE_SHORT_OPTIONS,
+    GIT_VALUE_SHORT_OPTIONS,
     INPLACE_EDIT_EXECUTABLES,
     is_git_executable_token,
     is_inplace_edit_flag,
@@ -288,16 +290,11 @@ def compound_commit_risk(command: str) -> str | None:
     return None
 
 
-# 値を取る git commit の短形式（`-m <msg>`・`-F <file>`・`-C` / `-c <commit>`・`-t <file>`・`-S[<keyid>]`・
-# `-u[<mode>]`）。結合短形式の中でこれらが現れたら、残りの文字はその値であってフラグではない
-# （`-m"add x"` や `-Cmain` の `a` を `-a` と読まない）。
-_SHORT_OPTIONS_WITH_VALUE = frozenset("CcFmStu")
-
-
 def short_option_flags(token: str) -> str:
     """短形式のトークン（``-am`` / ``-mmsg``）のうち、フラグとして読む文字列を返します。
 
-    値を取る短形式（`_SHORT_OPTIONS_WITH_VALUE`）が現れたらその文字までで止める（残りはその値）。
+    値を取る短形式（`GIT_VALUE_SHORT_OPTIONS` と、値が省略可能な `GIT_OPTIONAL_VALUE_SHORT_OPTIONS`）が現れたら
+    その文字までで止める（残りはその値。``-m"add x"`` や ``-Cmain`` の ``a`` を ``-a`` と読まない）。
 
     Args:
         token: ``-`` 1 つで始まる引数トークンです。
@@ -306,7 +303,7 @@ def short_option_flags(token: str) -> str:
         フラグの文字列（``-am`` は ``am``、``-mAdd`` は ``m``、``-v`` は ``v``）。
     """
     for position, flag in enumerate(token[1:], start=2):
-        if flag in _SHORT_OPTIONS_WITH_VALUE:
+        if flag in GIT_VALUE_SHORT_OPTIONS or flag in GIT_OPTIONAL_VALUE_SHORT_OPTIONS:
             return token[1:position]
     return token[1:]
 

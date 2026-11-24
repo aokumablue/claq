@@ -382,6 +382,12 @@ class TestScoring:
             "title": "title",
             "source": "agent",
             "status": "active",
+            "repo_id": None,
+            "body": "",
+            "domain": None,
+            "confidence": 0.5,
+            "source_ref": None,
+            "created_at": self._NOW.isoformat(),
             "updated_at": self._NOW.isoformat(),
         }
         fields.update(overrides)

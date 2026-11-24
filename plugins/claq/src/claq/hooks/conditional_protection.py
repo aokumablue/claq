@@ -16,10 +16,15 @@ import re
 from pathlib import Path
 from typing import Any, NoReturn
 
-from claq.hooks.edit_text import FULL_TEXT_MAX_BYTES, MAX_EDITS, read_current_text, text_after_edit
+from claq.hooks.edit_text import (
+    FULL_TEXT_MAX_BYTES,
+    edit_entries,
+    is_write_tool,
+    read_current_text,
+    text_after_edit,
+)
 from claq.hooks.git_config_text import GitConfigParseError, adds_sensitive_entries
-from claq.hooks.hook_common import memoized_in_scan, normalize_protected_name
-from claq.lib.harness import normalize_tool_name
+from claq.hooks.hook_common import HOST_SETTINGS_FILES, memoized_in_scan, normalize_protected_name
 from claq.lib.stdin_io import MAX_STDIN_BYTES
 
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
@@ -98,16 +103,12 @@ def _editable_text(tool_name: str, container: Any) -> list[str] | None:
     if not isinstance(container, dict):
         return None
 
-    normalized = normalize_tool_name(tool_name).lower()
-    if normalized == "write":
+    if is_write_tool(tool_name):
         content = container.get("content")
         return [content] if isinstance(content, str) else None
 
-    # MultiEdit は edits[]、edit / search_replace 等はコンテナ自身を 1 つの Edit 相当として扱う。
-    edits = container.get("edits") if normalized == "multiedit" else [container]
-    # 断片ごとにディスクの本文を走査するため、件数は全文を組み立てる経路（`text_after_edit`）と同じ
-    # `MAX_EDITS` までに抑える。超えたら判定不能として fail-closed にする。
-    if not isinstance(edits, list) or len(edits) > MAX_EDITS:
+    edits = edit_entries(tool_name, container)
+    if edits is None:
         return None
     snippets = [
         snippet
@@ -168,7 +169,7 @@ def _read_section_index(file_path: str) -> tuple[str, list[int], list[str | None
     return text, line_starts, headers_before
 
 
-def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None:
+def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool:
     """`file_path` をディスクから読み、`snippet` が属するセクションが lint 系か判定する。
 
     値行だけの Edit（見出しが old_string/new_string に含まれない）でも、ディスク上の
@@ -180,19 +181,18 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool | None
         snippet: 所属セクションを調べたいテキスト断片。
 
     Returns:
-        True: lint 系セクションに属すると判定できた。
-        False: 読めた上で lint 系セクションではないと判定できた。
-        None: 読めない・見つからない等、判定不能。
+        lint 系セクションに属すると判定できたら True。lint 系ではない・読めない・見つからない等は False
+        （判定不能は副判定に任せる）。
     """
     if not snippet:
-        return None
+        return False
     section_index = _read_section_index(file_path)
     if section_index is None:
-        return None
+        return False
     text, line_starts, headers_before = section_index
     index = text.find(snippet)
     if index < 0:
-        return None
+        return False
     # 全 hook の起動に載せないよう（import で約 0.3 ms）、ここへ到達したときだけ読み込む。
     from bisect import bisect_right
 
@@ -413,30 +413,18 @@ def conditional_block_reason(tool_name: str, container: Any, file_path: str, fil
     Returns:
         ブロック理由。問題なければ None。
     """
-    if normalize_protected_name(file_name) in ("settings.json", "settings.local.json"):
+    if normalize_protected_name(file_name) in HOST_SETTINGS_FILES:
         return _settings_block_reason(tool_name, container, file_path, file_name)
     snippets = _editable_text(tool_name, container)
     if snippets is None:
         return _unverifiable_conditional_message(file_name)
 
-    in_lint_section = any(_resolve_lint_section_from_disk(file_path, snippet) is True for snippet in snippets)
+    in_lint_section = any(_resolve_lint_section_from_disk(file_path, snippet) for snippet in snippets)
     if in_lint_section or _text_has_protected_signal("\n".join(snippets), file_name):
         return _conditional_blocked_message(file_name)
-    if _is_write(tool_name) and _current_text_has_protected_signal(file_path, file_name):
+    if is_write_tool(tool_name) and _current_text_has_protected_signal(file_path, file_name):
         return _conditional_blocked_message(file_name)
     return None
-
-
-def _is_write(tool_name: str) -> bool:
-    """ファイル全体を content で置き換える Write 系ツールかを返す。
-
-    Args:
-        tool_name: 正規化前の生ツール名。
-
-    Returns:
-        Write 系なら True（apply_patch は Edit へ正規化されるので含まない）。
-    """
-    return normalize_tool_name(tool_name).lower() == "write"
 
 
 def _current_text_has_protected_signal(file_path: str, file_name: str) -> bool:

@@ -353,6 +353,10 @@ def test_non_ascii_output_survives_a_non_utf8_locale(tmp_path: Path) -> None:
                 body="b",
                 status="active",
                 source="agent",
+                repo_id=None,
+                domain=None,
+                confidence=0.5,
+                source_ref=None,
                 created_at=utc_now_iso(),
                 updated_at=utc_now_iso(),
             )

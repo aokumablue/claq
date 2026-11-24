@@ -97,7 +97,7 @@ def _record_scans(monkeypatch: pytest.MonkeyPatch, issues: list[dict]) -> list[t
         seen.append((path, repo_root))
         return issues
 
-    monkeypatch.setattr(pre_bash_commit_quality, "find_file_issues", _fake_find_file_issues)
+    monkeypatch.setattr(commit_quality_scanner, "find_file_issues", _fake_find_file_issues)
     return seen
 
 

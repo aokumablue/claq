@@ -41,6 +41,11 @@ def _knowledge(key: str = "use-python3", **overrides: object) -> Knowledge:
         # status は必須引数（既定値なし）。DB 層のテストは注入対象の挙動を見る
         # ものが多いため、ヘルパの既定は 'active' に置く。
         "status": "active",
+        "repo_id": None,
+        "body": "",
+        "domain": None,
+        "confidence": 0.5,
+        "source_ref": None,
         "created_at": _TS,
         "updated_at": _TS,
     }

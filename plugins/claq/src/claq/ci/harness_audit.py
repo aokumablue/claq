@@ -29,8 +29,10 @@ from claq.ci.harness_audit_utils import (
     make_check,
     safe_read,
 )
+from claq.lib.core_utils import log
 from claq.lib.git_hosting import GITHUB, GITLAB, SERVICE_LABELS, detect_git_hosting_service
 from claq.lib.stdin_io import parse_json_object
+from claq.lib.subprocess_utils import SUBPROCESS_FAILURES
 
 # origin からホスティングを判定できないときの表示名。
 _UNKNOWN_HOSTING_LABEL = "Git hosting（origin から判定できず）"
@@ -420,6 +422,7 @@ def run(argv: Sequence[str] | None, build: Callable[[str, Path], dict[str, Any]]
 
     Returns:
         ``--help`` とチェックが全件合格なら 0、不合格があれば 1、引数・入出力の失敗も 1。
+        入出力の失敗には、origin の判定で起動する git の時間切れ（`SUBPROCESS_FAILURES`）も含む。
     """
     try:
         args = parse_args(argv)
@@ -432,8 +435,8 @@ def run(argv: Sequence[str] | None, build: Callable[[str, Path], dict[str, Any]]
         else:
             print_text(report)
         return int(any(not check["pass"] for check in report["checks"]))
-    except (OSError, RuntimeError, ValueError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+    except (*SUBPROCESS_FAILURES, RuntimeError, ValueError) as error:
+        log(f"Error: {error}")
         return 1
 
 

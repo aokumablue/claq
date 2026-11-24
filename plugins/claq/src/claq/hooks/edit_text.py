@@ -70,6 +70,38 @@ def _apply_edit(text: str, old: object, new: str, *, replace_all: bool) -> str |
     return text.replace(old, new, count)
 
 
+def is_write_tool(tool_name: str) -> bool:
+    """ファイル全体を content で置き換える Write 系ツールかを返す。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+
+    Returns:
+        Write 系なら True（apply_patch は Edit へ正規化されるので含まない）。
+    """
+    return normalize_tool_name(tool_name).lower() == "write"
+
+
+def edit_entries(tool_name: str, container: dict[str, Any]) -> list[Any] | None:
+    """Edit 系入力の編集の並びを返す。
+
+    MultiEdit は ``edits[]``、edit / search_replace 等はコンテナ自身を 1 件の Edit として扱う。
+    件数は `MAX_EDITS` までに抑える（全文の組み立ても断片の検査も、1 件ごとに全文を走査するため）。
+    各要素の形の検査は呼び出し側が行う。
+
+    Args:
+        tool_name: 正規化前の生ツール名。
+        container: extract_tool_input 相当の 1 コンテナ値（dict）。
+
+    Returns:
+        編集の並び。``edits`` が list でない・件数が上限を超えるなら None（呼び出し側は fail-closed とする）。
+    """
+    edits = container.get("edits") if normalize_tool_name(tool_name).lower() == "multiedit" else [container]
+    if not isinstance(edits, list) or len(edits) > MAX_EDITS:
+        return None
+    return edits
+
+
 def text_after_edit(tool_name: str, container: Any, before: str) -> str | None:
     """書込み系入力を適用した後の全文を組み立てる。
 
@@ -88,14 +120,11 @@ def text_after_edit(tool_name: str, container: Any, before: str) -> str | None:
     """
     if tool_name == "apply_patch" or not isinstance(container, dict):
         return None
-    normalized = normalize_tool_name(tool_name).lower()
-    if normalized == "write":
+    if is_write_tool(tool_name):
         content = container.get("content")
         return content if isinstance(content, str) else None
-    edits = container.get("edits") if normalized == "multiedit" else [container]
-    if not isinstance(edits, list) or not 0 < len(edits) <= MAX_EDITS:
-        return None
-    if not all(isinstance(edit, dict) and isinstance(edit.get("new_string"), str) for edit in edits):
+    edits = edit_entries(tool_name, container)
+    if not edits or not all(isinstance(edit, dict) and isinstance(edit.get("new_string"), str) for edit in edits):
         return None
     if not before:
         return "\n".join(edit["new_string"] for edit in edits)

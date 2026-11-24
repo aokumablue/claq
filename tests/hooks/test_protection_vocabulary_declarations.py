@@ -86,7 +86,7 @@ def _declared_vocabularies(module: ModuleType) -> dict[str, Any]:
     """モジュール**自身が定義した**語彙集合を返す。
 
     `vars(module)` だけを見ると import した名前（`bash_config_protection` へ
-    import された `PROTECTED_FILES_FOLDED` 等）まで数え上げ、同じ集合が定義元と
+    import された `PROTECTED_FILES` 等）まで数え上げ、同じ集合が定義元と
     参照側の両方で期待値を要求されてしまう。ソースを AST で読み、モジュール
     トップレベルの代入文で束縛された名前だけに絞り、``{定数名: 値}`` を返す。
     """
@@ -175,7 +175,6 @@ _VOCABULARY_DENY_ALLOW_CASES = (
         "{item} src.txt app.py",
     ),
     ("bash_config_protection._TOUCH_COMMANDS", "bash_config_protection", "{item} ruff.toml", "{item} app.py"),
-    ("bash_config_protection._LN_COMMANDS", "bash_config_protection", "{item} -s weak.toml ruff.toml", "{item} -s weak.toml app.py"),
     ("bash_config_protection._DD_COMMANDS", "bash_config_protection", "{item} if=/dev/null of=ruff.toml", "{item} if=/dev/null of=app.py"),
     # wrapper は「実行位置に無ければ allow」を対にする（実行位置の判定軸）。
     ("bash_config_protection._COMMAND_POSITION_WRAPPERS", "bash_config_protection", "{item} rm ruff.toml", "echo {item} rm ruff.toml"),
@@ -238,9 +237,9 @@ _VOCABULARY_DENY_ALLOW_CASES = (
 _VOCABULARY_ALLOW_ONLY_CASES = (
     ("block_no_verify._VALUE_LONG_OPTIONS", "block_no_verify", "git commit {item} --no-verify", _NO_VERIFY),
     ("block_no_verify._BOOLEAN_GLOBAL_LONG_OPTIONS", "block_no_verify", "git {item} log -n 5", "git --future-global-option v commit -n"),
-    ("block_no_verify._VALUE_SHORT_OPTIONS", "block_no_verify", "git commit -{item} --no-verify", _NO_VERIFY),
+    ("hook_common.GIT_VALUE_SHORT_OPTIONS", "block_no_verify", "git commit -{item} --no-verify", _NO_VERIFY),
     ("block_no_verify._BOOLEAN_GLOBAL_SHORT_OPTIONS", "block_no_verify", "git -{item} log -n 5", "git -Z log -n 5"),
-    ("block_no_verify._OPTIONAL_VALUE_SHORT_OPTIONS", "block_no_verify", "git -{item} log -n 5", "git -Z log -n 5"),
+    ("hook_common.GIT_OPTIONAL_VALUE_SHORT_OPTIONS", "block_no_verify", "git -{item} log -n 5", "git -Z log -n 5"),
     ("block_no_verify._GIT_CONFIG_READ_ONLY_FLAGS", "block_no_verify", "git config {item} core.hooksPath", "git config --add core.hooksPath x"),
     ("block_no_verify._GIT_CONFIG_NEW_READ_OPS", "block_no_verify", "git config {item} core.hooksPath", "git config set core.hooksPath x"),
     # 行コメントの開始条件。直前文字が語彙に無ければ `#` は語の一部なので deny。
@@ -295,13 +294,13 @@ _VOCABULARY_LAYER1_ELSEWHERE = {
     "bash_config_protection._BASH_TOOL_NAMES": "_HARNESS_CASES の copilot bash 危険 / 通常",
     "bash_config_protection._ALL_PROTECTED_BASENAMES": "test_every_protected_file_is_denied_on_bash_write",
     "hook_common.DIRECTORY_CHANGE_COMMANDS": "test_every_directory_change_command_forces_unconditional_deny",
+    "hook_common.HOST_SETTINGS_FILES": "config_protection.CONDITIONALLY_PROTECTED_FILES と host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS の層1（同じ要素を流す）",
+    "hook_common.WRAPPER_CHDIR_SHORT_OPTIONS": "bash_config_protection._WRAPPER_VALUE_SHORT_OPTIONS の deny/allow 対（同じ要素を流す）",
     "bash_config_protection._LEADING_SHELL_KEYWORDS": "test_directory_change_behind_shell_keywords_is_not_trusted (test_bash_config_protection_boundaries.py)",
     "bash_config_protection._HOME_LOG_PATH_SEGMENTS": "test_tilde_form_is_blocked / test_absolute_form_is_blocked / test_relative_after_cd_is_blocked (TestHomeLogDirectoryProtection)",
     "host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS": "test_tilde_form_is_blocked の settings-redirect / settings-local-append (TestHostGuardFilesOutsideRepo)",
     "config_protection.PROTECTED_FILES": "test_every_protected_file_is_denied_on_write",
     "config_protection.CONDITIONALLY_PROTECTED_FILES": "test_every_conditionally_protected_file_denies_only_lint_signals",
-    "config_protection.PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
-    "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": "test_folded_protected_sets_cover_every_declared_name",
     "conditional_protection._LINT_SECTION_HEADERS": "test_every_lint_section_header_is_detected",
     "conditional_protection._LINT_KEYS": "test_every_lint_key_is_detected",
     "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": "test_every_running_plugin_guarded_dir_is_denied_on_write_and_bash (test_running_plugin_protection)",
@@ -521,7 +520,13 @@ def test_every_minified_suffix_skips_secret_scan(suffix: str) -> None:
     assert commit_quality_scanner.should_scan_secrets("dist/bundle.js")
 
 
-@pytest.mark.parametrize("flag", sorted(_EXPECTED_VOCABULARIES["commit_risk._SHORT_OPTIONS_WITH_VALUE"]))
+@pytest.mark.parametrize(
+    "flag",
+    sorted(
+        _EXPECTED_VOCABULARIES["hook_common.GIT_VALUE_SHORT_OPTIONS"]
+        | _EXPECTED_VOCABULARIES["hook_common.GIT_OPTIONAL_VALUE_SHORT_OPTIONS"]
+    ),
+)
 def test_short_options_with_value_take_the_rest_of_the_cluster(flag: str) -> None:
     """値を取る短形式の後ろの文字をフラグと読まないこと（層1・単体）。値を取らない `-q` に替えると `a` は `-a` になる。"""
     assert not commit_risk.is_commit_all_flag([f"-{flag}all"])
@@ -575,7 +580,6 @@ def test_every_vocabulary_has_a_declared_layer1_status() -> None:
         "commit_quality_scanner._JS_COMMENT_LINE_PREFIXES",
         "commit_quality_scanner._SECRET_SCAN_EXCLUDED_FILENAMES",
         "commit_quality_scanner._MINIFIED_SUFFIXES",
-        "commit_risk._SHORT_OPTIONS_WITH_VALUE",
     }
     declared = (
         {case[0] for case in _VOCABULARY_DENY_ALLOW_CASES}

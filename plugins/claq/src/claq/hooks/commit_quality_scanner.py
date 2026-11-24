@@ -392,28 +392,6 @@ def should_scan_secrets(file_path: str) -> bool:
     return not name.endswith(_MINIFIED_SUFFIXES)
 
 
-def _neutralize_one_line(text: str) -> str:
-    """不信テキストを deny 出力の 1 項目（1 行）へ無害化する。
-
-    許可した文字だけを `keep_allowed_chars` で残し（不可視文字で分断したタグを `strip_tags` が
-    見られる形へ戻す）、囲いを偽装するタグを `strip_tags` で倒し、行区切りを空白 1 個へ畳む。
-    行区切りを残すと、抜粋やパスに続けて `[Hook] PASS` のような行を偽装できる。この順序（許可リスト
-    →タグ→改行畳み）は抜粋と表示パスで共通なので、1 箇所に閉じる。
-
-    `claq.lib.tag_stripping` は commit の検査結果を整形するときだけ要る。全 Bash 起動で読み込むと
-    import 時間に効くため、ここで遅延 import する。
-
-    Args:
-        text: 不信な文字列。
-
-    Returns:
-        改行を含まない無害化済みの文字列。
-    """
-    from claq.lib.tag_stripping import collapse_line_breaks, keep_allowed_chars, strip_tags
-
-    return collapse_line_breaks(strip_tags(keep_allowed_chars(text)))
-
-
 def _sanitize_untrusted_excerpt(text: str) -> str:
     """ファイル由来の抜粋を deny 出力へ載せる前に無害化する。
 
@@ -429,32 +407,38 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
     Returns:
         タグを無害化し上限で切り詰めた抜粋。
     """
-    sanitized = _neutralize_one_line(text.strip()).strip()
+    sanitized = sanitize_untrusted_path(text.strip()).strip()
     if len(sanitized) > _UNTRUSTED_EXCERPT_MAX_CHARS:
         return sanitized[:_UNTRUSTED_EXCERPT_MAX_CHARS] + "…"
     return sanitized
 
 
 def sanitize_untrusted_path(path: str) -> str:
-    """ステージされたファイルのパスを deny 出力へ載せる前に無害化する。
+    """ステージされたファイルのパス（と抜粋）を deny 出力の 1 項目（1 行）へ無害化する。
 
     ファイル名は攻撃者が選べる文字列で、`git diff --name-only` の既定は改行・ESC・`"` を
     C 形式に引用するが、`<` `>` は引用しない。`core.quotePath=false` では非 ASCII も生バイトで
     返る（行区切り U+2028、双方向制御、タグ文字を含む）。deny 時に stderr 経由でモデルの
-    コンテキストへ入るため、`_sanitize_untrusted_excerpt` と同じく許可リストで文字を残し
-    （不可視文字で分断したタグを `strip_tags` が見られる形へ戻す）、囲いを偽装するタグを
-    `strip_tags` で倒す。さらに行区切りを空白 1 個へ畳み、出力が 1 行の形を保つようにする。
-    抜粋と違い長さの上限は置かない（通常のパスを切り詰めない。長さは git のパス長で抑えられる）。
+    コンテキストへ入るため、許可した文字だけを `keep_allowed_chars` で残し（不可視文字で分断した
+    タグを `strip_tags` が見られる形へ戻す）、囲いを偽装するタグを `strip_tags` で倒し、行区切りを
+    空白 1 個へ畳む。行区切りを残すと、パスに続けて `[Hook] PASS` のような行を偽装できる。
+    この順序（許可リスト→タグ→改行畳み）は抜粋（`_sanitize_untrusted_excerpt`）も同じなので共有する。
+    長さの上限は置かない（通常のパスを切り詰めない。長さは git のパス長で抑えられる）。
 
     読み取りに渡すパスは生のままにする。本関数は表示専用である。
 
+    `claq.lib.tag_stripping` は commit の検査結果を整形するときだけ要る。全 Bash 起動で読み込むと
+    import 時間に効くため、ここで遅延 import する。
+
     Args:
-        path: git が返したファイルパス。
+        path: git が返したファイルパス、または不信な文字列。
 
     Returns:
-        タグを無害化し、1 行に畳んだ表示用のパス。
+        タグを無害化し、1 行に畳んだ表示用の文字列。
     """
-    return _neutralize_one_line(path)
+    from claq.lib.tag_stripping import collapse_line_breaks, keep_allowed_chars, strip_tags
+
+    return collapse_line_breaks(strip_tags(keep_allowed_chars(path)))
 
 
 def _issue(kind: str, message: str, *, line: int, severity: str) -> dict:

@@ -30,6 +30,7 @@ import pytest
 from claq.hooks import (
     bash_config_protection,
     block_no_verify,
+    commit_message,
     commit_quality_scanner,
     commit_risk,
     config_protection,
@@ -55,7 +56,7 @@ def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[list
         validated.append(commit_args)
         return []
 
-    monkeypatch.setattr(pre_bash_commit_quality, "validate_commit_message", _spy)
+    monkeypatch.setattr(commit_message, "validate_commit_message", _spy)
     return validated
 
 
@@ -387,11 +388,10 @@ def _folded(names: frozenset[str]) -> frozenset[str]:
 _EXPECTED_VOCABULARIES: dict[str, Any] = {
     # --- bash_config_protection ---
     "bash_config_protection._BASH_TOOL_NAMES": frozenset({"bash"}),
-    "bash_config_protection._LAST_ARG_WRITE_COMMANDS": frozenset({"cp", "install", "mv"}),
+    "bash_config_protection._LAST_ARG_WRITE_COMMANDS": frozenset({"cp", "install", "ln", "mv"}),
     "bash_config_protection._REMOVE_COMMANDS": _EXPECTED_REMOVE_COMMANDS,
     "bash_config_protection._MODE_COMMANDS": _EXPECTED_MODE_COMMANDS,
     "bash_config_protection._TEE_COMMANDS": frozenset({"tee"}),
-    "bash_config_protection._LN_COMMANDS": frozenset({"ln"}),
     "bash_config_protection._DD_COMMANDS": frozenset({"dd"}),
     "bash_config_protection._TOUCH_COMMANDS": _EXPECTED_TOUCH_COMMANDS,
     "bash_config_protection._LEADING_SHELL_KEYWORDS": _EXPECTED_LEADING_SHELL_KEYWORDS,
@@ -414,6 +414,8 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
         }
     ),
     "bash_config_protection._WRAPPER_VALUE_SHORT_OPTIONS": frozenset({"-u", "-C", "-D", "--chdir"}),
+    "hook_common.WRAPPER_CHDIR_SHORT_OPTIONS": ("-C", "-D"),
+    "hook_common.HOST_SETTINGS_FILES": ("settings.json", "settings.local.json"),
     "bash_config_protection._HOME_LOG_PATH_SEGMENTS": ((".claq", "logs"),),
     "host_guard_targets._HOST_SETTINGS_PATH_SEGMENTS": (
         (".claude", "settings.json"),
@@ -483,9 +485,9 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "--version",
         }
     ),
-    "block_no_verify._VALUE_SHORT_OPTIONS": frozenset("CcmFt"),
+    "hook_common.GIT_VALUE_SHORT_OPTIONS": frozenset("CcmFt"),
     "block_no_verify._BOOLEAN_GLOBAL_SHORT_OPTIONS": frozenset("pPvh"),
-    "block_no_verify._OPTIONAL_VALUE_SHORT_OPTIONS": frozenset("uS"),
+    "hook_common.GIT_OPTIONAL_VALUE_SHORT_OPTIONS": frozenset("uS"),
     "git_config_text._SENSITIVE_CONFIG_KEY_PREFIXES": (
         "core.hookspath",
         "include.path",
@@ -536,10 +538,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
     "config_protection._WRITE_TOOL_NAMES": frozenset({"edit", "multiedit", "write"}),
     "config_protection.PROTECTED_FILES": _EXPECTED_PROTECTED_FILES,
     "config_protection.CONDITIONALLY_PROTECTED_FILES": _EXPECTED_CONDITIONALLY_PROTECTED_FILES,
-    "config_protection.PROTECTED_FILES_FOLDED": _folded(_EXPECTED_PROTECTED_FILES),
-    "config_protection.CONDITIONALLY_PROTECTED_FILES_FOLDED": _folded(
-        _EXPECTED_CONDITIONALLY_PROTECTED_FILES
-    ),
     "config_protection._RUNNING_PLUGIN_GUARDED_DIRS": _EXPECTED_RUNNING_PLUGIN_GUARDED_DIRS,
     # 派生: 上の表示名（`blocked_message_for_file` が文言を選ぶ鍵）。
     "config_protection.RUNNING_PLUGIN_DISPLAY_NAMES": frozenset(
@@ -614,8 +612,6 @@ _EXPECTED_VOCABULARIES: dict[str, Any] = {
             "unlink",
         }
     ),
-    # 結合短形式の中で現れたら、残りの文字をその値として読む短形式。
-    "commit_risk._SHORT_OPTIONS_WITH_VALUE": frozenset("CcFmStu"),
 }
 
 # 完全一致で固定**しない**語彙と、その代わりに何が固定しているか。

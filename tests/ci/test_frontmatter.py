@@ -7,7 +7,6 @@ import pytest
 from claq_dev.frontmatter import (
     FrontmatterError,
     MissingFrontmatterError,
-    UnterminatedFrontmatterError,
     parse_yaml,
     split_frontmatter,
 )
@@ -41,18 +40,18 @@ def test_split_frontmatter_returns_block(content: str, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("content", "error"),
+    ("content", "error", "message"),
     [
-        pytest.param("name: x\n---\n", MissingFrontmatterError, id="missing-start-fence"),
-        pytest.param("---extra\nname: x\n---\n", MissingFrontmatterError, id="fence-with-trailing-text"),
-        pytest.param("---\nname: x\nbody\n", UnterminatedFrontmatterError, id="missing-end-fence"),
+        pytest.param("name: x\n---\n", MissingFrontmatterError, "開始", id="missing-start-fence"),
+        pytest.param("---extra\nname: x\n---\n", MissingFrontmatterError, "開始", id="fence-with-trailing-text"),
+        pytest.param("---\nname: x\nbody\n", FrontmatterError, "終了", id="missing-end-fence"),
         # strip() 一致で探すと列 0 を要求せず、内側のインデント付き --- で切ってしまう。
-        pytest.param("---\nname: x\n  ---\n", UnterminatedFrontmatterError, id="indented-dashes-are-not-fence"),
+        pytest.param("---\nname: x\n  ---\n", FrontmatterError, "終了", id="indented-dashes-are-not-fence"),
     ],
 )
-def test_split_frontmatter_rejects(content: str, error: type[FrontmatterError]) -> None:
-    """フェンスが欠ける・列 0 の ``---`` だけの行でない入力は種類別の例外にする。"""
-    with pytest.raises(error):
+def test_split_frontmatter_rejects(content: str, error: type[FrontmatterError], message: str) -> None:
+    """フェンスが欠ける・列 0 の ``---`` だけの行でない入力は、欠けた側のフェンスを示す例外にする。"""
+    with pytest.raises(error, match=message):
         split_frontmatter(content)
 
 
@@ -69,9 +68,8 @@ def test_split_frontmatter_keeps_indented_dashes_inside_block_scalar() -> None:
 
 
 def test_split_frontmatter_errors_derive_from_frontmatter_error() -> None:
-    """両エラーとも FrontmatterError（ひいては ValueError）派生である。"""
+    """MissingFrontmatterError は FrontmatterError（ひいては ValueError）派生である。"""
     assert issubclass(MissingFrontmatterError, FrontmatterError)
-    assert issubclass(UnterminatedFrontmatterError, FrontmatterError)
     assert issubclass(FrontmatterError, ValueError)
 
 

@@ -32,7 +32,6 @@ from collections.abc import Callable, Iterator
 __all__ = [
     "FrontmatterError",
     "MissingFrontmatterError",
-    "UnterminatedFrontmatterError",
     "parse_yaml",
     "split_frontmatter",
 ]
@@ -69,10 +68,6 @@ class MissingFrontmatterError(FrontmatterError):
     """先頭の ``---`` が無く frontmatter が存在しないことを表す例外。"""
 
 
-class UnterminatedFrontmatterError(FrontmatterError):
-    """終了側の ``---`` が無く frontmatter が閉じていないことを表す例外。"""
-
-
 def split_frontmatter(content: str) -> str:
     """Markdown 本文から frontmatter の生テキストを切り出して返す。
 
@@ -102,7 +97,7 @@ def split_frontmatter(content: str) -> str:
 
     Raises:
         MissingFrontmatterError: 先頭行が ``---`` でない場合。
-        UnterminatedFrontmatterError: 終了側の ``---`` が見つからない場合。
+        FrontmatterError: 終了側の ``---`` が見つからない場合。
     """
     normalized = content.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     lines = normalized.split("\n")
@@ -111,7 +106,7 @@ def split_frontmatter(content: str) -> str:
     for index, line in enumerate(lines[1:], start=1):
         if line.rstrip() == _FENCE:
             return "\n".join(lines[1:index])
-    raise UnterminatedFrontmatterError("frontmatter の終了 --- がありません")
+    raise FrontmatterError("frontmatter の終了 --- がありません")
 
 
 def parse_yaml(text: str) -> object:
