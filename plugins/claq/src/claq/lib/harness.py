@@ -79,25 +79,7 @@ def extract_tool_input(payload: dict[str, Any]) -> Any:
     Returns:
         正規化後の tool 入力（dict / str / その他）、キーが無ければ None。
     """
-    for key in INPUT_CONTAINER_KEYS:
-        if key not in payload:
-            continue
-        value = payload[key]
-        if not isinstance(value, str):
-            return value
-        # 判定とパースは同じ文字列に対して行う。lstrip 後の値で「JSON らしさ」を
-        # 見ながら元の文字列をパースすると、JSON が許容しない空白（\x0c 等）を
-        # 1 文字前置しただけで「{ で始まるがパースできない」状態になり、生コマンド
-        # 文字列として扱われる。その文字列の中では危険なコマンドが JSON のダブル
-        # クォート内に入るため、トークナイザからは実行トークンに見えず素通りする。
-        stripped = value.lstrip()
-        if not stripped.startswith(("{", "[")):
-            return value
-        try:
-            return json.loads(stripped)
-        except JSON_PARSE_FAILURES:
-            return value
-    return None
+    return next(iter_tool_input_containers(payload), None)
 
 
 def extract_raw_tool_name(payload: dict[str, Any]) -> str:
@@ -122,7 +104,25 @@ def iter_tool_input_containers(payload: dict[str, Any]) -> Iterator[Any]:
     """
     for key in INPUT_CONTAINER_KEYS:
         if key in payload:
-            yield extract_tool_input({key: payload[key]})
+            yield _parse_container_value(payload[key])
+
+
+def _parse_container_value(value: Any) -> Any:
+    """コンテナキーの値を正規化する。JSON に見える文字列はパースし、読めなければ元の文字列を返す。"""
+    if not isinstance(value, str):
+        return value
+    # 判定とパースは同じ文字列に対して行う。lstrip 後の値で「JSON らしさ」を
+    # 見ながら元の文字列をパースすると、JSON が許容しない空白（\x0c 等）を
+    # 1 文字前置しただけで「{ で始まるがパースできない」状態になり、生コマンド
+    # 文字列として扱われる。その文字列の中では危険なコマンドが JSON のダブル
+    # クォート内に入るため、トークナイザからは実行トークンに見えず素通りする。
+    stripped = value.lstrip()
+    if not stripped.startswith(("{", "[")):
+        return value
+    try:
+        return json.loads(stripped)
+    except JSON_PARSE_FAILURES:
+        return value
 
 
 def iter_bash_command_groups(payload: dict[str, Any]) -> Iterator[tuple[str, ...]]:
@@ -487,8 +487,8 @@ def _fold_command_invocation(text: str) -> str:
         return _COMMAND_SCAFFOLD_PATTERN.sub("", text)
 
     parts: list[str] = [text[: matches[0].start()]]
-    for index, match in enumerate(matches):
-        region_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+    region_ends = [match.start() for match in matches[1:]] + [len(text)]
+    for match, region_end in zip(matches, region_ends, strict=True):
         region = text[match.end() : region_end]
         name = match.group(1).strip().lstrip("/")
         if name:
