@@ -23,6 +23,7 @@ md に書かない）。
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -35,7 +36,9 @@ from claq.lib.subprocess_utils import SUBPROCESS_FAILURES, run_text
 
 _ROOTS_DIRNAME = "roots"
 _ENV_FILENAME = "env.sh"
-_ENV_TMP_PREFIX = f"{_ENV_FILENAME}.tmp."
+# `_atomic_write_text` の一時ファイル名 ``<name>.tmp.<random>`` の区切り。GC の `_ENV_TMP_PREFIX` と揃わないと孤児を拾えないので 1 か所で持つ。
+_TMP_INFIX = ".tmp."
+_ENV_TMP_PREFIX = f"{_ENV_FILENAME}{_TMP_INFIX}"
 _ENV_TEMPLATE_RELATIVE = Path(RUNTIME_DIR_NAME) / "env-template.sh"
 
 _MAX_ANCESTOR_DEPTH = 2
@@ -132,7 +135,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
     # import 時間に効く。書き込みが要るとき（初回・内容変化時）だけ読み込む。
     import tempfile
 
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.tmp.")
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}{_TMP_INFIX}")
     tmp_path = Path(tmp_name)
     owned_fd: int | None = fd
     try:
@@ -144,14 +147,10 @@ def _atomic_write_text(path: Path, text: str) -> None:
         os.replace(tmp_path, path)
     except OSError:
         if owned_fd is not None:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(owned_fd)
-            except OSError:
-                pass
-        try:
+        with contextlib.suppress(OSError):
             tmp_path.unlink()
-        except OSError:
-            pass
         raise
 
 
