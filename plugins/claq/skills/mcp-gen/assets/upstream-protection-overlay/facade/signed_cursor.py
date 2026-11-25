@@ -33,21 +33,6 @@ _MAC_DOMAIN = "facade.cursor"
 _EXPIRED = "この cursor は有効期限が切れています。cursor を外して、同じ条件で検索し直してください。"
 
 
-def _read_payload(body: str) -> dict[str, Any] | None:
-    """署名を確かめた本体を読み、形が正しければ返す。
-
-    Args:
-        body: 符号化済みの本体。
-
-    Returns:
-        本体（版・位置・期限）。読めない・版が違う・形が違うときは None。
-    """
-    payload = read_payload(body, _VERSION)
-    if payload is None or not is_int(payload.get("exp")):
-        return None
-    return payload
-
-
 class CursorCodec:
     """カーソルの発行と検証。"""
 
@@ -123,8 +108,8 @@ class CursorCodec:
                 検索条件）・本体を読めないか版や形が違う・期限切れのとき。
         """
         body = verified_body(token, lambda raw: self._sign(raw, scope=scope, principal=principal, fingerprint=fingerprint))
-        payload = _read_payload(body)
-        if payload is None:
+        payload = read_payload(body, _VERSION)
+        if payload is None or not is_int(payload.get("exp")):
             raise CursorError()
         if payload["exp"] < self._clock():
             raise CursorError(_EXPIRED)
