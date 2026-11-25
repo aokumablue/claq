@@ -96,6 +96,7 @@ from claq.hooks.hook_common import (
     is_git_executable_token,
     memoized_in_scan,
     scan_memo,
+    short_option_flags,
 )
 from claq.hooks.shell_tokens import (
     ENV_ASSIGNMENT_RE,
@@ -230,25 +231,18 @@ def _consume_short_option(
         (値として追加で消費すべき後続トークン数（0 または 1）,
         git グローバルオプションとして未知の文字を含むか) の 2 要素タプル。
     """
-    last_index = len(token) - 1
-    unknown = False
-    for index, char in enumerate(token[1:], start=1):
-        flags.append(f"-{char}")
-        if char in GIT_OPTIONAL_VALUE_SHORT_OPTIONS:
-            if index < last_index:
-                return 0, unknown
-            continue
-        if char in GIT_VALUE_SHORT_OPTIONS:
-            if index < last_index:
-                value, consumed = token[index + 1 :], 0
-            else:
-                value, consumed = next_token, 1
-            if char == "c" and value is not None:
-                config_values.append(value)
-            return consumed, unknown
-        if char not in _BOOLEAN_GLOBAL_SHORT_OPTIONS:
-            unknown = True
-    return 0, unknown
+    option_chars = short_option_flags(token)
+    flags.extend(f"-{char}" for char in option_chars)
+    # 値を取る文字は short_option_flags が末尾にしか残さないので、未知判定の既知側に含めてよい。
+    unknown = not set(option_chars) <= _BOOLEAN_GLOBAL_SHORT_OPTIONS | GIT_VALUE_SHORT_OPTIONS | GIT_OPTIONAL_VALUE_SHORT_OPTIONS
+    last_char = option_chars[-1:]
+    if last_char not in GIT_VALUE_SHORT_OPTIONS:
+        return 0, unknown
+    inline_value = token[1 + len(option_chars) :]
+    value, consumed = (inline_value, 0) if inline_value else (next_token, 1)
+    if last_char == "c" and value is not None:
+        config_values.append(value)
+    return consumed, unknown
 
 
 def _consume_option(

@@ -345,41 +345,25 @@ def _gc_roots(roots_dir: Path, now: float, *, keep_pids: frozenset[int]) -> None
     """``roots/`` を掃除する。実行中ホストのポインタは残す。
 
     ``keep_pids`` に含まれるファイル名は削除しない（同じ呼び出しで書いたばかりの
-    ポインタを自分で消さないため）。個々のエントリの判定は ``_gc_one`` が行い、
-    stat/unlink の失敗は無視する。``now`` は猶予判定の基準時刻（epoch 秒）。
+    ポインタを自分で消さないため）。残りのエントリの期限は ``_root_cutoff`` が決め、
+    iterdir/stat/unlink の失敗は無視する。``now`` は猶予判定の基準時刻（epoch 秒）。
     """
-    try:
-        entries = list(roots_dir.iterdir())
-    except OSError:
-        return
-
     keep_names = {str(pid) for pid in keep_pids}
-    for entry in entries:
-        if entry.name in keep_names:
-            continue
-        try:
-            _gc_one(entry, now)
-        except OSError:
-            continue
+    unlink_stale_entries(roots_dir, lambda name: None if name in keep_names else _root_cutoff(name, now))
 
 
-def _gc_one(entry: Path, now: float) -> None:
-    """``roots/`` 配下の 1 エントリを判定し、対象なら削除する。
+def _root_cutoff(name: str, now: float) -> float:
+    """``roots/`` 配下の 1 エントリの削除期限（これより古い mtime なら消す epoch 秒）を返す。
 
-    - 生存 PID のポインタは mtime が ``_MAX_ROOT_AGE_SECONDS`` より古ければ削除する
+    - 生存 PID のポインタは ``_MAX_ROOT_AGE_SECONDS`` を過ぎたら削除する
       （稼働中のホストは全 hook 起動で mtime を更新し続けるため、PID 再利用と判断できる）。
-    - それ以外（PID 不在・数字のみでない名前）は mtime が ``_DEAD_PID_GRACE_SECONDS``
-      より古ければ削除する。数字のみでない名前には別 writer が ``os.replace()`` 直前に
-      作った一時ファイルも含まれ、即削除するとその rename 前に消す race になる。
-
-    Raises:
-        OSError: stat/unlink に失敗した場合（呼び出し元で無視される）。
+    - それ以外（PID 不在・数字のみでない名前）は ``_DEAD_PID_GRACE_SECONDS`` を過ぎたら
+      削除する。数字のみでない名前には別 writer が ``os.replace()`` 直前に作った一時ファイルも
+      含まれ、即削除するとその rename 前に消す race になる。
     """
     # isdigit は ² のような Unicode の数字も真にするので、int() で落ちないよう ASCII に限る
-    alive = entry.name.isascii() and entry.name.isdigit() and _pid_is_alive(int(entry.name))
-    mtime = entry.stat().st_mtime
-    if mtime < now - (_MAX_ROOT_AGE_SECONDS if alive else _DEAD_PID_GRACE_SECONDS):
-        entry.unlink()
+    alive = name.isascii() and name.isdigit() and _pid_is_alive(int(name))
+    return now - (_MAX_ROOT_AGE_SECONDS if alive else _DEAD_PID_GRACE_SECONDS)
 
 
 def _gc_stale_temp_files(claq_dir: Path, now: float) -> None:
@@ -393,4 +377,5 @@ def _gc_stale_temp_files(claq_dir: Path, now: float) -> None:
     detach の stdin 一時ファイルは生成側が ``get_claq_dir()`` 配下に作る別契約なので、
     回収も生成側（`detach.gc_detach_stdin_orphans`）に置く。
     """
-    unlink_stale_entries(claq_dir, lambda name: name.startswith(_ENV_TMP_PREFIX), now - _DEAD_PID_GRACE_SECONDS)
+    cutoff = now - _DEAD_PID_GRACE_SECONDS
+    unlink_stale_entries(claq_dir, lambda name: cutoff if name.startswith(_ENV_TMP_PREFIX) else None)

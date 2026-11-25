@@ -400,17 +400,17 @@ def _redirect_targets(segment: list[str]) -> list[str]:
     ]
 
 
-# 実行位置のコマンド名ごとの書き込み先候補の取り出し方。並び順が候補の順序
+# 実行位置のコマンド名ごとの書き込み先候補の取り出し方。取り出し方が同じ集合は 1 行にまとめる。
+# 2 行に当たる名前は ``mv`` だけで、末尾引数の行が先なので、行の順が候補の順序
 # （＝最初に一致した保護対象の表示名）を決める。名前は `_command_index` が求めた
 # 実行位置だけで照合し、``echo tee pyproject.toml`` のような非実行位置の言及は見ない。
 _EXECUTED_COMMAND_TARGET_RULES = (
-    (_TEE_COMMANDS, _non_option_args),
     (INPLACE_EDIT_EXECUTABLES, _inplace_edit_args),
-    (ALWAYS_MUTATING_EDIT_EXECUTABLES, _non_option_args),
-    (_TOUCH_COMMANDS, _non_option_args),
     (_LAST_ARG_WRITE_COMMANDS, _last_non_option_arg),
-    (_REMOVE_COMMANDS, _non_option_args),
-    (_MODE_COMMANDS, _non_option_args),
+    (
+        _TEE_COMMANDS | ALWAYS_MUTATING_EDIT_EXECUTABLES | _TOUCH_COMMANDS | _REMOVE_COMMANDS | _MODE_COMMANDS,
+        _non_option_args,
+    ),
     (_DD_COMMANDS, _dd_of_args),
 )
 

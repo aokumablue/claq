@@ -13,12 +13,11 @@ import re
 from claq.hooks.heredoc import strip_data_heredoc_bodies
 from claq.hooks.hook_common import (
     ALWAYS_MUTATING_EDIT_EXECUTABLES,
-    GIT_OPTIONAL_VALUE_SHORT_OPTIONS,
-    GIT_VALUE_SHORT_OPTIONS,
     INPLACE_EDIT_EXECUTABLES,
     is_git_executable_token,
     is_inplace_edit_flag,
     memoized_in_scan,
+    short_option_flags,
     write_command_name,
 )
 from claq.hooks.shell_tokens import (
@@ -288,24 +287,6 @@ def compound_commit_risk(command: str) -> str | None:
     if any(_segment_mutates_worktree_or_index(segment) for segment in segments[: commit_indices[0]]):
         return _MUTATION_BEFORE_COMMIT_MESSAGE
     return None
-
-
-def short_option_flags(token: str) -> str:
-    """短形式のトークン（``-am`` / ``-mmsg``）のうち、フラグとして読む文字列を返します。
-
-    値を取る短形式（`GIT_VALUE_SHORT_OPTIONS` と、値が省略可能な `GIT_OPTIONAL_VALUE_SHORT_OPTIONS`）が現れたら
-    その文字までで止める（残りはその値。``-m"add x"`` や ``-Cmain`` の ``a`` を ``-a`` と読まない）。
-
-    Args:
-        token: ``-`` 1 つで始まる引数トークンです。
-
-    Returns:
-        フラグの文字列（``-am`` は ``am``、``-mAdd`` は ``m``、``-v`` は ``v``）。
-    """
-    for position, flag in enumerate(token[1:], start=2):
-        if flag in GIT_VALUE_SHORT_OPTIONS or flag in GIT_OPTIONAL_VALUE_SHORT_OPTIONS:
-            return token[1:position]
-    return token[1:]
 
 
 def is_commit_all_flag(commit_args: list[str]) -> bool:

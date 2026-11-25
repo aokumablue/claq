@@ -381,11 +381,6 @@ def _block_reason_for_file(tool_name: str, container: Any, file_path: str) -> st
     Returns:
         ブロック理由。保護対象でなければ None。
     """
-    # 内容の検査（`conditional_protection` と、そこから読む `edit_text`）は Edit/Write の経路だけで要る。
-    # このモジュールの語彙を import する `bash_config_protection` の全 Bash 起動で import 時間を払わないよう、
-    # ここで遅延 import する。
-    from claq.hooks.conditional_protection import conditional_block_reason, git_config_block_reason
-
     # 実体パスを解決できない file_path は位置で照合できないので、下の名前の判定に任せる。
     resolved = resolve_effective_target(file_path)
     if resolved is not None:
@@ -396,7 +391,11 @@ def _block_reason_for_file(tool_name: str, container: Any, file_path: str) -> st
     if protected_segment is not None:
         return blocked_message_for_file(protected_path_display_name(protected_segment))
     git_config = repo_git_config_path(file_path) or global_git_config_path(file_path)
+    # 内容の検査（`conditional_protection` と、そこから読む `edit_text`）は git config と条件付き保護の
+    # 分岐だけで要る。全 Bash 起動と大半の Edit/Write で import 時間を払わないよう、各分岐で遅延 import する。
     if git_config is not None:
+        from claq.hooks.conditional_protection import git_config_block_reason
+
         reason = git_config_block_reason(tool_name, container, file_path, git_config)
         if reason:
             return reason
@@ -407,6 +406,8 @@ def _block_reason_for_file(tool_name: str, container: Any, file_path: str) -> st
     if folded_name in PROTECTED_FILES:
         return blocked_message_for_file(file_name)
     if folded_name in CONDITIONALLY_PROTECTED_FILES:
+        from claq.hooks.conditional_protection import conditional_block_reason
+
         return conditional_block_reason(tool_name, container, file_path, file_name)
     return None
 

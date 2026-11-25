@@ -75,7 +75,7 @@ class TestPidIsAlive:
 
 
 class TestGcRoots:
-    """_gc_roots / _gc_one / _gc_stale_temp_files の削除判定のテスト。"""
+    """_gc_roots / _root_cutoff / _gc_stale_temp_files の削除判定のテスト。"""
 
     @pytest.mark.parametrize(
         ("name", "age", "keep", "survives"),

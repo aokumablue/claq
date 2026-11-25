@@ -165,9 +165,8 @@ def gc_detach_stdin_orphans() -> None:
     Raises:
         例外は発生しません（iterdir/stat/unlink の失敗は無視します）。
     """
-    unlink_stale_entries(
-        get_claq_dir(), lambda name: name.endswith(_DETACH_STDIN_SUFFIX), time.time() - _DETACH_STDIN_GRACE_SECONDS
-    )
+    cutoff = time.time() - _DETACH_STDIN_GRACE_SECONDS
+    unlink_stale_entries(get_claq_dir(), lambda name: cutoff if name.endswith(_DETACH_STDIN_SUFFIX) else None)
 
 
 def detach_process(cmd: list[str], raw_stdin: str, *, env: dict[str, str]) -> None:

@@ -297,13 +297,32 @@ WRAPPER_CHDIR_OPTION_RE = re.compile(rf"^(?:{'|'.join(WRAPPER_CHDIR_SHORT_OPTION
 
 # git の値を必ず取る short オプション文字（global の ``-C <dir>`` / ``-c <key=value>`` と、commit の ``-m`` /
 # ``-F`` / ``-C`` / ``-c`` / ``-t``）。結合形（``-mmsg``）なら残りが値、クラスタ末尾（``-am``）なら次トークンが値。
-# `block_no_verify`（バイパスフラグの検出）と `commit_risk`（``-a`` の検出）が共有する。片方だけが値と読むと、
+# `short_option_flags` を通して `block_no_verify`（バイパスフラグの検出）と `commit_risk`（``-a`` の検出）が共有する。片方だけが値と読むと、
 # ``-mAll`` の後ろをフラグと読むかがフック間でずれる。
 GIT_VALUE_SHORT_OPTIONS = frozenset("CcmFt")
 
 # git の値が省略可能で、指定するなら結合形だけの short オプション文字（``-uno`` / ``-Skeyid``）。
 # 次トークンは値として消費しない。`GIT_VALUE_SHORT_OPTIONS` と同じく 2 つのフックが共有する。
 GIT_OPTIONAL_VALUE_SHORT_OPTIONS = frozenset("uS")
+
+
+def short_option_flags(token: str) -> str:
+    """短形式のトークン（``-am`` / ``-mmsg``）のうち、フラグとして読む文字列を返します。
+
+    値を取る短形式（`GIT_VALUE_SHORT_OPTIONS` と、値が省略可能な `GIT_OPTIONAL_VALUE_SHORT_OPTIONS`）が現れたら
+    その文字までで止める（残りはその値。``-m"add x"`` や ``-Cmain`` の ``a`` を ``-a`` と読まない）。
+
+    Args:
+        token: ``-`` 1 つで始まる引数トークンです。
+
+    Returns:
+        フラグの文字列（``-am`` は ``am``、``-mAdd`` は ``m``、``-v`` は ``v``）。
+    """
+    for position, flag in enumerate(token[1:], start=2):
+        if flag in GIT_VALUE_SHORT_OPTIONS or flag in GIT_OPTIONAL_VALUE_SHORT_OPTIONS:
+            return token[1:position]
+    return token[1:]
+
 
 # sed の GNU 長形式 in-place フラグの名前（長形式の短縮は意図して組み立てる回避形なので見ない）。
 _LONG_INPLACE_OPTION_NAME = "in-place"
