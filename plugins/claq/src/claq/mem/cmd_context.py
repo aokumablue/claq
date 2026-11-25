@@ -116,6 +116,7 @@ def _sanitize_stored(text: str) -> str:
     ``keep_allowed_chars_for_injection`` で許可した文字だけを残してから ``strip_tags`` で信頼境界タグを
     倒し、前後の空白を落とす。順序を逆にすると、不可視文字で分断したタグが除去で再結合して
     ``strip_tags`` をすり抜ける（書き込み側の ``handoff.sanitize_freeform`` と同じく、合成を 1 か所に閉じる）。
+    読み出し側は ``redact`` を掛けないため、除去で再結合した鍵だけは ``keep_allowed_chars_for_injection`` が伏せる。
 
     Args:
         text: DB から読んだ値。
@@ -131,10 +132,7 @@ def _format_injected_item(row: Knowledge) -> str:
 
     既定は ``- [kind] title`` のみ。``body`` を足しても ``CONTEXT_ITEM_CHAR_LIMIT``
     文字に収まる場合だけ ``—`` で続け、長い body が節の予算を食い潰すのを防ぐ。
-    title / body は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
-    ``keep_allowed_chars_for_injection`` で許可した文字だけを残す（後ろに置くと、不可視文字で
-    分断したタグが除去で再結合して ``strip_tags`` をすり抜ける）。読み出し側は ``redact`` を
-    掛けないため、除去で再結合した鍵だけは同関数が伏せる。
+    title / body は信頼境界タグを偽装できるため ``_sanitize_stored`` で無害化する。
 
     Args:
         row: 注入対象の知識カード。
@@ -174,8 +172,7 @@ def _knowledge_section(heading: str, rows: list[Knowledge], budget: int) -> str:
 def _handoff_section(db: Database, repo_id: str) -> str:
     """直近セッションの引き継ぎを ``前回の続き`` 節へ組み立てる。
 
-    handoff 本文は信頼境界タグを偽装できるため ``strip_tags`` で無害化する。その前に
-    ``keep_allowed_chars_for_injection`` で許可した文字だけを残す。行区切りは LF に揃って
+    handoff 本文は信頼境界タグを偽装できるため ``_sanitize_stored`` で無害化する。行区切りは LF に揃って
     改行として残るので、``_neutralize_handoff_structure`` は全ての論理行を見られる。
 
     見出しの時刻は、UTC で保存した ``ended_at`` を利用者のローカル時刻へ直して出す
