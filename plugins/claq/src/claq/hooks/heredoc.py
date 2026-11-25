@@ -49,8 +49,7 @@ def _heredoc_delimiters(line: str, quote: str | None) -> tuple[list[tuple[str, b
             continue
         if char == "#" and at_word_start:
             break
-        match = _HEREDOC_OPERATOR_RE.match(line, index) if char == "<" else None
-        if match is not None:
+        if char == "<" and (match := _HEREDOC_OPERATOR_RE.match(line, index)):
             # ``<<''`` の空文字列区切りを落とさないため or 連結にしない。
             word = next(value for value in match.group("squote", "dquote", "bare") if value is not None)
             delimiters.append((word, match.group(1) == "-"))
