@@ -78,12 +78,11 @@ def run(server: MCPServer) -> None:
     # （DNS リバインディング対策）。認証の無いサーバをループバックの外へ公開する手段は置かない。
     if args.host not in _LOOPBACK_HOSTS:
         parser.error(f"--host {args.host} は使えません。認証を実装していないので、ループバック以外には公開しない")
-    security = _http_security(args.host, args.port)
     logger.info("starting streamable-http on %s:%s", args.host, args.port)
     server.run(
         transport="streamable-http",
         host=args.host,
         port=args.port,
         streamable_http_path="/mcp",
-        transport_security=security,
+        transport_security=_http_security(args.host, args.port),
     )
