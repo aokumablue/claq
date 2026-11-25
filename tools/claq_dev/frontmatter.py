@@ -575,7 +575,7 @@ class _Parser:
             return self._parse_block_value(base_indent)
         if rest[0] in "|>":
             style, chomping = _parse_block_header(rest)
-            return self._read_block_scalar(style, chomping, base_indent)
+            return _render_block_scalar(self._collect_block_lines(base_indent), style, chomping)
         if rest[0] in "'\"":
             value, end = _read_quoted(rest, 0)
             _ensure_no_trailing(rest, end)
@@ -599,19 +599,6 @@ class _Parser:
             parts.append(_strip_comment(line.strip()))
             self.pos += 1
         return _resolve_plain(" ".join(parts))
-
-    def _read_block_scalar(self, style: str, chomping: str, base_indent: int) -> str:
-        """``|`` / ``>`` のブロックスカラー本文を読み取って文字列を返す。
-
-        Args:
-            style: ``|``（リテラル）または ``>``（折り畳み）。
-            chomping: ``-``（strip）/ ``+``（keep）/ ``""``（clip）。
-            base_indent: 本文がこれより深いインデントであることを要求する基準桁。
-
-        Returns:
-            チョンピング適用後の文字列。
-        """
-        return _render_block_scalar(self._collect_block_lines(base_indent), style, chomping)
 
     def _collect_block_lines(self, base_indent: int) -> list[str]:
         """ブロックスカラーの本文行を、コンテンツのインデントを外して集める。
