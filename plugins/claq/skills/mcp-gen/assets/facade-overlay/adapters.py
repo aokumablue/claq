@@ -116,6 +116,25 @@ def _at(value: Any, path: str) -> Any:
     return value
 
 
+def _string(container: Any, path: str) -> str:
+    """上流の文字列の項目を、無害化する前の値のまま取り出す。
+
+    Args:
+        container: 上流の object。
+        path: ドット区切りのパス。
+
+    Returns:
+        上流の文字列（そのまま出さず、`clean_text` か検査を通してから使う）。
+
+    Raises:
+        UpstreamError: 項目が無い、または文字列でないとき（502）。
+    """
+    value = _at(container, path)
+    if not isinstance(value, str):
+        raise _malformed(path)
+    return value
+
+
 def _text(container: Any, path: str, *, max_chars: int) -> str:
     """上流の文字列の項目を取り出し、`clean_text` で無害化して長さを抑える。
 
@@ -130,10 +149,7 @@ def _text(container: Any, path: str, *, max_chars: int) -> str:
     Raises:
         UpstreamError: 項目が無い、または文字列でないとき（502）。
     """
-    value = _at(container, path)
-    if not isinstance(value, str):
-        raise _malformed(path)
-    return clean_text(value, max_chars=max_chars)
+    return clean_text(_string(container, path), max_chars=max_chars)
 
 
 def _integer(container: Any, path: str) -> int:
@@ -234,9 +250,7 @@ def _created_at(raw: Any) -> datetime:
             JST にすると日付の範囲を外れるとき（502）。
     """
     path = "data.attributes.createdAt"
-    value = _at(raw, path)
-    if not isinstance(value, str):
-        raise _malformed(path)
+    value = _string(raw, path)
     try:
         created = datetime.fromisoformat(value.replace("Z", "+00:00"))
         # タイムゾーンの無い日時は、astimezone がホストの地方時とみなして黙ってずれるので通さない
@@ -294,9 +308,11 @@ def _page_offset(page: str | None) -> int:
     Raises:
         UpstreamError: この偽物が返す形でないとき（400）。
     """
-    if page is not None and not re.fullmatch(r"o:\d+", page):
+    if page is None:
+        return 0
+    if not re.fullmatch(r"o:\d+", page):
         raise UpstreamError(400, "orders search: bad page token")
-    return int((page or "o:0").removeprefix("o:"))
+    return int(page.removeprefix("o:"))
 
 
 class OrdersApi:
@@ -429,8 +445,8 @@ def normalize_order(raw: Any) -> dict[str, Any]:
     """
     attributes = _at(raw, "data.attributes")
     ordered_at = _created_at(raw)
-    customer_ref = _at(attributes, "customerRef")
-    if not isinstance(customer_ref, str) or customer_ref not in _CUSTOMERS:
+    customer_ref = _string(attributes, "customerRef")
+    if customer_ref not in _CUSTOMERS:
         raise _malformed("customerRef")
     number = _text(attributes, "number", max_chars=CODE_MAX_CHARS)
     return {
