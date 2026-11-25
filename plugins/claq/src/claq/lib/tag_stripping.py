@@ -365,7 +365,8 @@ def _neutralize(text: str) -> str:
         既知タグ名の直前に生の ``<`` を持たず、``<`` を表す実体参照も倒した
         テキスト。``claq-memory`` を互換文字で書いた開き山括弧も倒してある。
     """
-    escaped = _NEUTRALIZE_PATTERN.sub(_NEUTRALIZED_LT, _ENTITY_LT_PATTERN.sub(_NEUTRALIZED_AMP, text))
+    escaped = _ENTITY_LT_PATTERN.sub(_NEUTRALIZED_AMP, text)
+    escaped = _NEUTRALIZE_PATTERN.sub(_NEUTRALIZED_LT, escaped)
     return _escape_compat_brackets(escaped)
 
 
