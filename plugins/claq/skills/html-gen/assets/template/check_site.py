@@ -286,9 +286,9 @@ def _lower_lightness_until(value: str, backdrop_hex: str, minimum: float) -> str
     """
     lightness, chroma, hue, _ = parse_oklch(value)
     while lightness > 0.0:
-        fitted = fit_chroma(lightness, chroma, hue)
-        if contrast_ratio(oklch_to_hex(format_oklch(lightness, fitted, hue)), backdrop_hex) >= minimum:
-            return format_oklch(lightness, fitted, hue)
+        candidate = format_oklch(lightness, fit_chroma(lightness, chroma, hue), hue)
+        if contrast_ratio(oklch_to_hex(candidate), backdrop_hex) >= minimum:
+            return candidate
         lightness = round(lightness - 0.002, 3)
     raise ValueError(f"{value} は {minimum}:1 を満たせない")
 
@@ -328,10 +328,7 @@ def resolved_hex(tokens: dict[str, Any], base_id: str, theme: str) -> dict[str, 
     """スキームを、半透明を下地へ合成した実効 hex に落とす。"""
     raw = scheme(tokens, base_id, theme)
     backdrops = {"--border": "--background", "--input": "--background", "--sidebar-border": "--sidebar"}
-    return {
-        name: oklch_to_hex(value, raw.get(backdrops.get(name, ""), raw["--background"]))
-        for name, value in raw.items()
-    }
+    return {name: oklch_to_hex(value, raw[backdrops.get(name, "--background")]) for name, value in raw.items()}
 
 
 def color_var_names(tokens: dict[str, Any]) -> tuple[str, ...]:
@@ -780,9 +777,9 @@ def _validate_lists(html: str, tags: _Tags) -> list[str]:
 def _validate_head_placement(tags: _Tags) -> list[str]:
     """app.js と CSP の meta が ``<head>`` にあることを検査する。"""
     violations: list[str] = []
-    if not _script_runs_before_body(tags):
+    if not _precedes_body(tags, lambda tag, attrs: tag == "script" and "app.js" in attrs.get("src", "")):
         violations.append("app.js が <head> で読み込まれていない（ダーク選択時に白のちらつきが出る）")
-    if not _csp_meta_in_head(tags):
+    if not _precedes_body(tags, _is_csp_meta):
         violations.append(
             "Content-Security-Policy の meta が <head> に無い（<meta charset> の直後に置く。<body> 内ではブラウザが無視する）"
         )
@@ -802,19 +799,9 @@ def _precedes_body(tags: _Tags, is_target: Callable[[str, dict[str, str]], bool]
     return next((tag for tag, attrs in tags if tag == "body" or is_target(tag, attrs)), "body") != "body"
 
 
-def _script_runs_before_body(tags: _Tags) -> bool:
-    """app.js が body より前（head 内）で読み込まれているかを返す。"""
-    return _precedes_body(tags, lambda tag, attrs: tag == "script" and "app.js" in attrs.get("src", ""))
-
-
 def _is_csp_meta(tag: str, attrs: dict[str, str]) -> bool:
     """Content-Security-Policy の meta かを返す。"""
     return tag == "meta" and attrs.get("http-equiv", "").lower() == "content-security-policy"
-
-
-def _csp_meta_in_head(tags: _Tags) -> bool:
-    """Content-Security-Policy の meta が body より前（head 内）にあるかを返す。"""
-    return _precedes_body(tags, _is_csp_meta)
 
 
 #: CSP で値を固定する指令。スクリプトは app.js だけ、プラグインと <base> の差し替えは禁じる。
@@ -1510,11 +1497,10 @@ def _min_render_width(css: str, class_names: list[str]) -> float | None:
     Returns:
         ``min-inline-size`` の px 値。どこにも宣言が無ければ None
     """
-    modifiers = [f".{name}" for name in class_names if name.startswith("chart--")]
-    return next(
-        (value for value in (_css_length(css, name, "min-inline-size") for name in modifiers) if value),
-        _css_length(css, ".chart", "min-inline-size"),
-    )
+    for name in class_names:
+        if name.startswith("chart--") and (width := _css_length(css, f".{name}", "min-inline-size")):
+            return width
+    return _css_length(css, ".chart", "min-inline-size")
 
 
 def _axis_text_scale_violations(index: int, svg: str, css: str, declared: float) -> list[str]:
