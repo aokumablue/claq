@@ -41,7 +41,7 @@ class GitConfigParseError(ValueError):
     """git config として解釈できない本文であることを表す。"""
 
 
-# `typing.NamedTuple` にしない理由は `shell_tokens.ShellWrapperCall` と同じ（3.14 で起動時に annotationlib を読み込む）。
+# `typing.NamedTuple` のクラス定義は Python 3.14 で annotationlib と ast を読み込み、全保護フックの起動に約 1 ms 載る。
 class ConfigEntry(namedtuple("ConfigEntry", ["key", "value"])):
     """解析した 1 つの key と値。
 
