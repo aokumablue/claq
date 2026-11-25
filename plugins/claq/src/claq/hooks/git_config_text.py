@@ -12,8 +12,8 @@
 from __future__ import annotations
 
 import os
+from collections import namedtuple
 from pathlib import Path
-from typing import NamedTuple
 
 from claq.hooks.hook_common import fold_path_parts, memoized_in_scan, resolve_effective_target
 from claq.lib.core_utils import get_home_dir
@@ -41,17 +41,17 @@ class GitConfigParseError(ValueError):
     """git config として解釈できない本文であることを表す。"""
 
 
-class ConfigEntry(NamedTuple):
+# `typing.NamedTuple` にしない理由は `shell_tokens.ShellWrapperCall` と同じ（3.14 で起動時に annotationlib を読み込む）。
+class ConfigEntry(namedtuple("ConfigEntry", ["key", "value"])):
     """解析した 1 つの key と値。
 
     Attributes:
-        key: ``section[.subsection].name`` の完全修飾名。section と name は小文字、``[sec "Sub"]``
+        key (str): ``section[.subsection].name`` の完全修飾名。section と name は小文字、``[sec "Sub"]``
             形式の subsection は大小を保つ（git の規則どおり）。
-        value: 値。``=`` の無い key は None。
+        value (str | None): 値。``=`` の無い key は None。
     """
 
-    key: str
-    value: str | None
+    __slots__ = ()
 
 
 def _is_key_char(char: str) -> bool:
