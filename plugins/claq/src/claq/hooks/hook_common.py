@@ -15,12 +15,16 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TextIO
 
 from claq.hooks.shell_tokens import basename_any_separator, normalize_executable_name
 from claq.lib.core_utils import get_home_dir
 from claq.lib.output_adapter import adapt_deny_output
 from claq.lib.subprocess_utils import SUBPROCESS_FAILURES
+
+# `typing` の import は約 1 ms かかり、全保護フックの起動ごとに載る。注釈は `from __future__ import annotations` で評価されないので、型検査器にだけ見せる。
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from typing import TextIO
 
 # `scan_memo` の with の中でだけ使う、引数ごとの結果の置き場。with の外では None（毎回計算する）。
 _scan_memo: dict[tuple[object, ...], object] | None = None

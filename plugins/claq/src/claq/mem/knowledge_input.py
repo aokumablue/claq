@@ -271,19 +271,32 @@ class KnowledgeDraft:
         )
 
 
-def _stripped_optional(value: Any) -> str | None:
-    """許可した文字だけを残した上で、空でない値だけを文字列にして返す。
+def _allowed_text(value: Any) -> str:
+    """JSON の値を文字列にして、許可した文字だけを残す。
 
     不可視文字・制御文字で分断した鍵が ``redact_knowledge_text`` をすり抜けて保存され、
-    注入側の除去で 1 本に戻るのを防ぐため、除去は redact より前に行う。
+    注入側の除去で 1 本に戻るのを防ぐため、呼び出し側は redact より前にこれを通す。
 
     Args:
         value: JSON から得た任意の値。
 
     Returns:
-        許可した文字だけの文字列。None・空・除去後に空になる値なら None。
+        許可した文字だけを残した文字列。None・空文字・空コンテナなら空文字列。
     """
-    return keep_allowed_chars(optional_str(value) or "") or None
+    return keep_allowed_chars(str(value or ""))
+
+
+def _sanitized_optional(value: Any) -> str | None:
+    """許可した文字だけを残してから redact し、空でない値だけを文字列にして返す。
+
+    Args:
+        value: JSON から得た任意の値。
+
+    Returns:
+        許可した文字だけを残して redact した文字列。None・空・除去後に空になる値なら None。
+    """
+    stripped = _allowed_text(value)
+    return redact_knowledge_text(stripped) if stripped else None
 
 
 def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
@@ -316,7 +329,7 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     # `.strip()` は前後しか落とさず、内部の改行は DB へ入る。title は注入時に
     # `- [kind] title` の 1 行として描かれる契約なので、改行が残ると 1 枚のカードが
     # 複数行に割れ、偽の知識カード行を注入枠の内側に作れる。
-    title = " ".join(keep_allowed_chars(str(payload.get("title") or "")).split())
+    title = " ".join(_allowed_text(payload.get("title")).split())
     if not title:
         raise KnowledgeInputError("learn: title は必須です")
 
@@ -325,17 +338,14 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     _reject_override(payload, "source", _FIXED_SOURCE)
     _reject_override(payload, "status", _FIXED_STATUS)
 
-    raw_key = keep_allowed_chars(str(payload.get("key") or "")).strip()
+    raw_key = _allowed_text(payload.get("key")).strip()
     # 明示 key もシークレット断片を持ち込みうるため、生成 key と同じく
     # redact してから slugify を通す。
     # ハッシュ fallback も title 由来 key と同じく適用する。適用しないと
     # `日本語` と `別` のような ASCII を含まない明示 key が同じ slug へ潰れ、
     # upsert で別の知識を黙って上書きする。
     key = slug_with_hash_fallback(redact_knowledge_text(raw_key), kind) if raw_key else generate_key(title, kind)
-    body = keep_allowed_chars(str(payload.get("body") or ""))
-
-    source_ref = _stripped_optional(payload.get("source_ref"))
-    domain = _stripped_optional(payload.get("domain"))
+    body = _allowed_text(payload.get("body"))
 
     return KnowledgeDraft(
         key=key,
@@ -343,7 +353,7 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
         kind=kind,
         title=redact_knowledge_text(title),
         body=redact_knowledge_text(body),
-        domain=redact_knowledge_text(domain) if domain else None,
+        domain=_sanitized_optional(payload.get("domain")),
         confidence=coerce_confidence(payload.get("confidence")),
-        source_ref=redact_knowledge_text(source_ref) if source_ref else None,
+        source_ref=_sanitized_optional(payload.get("source_ref")),
     )

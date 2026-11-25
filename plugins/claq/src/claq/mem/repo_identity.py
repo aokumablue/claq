@@ -95,6 +95,18 @@ def _is_scp_like(remote: str) -> bool:
     return colon != -1 and (slash == -1 or colon < slash)
 
 
+def _drop_userinfo(authority: str) -> str:
+    """authority から最後の ``@`` までの userinfo（``user:token@``）を落とす。identity_key と保存用 remote_url で同じ規則にする。
+
+    Args:
+        authority: ``user:token@host:port`` 形式を取りうる authority 部。
+
+    Returns:
+        ``host`` または ``host:port``。``@`` が無ければそのまま。
+    """
+    return authority.rpartition("@")[2]
+
+
 def _join_host_path(authority: str, path: str, *, strip_port: bool) -> str | None:
     """authority とパスを ``host/path`` 形式の正体キーへ組み立てる。
 
@@ -107,7 +119,7 @@ def _join_host_path(authority: str, path: str, *, strip_port: bool) -> str | Non
     Returns:
         正規化済みの ``host/path``。host もパスも空なら None。
     """
-    host = authority.rpartition("@")[2]
+    host = _drop_userinfo(authority)
     if strip_port:
         host = _PORT_RE.sub("", host)
     host = host.lower()
@@ -122,7 +134,7 @@ def _strip_credentials(remote_url: str) -> str:
 
     DB へ保存する ``repos.remote_url`` に credential 付き authority
     （``https://user:token@github.com/o/r``）を残さないため、identity_key と
-    同じ ``rpartition("@")`` を scheme・パス・大小文字を保ったまま適用する。
+    同じ ``_drop_userinfo`` を scheme・パス・大小文字を保ったまま適用する。
     scp 形式も一貫して ``host:owner/repo`` にする。
 
     query（``?``）と fragment（``#``）は先に現れた方から丸ごと捨てる。
@@ -140,10 +152,10 @@ def _strip_credentials(remote_url: str) -> str:
     scheme_match = _SCHEME_RE.match(trimmed)
     if scheme_match:
         authority, sep, path = scheme_match.group(2).partition("/")
-        return f"{scheme_match.group(1)}://{authority.rpartition('@')[2]}{sep}{path}"
+        return f"{scheme_match.group(1)}://{_drop_userinfo(authority)}{sep}{path}"
     if _is_scp_like(trimmed):
         authority, sep, path = trimmed.partition(":")
-        return f"{authority.rpartition('@')[2]}{sep}{path}"
+        return f"{_drop_userinfo(authority)}{sep}{path}"
     return trimmed
 
 
@@ -196,6 +208,18 @@ class RepoIdentity:
     remote_url: str | None
 
 
+def _resolve_start(cwd: str | Path | None) -> str:
+    """起点ディレクトリをシンボリックリンク解決済みの絶対パスにする。None は現在の作業ディレクトリ。
+
+    Args:
+        cwd: 起点ディレクトリ。None なら現在の作業ディレクトリ。
+
+    Returns:
+        シンボリックリンク解決済みの絶対パス（git が使えないときの返り値にもなる）。
+    """
+    return os.path.realpath(Path.cwd() if cwd is None else cwd)
+
+
 def find_repo_root(cwd: str | Path | None) -> str:
     """*cwd* が属する git リポジトリ本体のルート絶対パスを返す。
 
@@ -212,7 +236,7 @@ def find_repo_root(cwd: str | Path | None) -> str:
     Raises:
         subprocess.TimeoutExpired: git が時間内に終わらない場合（``_run_git`` を参照）。
     """
-    start = os.path.realpath(Path.cwd() if cwd is None else cwd)
+    start = _resolve_start(cwd)
     common_dir = _run_git(start, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if common_dir is None:
         return start
@@ -238,7 +262,7 @@ def find_work_tree_root(cwd: str | Path | None) -> str:
     Raises:
         subprocess.TimeoutExpired: git が時間内に終わらない場合（``_run_git`` を参照）。
     """
-    start = os.path.realpath(Path.cwd() if cwd is None else cwd)
+    start = _resolve_start(cwd)
     top_level = _run_git(start, "rev-parse", "--show-toplevel")
     return start if top_level is None else os.path.realpath(top_level)
 

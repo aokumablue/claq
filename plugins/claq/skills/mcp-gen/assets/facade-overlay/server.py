@@ -448,9 +448,10 @@ def _merged_order(
     if "order" in failures:
         raise failures["order"]
     partial: list[str] = []
-    if "shipments" in failures:
-        logger.warning("upstream failure: %s", failures["shipments"])
-        partial.append(f"shipments: {model_message(failures['shipments'])}")
+    shipments_error = failures.get("shipments")
+    if shipments_error is not None:
+        logger.warning("upstream failure: %s", shipments_error)
+        partial.append(f"shipments: {model_message(shipments_error)}")
     order = normalize_order(results["order"])
     if "shipments" in results:
         order["shipments"] = results["shipments"]

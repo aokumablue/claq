@@ -31,7 +31,7 @@ def _strip_markdown_prefix(line: str) -> str:
 
 def compact_line(text: str) -> str:
     """空白を畳みマークダウンの行頭記号を落として 1 行にし、``COMPACT_LINE_MAX_CHARS`` を超えれば切って ``...`` を付ける。"""
-    value = _strip_markdown_prefix(" ".join(text.split())).strip()
+    value = _strip_markdown_prefix(" ".join(text.split()))
     if len(value) > COMPACT_LINE_MAX_CHARS:
         return value[:COMPACT_LINE_MAX_CHARS].rstrip() + TRUNCATION_MARKER
 

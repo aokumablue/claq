@@ -418,7 +418,7 @@ def _is_local_command_output(entry: dict[str, Any]) -> bool:
     Returns:
         本文が文字列で、ローカルコマンドの出力タグで始まれば True。
     """
-    content = _message_of(entry).get("content") or entry.get("content")
+    content = _raw_content(entry)
     return isinstance(content, str) and _LOCAL_COMMAND_OUTPUT_RE.match(content) is not None
 
 
@@ -539,6 +539,21 @@ def _message_of(entry: dict[str, Any]) -> dict[str, Any]:
     return message if isinstance(message, dict) else {}
 
 
+def _raw_content(entry: dict[str, Any]) -> object:
+    """エントリの ``content`` を、``message.content`` → ``entry.content`` の順に探して返す。
+
+    発話かどうかは見ない。ローカルコマンドの出力は ``system`` 型でも記録されるため、
+    role で絞るのは発話を取り出す ``user_entry_content`` の側に置く。
+
+    Args:
+        entry: トランスクリプトの 1 エントリ。
+
+    Returns:
+        ``content`` の生の値。``message.content`` が空・欠落なら ``entry.content``（無ければ None）。
+    """
+    return _message_of(entry).get("content") or entry.get("content")
+
+
 def user_entry_content(entry: dict[str, Any]) -> object:
     """ユーザー発話のエントリから ``content`` を取り出す。
 
@@ -556,10 +571,9 @@ def user_entry_content(entry: dict[str, Any]) -> object:
     entry_type = entry.get("type")
     if entry_type in _NON_SPEECH_ENTRY_TYPES:
         return None
-    message = _message_of(entry)
-    if "user" not in (entry_type, entry.get("role"), message.get("role")):
+    if "user" not in (entry_type, entry.get("role"), _message_of(entry).get("role")):
         return None
-    return message.get("content") or entry.get("content")
+    return _raw_content(entry)
 
 
 def _user_message(entry: dict[str, Any]) -> str:

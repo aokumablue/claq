@@ -123,12 +123,10 @@ def _remove_empty_or_file(link: Path) -> bool:
     if not link.is_dir():
         link.unlink()
         return True
-    try:
-        next(link.iterdir())
-    except StopIteration:
-        link.rmdir()
-        return True
-    return False
+    if any(link.iterdir()):
+        return False
+    link.rmdir()
+    return True
 
 
 def _is_link_to(link: Path, target: Path) -> bool:

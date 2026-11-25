@@ -386,6 +386,7 @@ def _memory_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
 def _eval_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モードの Eval Coverage カテゴリのチェックを返す。"""
     category = EVAL_COVERAGE
+    dev_root = _dev_root(root_dir)
     return [
         make_check(
             check_id="eval-skill", category=category, points=4, scopes=["repo", "skills"],
@@ -405,8 +406,7 @@ def _eval_checks(root_dir: Path) -> list[dict[str, Any]]:
             check_id="eval-tests-presence", category=category, points=2, scopes=["repo"],
             path="tests/",
             description="カバレッジゲートが設定され、テスト surface が失われていない（数は品質指標ではない）",
-            passed=count_files(_dev_root(root_dir), "tests", ".py") >= 1
-            and _coverage_gate_configured(_dev_root(root_dir)),
+            passed=count_files(dev_root, "tests", ".py") >= 1 and _coverage_gate_configured(dev_root),
             fix="Keep tests/ populated and configure a coverage threshold (fail_under) in pyproject.toml.",
         ),
     ]

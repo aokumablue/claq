@@ -129,11 +129,8 @@ def ensure_private_dir(dir_path: str | Path) -> Path:
     """
     path = make_private_dirs(dir_path)
     claq_dir = get_claq_dir()
-    try:
-        path.resolve().relative_to(claq_dir.resolve())
-    except ValueError:
-        return path
-    claq_dir.chmod(0o700)
+    if path.resolve().is_relative_to(claq_dir.resolve()):
+        claq_dir.chmod(0o700)
     return path
 
 

@@ -179,6 +179,7 @@ _BYPASS_LONG_FLAG = "--no-verify"
 # ``git commit`` でのみ ``--no-verify`` の別名になる short フラグ。
 _BYPASS_SHORT_FLAG = "-n"
 
+
 def _consume_long_option(
     token: str, next_token: str | None, flags: list[str], config_values: list[str]
 ) -> tuple[int, bool]:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from typing import NamedTuple
+from collections import namedtuple
 
 # 1 コマンドに許すバイト数の上限。
 # `shlex` の走査コストは単一の巨大トークンでバイト数の二次になり、host の timeout で kill された hook は
@@ -87,20 +87,19 @@ def is_shell_wrapper_token(token: str) -> bool:
     return normalize_executable_name(token) in SHELL_WRAPPER_EXECUTABLES
 
 
-class ShellWrapperCall(NamedTuple):
+# `typing.NamedTuple` のクラス定義は Python 3.14 で annotationlib と ast を読み込み、全保護フックの起動に約 1 ms 載る。
+class ShellWrapperCall(namedtuple("ShellWrapperCall", ["prefix", "command", "command_index"])):
     """1 セグメント内の既知シェル ``-c`` 呼び出し。
 
     Attributes:
-        prefix: 最初のシェル起動トークンより前のトークン列。``HOME=/tmp/h sh -c '...'`` や
+        prefix (tuple[str, ...]): 最初のシェル起動トークンより前のトークン列。``HOME=/tmp/h sh -c '...'`` や
             ``env HOME=/tmp/h sh -c '...'`` の ``HOME=/tmp/h`` は内側のコマンドにも環境として渡る。
             ``-c`` の文字列より後ろの位置引数（``sh -c '...' HOME=/tmp/h``）は環境ではないため含めない。
-        command: ``-c`` に続く、ラップされた文字列コマンド。
-        command_index: ``command`` のセグメント内位置。外側のセグメントから文字列を除くときに使う。
+        command (str): ``-c`` に続く、ラップされた文字列コマンド。
+        command_index (int): ``command`` のセグメント内位置。外側のセグメントから文字列を除くときに使う。
     """
 
-    prefix: tuple[str, ...]
-    command: str
-    command_index: int
+    __slots__ = ()
 
 
 def extract_shell_wrapper_call(segment: list[str]) -> ShellWrapperCall | None:

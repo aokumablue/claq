@@ -13,9 +13,13 @@ import queue
 import sys
 import threading
 import time
-from typing import Any
 
 from claq.lib.harness import JSON_PARSE_FAILURES
+
+# `typing` の import は約 1 ms かかり、全保護フックの起動ごとに載る。注釈は `from __future__ import annotations` で評価されないので、型検査器にだけ見せる。
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from typing import Any
 
 MAX_STDIN_BYTES = 1024 * 1024
 
@@ -135,7 +139,8 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
         target=_pump_stdin, args=(_stdin_chunk_reader(sys.stdin.buffer), max_bytes, sink), daemon=True
     ).start()
 
-    collected = b""
+    # bytes の `+=` は毎回全体を複製し、チャンクが細かいとき上限 1 MB まで二次になるため bytearray に溜める。
+    collected = bytearray()
     deadline: float | None = None
     while len(collected) < max_bytes:
         timeout = STDIN_FIRST_BYTE_TIMEOUT if deadline is None else max(0.0, deadline - time.monotonic())
@@ -161,7 +166,7 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
         collected += payload
         if deadline is None:
             deadline = time.monotonic() + STDIN_READ_DEADLINE_SECONDS
-    return collected
+    return bytes(collected)
 
 
 def read_raw_stdin() -> str:

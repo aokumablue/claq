@@ -365,7 +365,8 @@ def _neutralize(text: str) -> str:
         既知タグ名の直前に生の ``<`` を持たず、``<`` を表す実体参照も倒した
         テキスト。``claq-memory`` を互換文字で書いた開き山括弧も倒してある。
     """
-    escaped = _NEUTRALIZE_PATTERN.sub(_NEUTRALIZED_LT, _ENTITY_LT_PATTERN.sub(_NEUTRALIZED_AMP, text))
+    escaped = _ENTITY_LT_PATTERN.sub(_NEUTRALIZED_AMP, text)
+    escaped = _NEUTRALIZE_PATTERN.sub(_NEUTRALIZED_LT, escaped)
     return _escape_compat_brackets(escaped)
 
 
@@ -410,7 +411,8 @@ def _hides_secret_behind_tags(text: str) -> bool:
     return _erase_known_tags(redact(text)) != redact(erased)
 
 
-_LINE_BREAKS_RE = re.compile(r"\n+")
+_LF_RUNS = re.compile(r"\n+")
+"""LF の連なり。``collapse_line_breaks`` が空白 1 つへ畳む（``_LINE_BREAKS`` は LF へ揃える前の区切り）。"""
 
 
 def collapse_line_breaks(text: str) -> str:
@@ -425,7 +427,7 @@ def collapse_line_breaks(text: str) -> str:
     Returns:
         LF を含まない文字列。
     """
-    return _LINE_BREAKS_RE.sub(" ", text)
+    return _LF_RUNS.sub(" ", text)
 
 
 def keep_allowed_chars(text: str) -> str:

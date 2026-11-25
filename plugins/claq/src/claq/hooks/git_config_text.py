@@ -12,8 +12,8 @@
 from __future__ import annotations
 
 import os
+from collections import namedtuple
 from pathlib import Path
-from typing import NamedTuple
 
 from claq.hooks.hook_common import fold_path_parts, memoized_in_scan, resolve_effective_target
 from claq.lib.core_utils import get_home_dir
@@ -41,17 +41,17 @@ class GitConfigParseError(ValueError):
     """git config として解釈できない本文であることを表す。"""
 
 
-class ConfigEntry(NamedTuple):
+# `typing.NamedTuple` のクラス定義は Python 3.14 で annotationlib と ast を読み込み、全保護フックの起動に約 1 ms 載る。
+class ConfigEntry(namedtuple("ConfigEntry", ["key", "value"])):
     """解析した 1 つの key と値。
 
     Attributes:
-        key: ``section[.subsection].name`` の完全修飾名。section と name は小文字、``[sec "Sub"]``
+        key (str): ``section[.subsection].name`` の完全修飾名。section と name は小文字、``[sec "Sub"]``
             形式の subsection は大小を保つ（git の規則どおり）。
-        value: 値。``=`` の無い key は None。
+        value (str | None): 値。``=`` の無い key は None。
     """
 
-    key: str
-    value: str | None
+    __slots__ = ()
 
 
 def _is_key_char(char: str) -> bool:
@@ -187,8 +187,7 @@ def _parse_value(text: str, pos: int) -> tuple[str, int]:
             continue
         if not quoted and char in _COMMENT_STARTS:
             # 行内コメントは行末まで読み飛ばす（引用符・継続行はコメントの中では解釈しない）。
-            line_end = text.find("\n", pos)
-            return "".join(value), length if line_end < 0 else line_end + 1
+            return "".join(value), _skip_line(text, pos)
         if pending_spaces:
             value.append(" " * pending_spaces)
             pending_spaces = 0
@@ -309,8 +308,7 @@ def is_sensitive_config_key(key: str) -> bool:
     Returns:
         `_SENSITIVE_CONFIG_KEY_PREFIXES` のいずれかに前方一致すれば True。
     """
-    normalized = key.strip().lower()
-    return any(normalized.startswith(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES)
+    return key.strip().lower().startswith(_SENSITIVE_CONFIG_KEY_PREFIXES)
 
 
 def _sensitive_entries(text: str) -> list[ConfigEntry]:

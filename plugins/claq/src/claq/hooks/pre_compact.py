@@ -22,8 +22,7 @@ def main() -> int:
     Returns:
         終了コード 0。
     """
-    sessions_dir = get_sessions_dir()
-    append_file(sessions_dir / "compaction-log.txt", f"[{get_datetime_string()}] Context compaction triggered\n")
+    append_file(get_sessions_dir() / "compaction-log.txt", f"[{get_datetime_string()}] Context compaction triggered\n")
     log("[PreCompact] Context compaction logged")
     return 0
 

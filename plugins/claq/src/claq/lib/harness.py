@@ -7,11 +7,16 @@ host 判定は一切行わない。フィールド名の union を無条件に�
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import shlex
 from collections.abc import Iterable, Iterator
-from typing import Any
+
+# `typing` の import は約 1 ms かかり、全保護フックの起動ごとに載る。注釈は `from __future__ import annotations` で評価されないので、型検査器にだけ見せる。
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from typing import Any
 
 # 各ハーネスのツール名 → Claude Code 相当ツール名。
 #
@@ -79,25 +84,7 @@ def extract_tool_input(payload: dict[str, Any]) -> Any:
     Returns:
         正規化後の tool 入力（dict / str / その他）、キーが無ければ None。
     """
-    for key in INPUT_CONTAINER_KEYS:
-        if key not in payload:
-            continue
-        value = payload[key]
-        if not isinstance(value, str):
-            return value
-        # 判定とパースは同じ文字列に対して行う。lstrip 後の値で「JSON らしさ」を
-        # 見ながら元の文字列をパースすると、JSON が許容しない空白（\x0c 等）を
-        # 1 文字前置しただけで「{ で始まるがパースできない」状態になり、生コマンド
-        # 文字列として扱われる。その文字列の中では危険なコマンドが JSON のダブル
-        # クォート内に入るため、トークナイザからは実行トークンに見えず素通りする。
-        stripped = value.lstrip()
-        if not stripped.startswith(("{", "[")):
-            return value
-        try:
-            return json.loads(stripped)
-        except JSON_PARSE_FAILURES:
-            return value
-    return None
+    return next(iter_tool_input_containers(payload), None)
 
 
 def extract_raw_tool_name(payload: dict[str, Any]) -> str:
@@ -122,7 +109,25 @@ def iter_tool_input_containers(payload: dict[str, Any]) -> Iterator[Any]:
     """
     for key in INPUT_CONTAINER_KEYS:
         if key in payload:
-            yield extract_tool_input({key: payload[key]})
+            yield _parse_container_value(payload[key])
+
+
+def _parse_container_value(value: Any) -> Any:
+    """コンテナキーの値を正規化する。JSON に見える文字列はパースし、読めなければ元の文字列を返す。"""
+    if not isinstance(value, str):
+        return value
+    # 判定とパースは同じ文字列に対して行う。lstrip 後の値で「JSON らしさ」を
+    # 見ながら元の文字列をパースすると、JSON が許容しない空白（\x0c 等）を
+    # 1 文字前置しただけで「{ で始まるがパースできない」状態になり、生コマンド
+    # 文字列として扱われる。その文字列の中では危険なコマンドが JSON のダブル
+    # クォート内に入るため、トークナイザからは実行トークンに見えず素通りする。
+    stripped = value.lstrip()
+    if not stripped.startswith(("{", "[")):
+        return value
+    try:
+        return json.loads(stripped)
+    except JSON_PARSE_FAILURES:
+        return value
 
 
 def iter_bash_command_groups(payload: dict[str, Any]) -> Iterator[tuple[str, ...]]:
@@ -239,6 +244,8 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     判定とパースは同じ ``lstrip`` 後の文字列に対して行う。``\\x0c`` / ``\\x0b`` は
     Python の空白だが JSON の空白ではないため、元の文字列をパースすると 1 文字前置
     するだけでパースが失敗し、patch 本文ではなく生の JSON 文字列がパス候補として返る。
+    ``[`` で始まる文字列はパースせず生のパッチとして返す（`_parse_container_value` と違い
+    dict の JSON だけを読む）。
     """
     if isinstance(tool_input, dict):
         patch_text = tool_input.get("input")
@@ -391,7 +398,7 @@ _ORPHAN_NAME_END = r"(?=[\s/>]|$)"
 # （`"<system-reminder " * N`）で二次オーダーになる（SessionEnd で毎回通る経路）。
 #
 # **この上限は複雑度のための装置であって、安全性の境界ではない。** 上限を使うのは
-# 除去パターンだけで、破棄判定の `_SCAFFOLD_ORPHAN_PATTERN` は使わない。超過して除去
+# 除去パターンだけで、破棄判定の `_UserMessagePatterns.scaffold_orphan` は使わない。超過して除去
 # できなかったブロックは孤立タグとして検出され、メッセージごと破棄される。
 _MAX_TAG_ATTR_CHARS = 512
 _TAG_ATTRS = rf"[^>]{{0,{_MAX_TAG_ATTR_CHARS}}}"
@@ -414,36 +421,55 @@ def tag_block_pattern(tag: str, *, capture: bool = False) -> re.Pattern[str]:
     return re.compile(rf"<{tag}{TAG_NAME_END}{_TAG_ATTRS}>{body}</{tag}\s*>", re.IGNORECASE)
 
 
-# タグごとに自分自身の開始タグを否定先読みする必要があるため、1 本の alternation に
-# まとめられずタグ単位のリストになる。
-_SCAFFOLD_BLOCK_PATTERNS = [tag_block_pattern(tag) for tag in SCAFFOLD_TAGS]
+def _tag_marker_pattern(tags: tuple[str, ...]) -> re.Pattern[str]:
+    """*tags* のいずれかの開始タグ・終了タグ単体（中身は含まない）に一致するパターンを返す。"""
+    return re.compile(r"</?(?:" + "|".join(tags) + r")" + TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE)
 
-# ペア除去後に残った足場タグ。ハーネスは足場タグを必ず対で書き、`read_tail_text` の
-# 前方切り詰めで壊れる先頭 1 行は `mem.handoff.parse_entry` が不正 JSON として捨てるため、
-# この段階で片側だけ残っているタグは、足場の中身に閉じタグリテラルを混ぜてブロックを
-# 早期終端させた細工とみなす。断片を救う利得より、細工した文字列が「直近の依頼」として
-# 次セッションへ注入される損失のほうが大きいため、メッセージごと破棄する。
-#
-# 属性部（`_TAG_ATTRS`）と閉じ括弧は**要求しない**。要求すると、属性が 512 文字を
-# 超えるタグがブロック除去にも本検出にも一致せず素通りする。先読みも選択肢も固定幅
-# なので走査は入力長に対して線形。
-_SCAFFOLD_ORPHAN_PATTERN = re.compile(
-    r"</?(?:" + "|".join(SCAFFOLD_TAGS) + r")" + _ORPHAN_NAME_END, re.IGNORECASE
-)
 
-# スラッシュコマンド起動の足場。`<command-name>` と `<command-args>` の中身は
-# ユーザーが実際に入力した依頼そのものなので、捨てずに `/name args` へ畳む。
-_COMMAND_NAME_PATTERN = tag_block_pattern("command-name", capture=True)
-_COMMAND_ARGS_PATTERN = tag_block_pattern("command-args", capture=True)
-_COMMAND_SCAFFOLD_PATTERN = re.compile(
-    r"</?(?:" + "|".join(COMMAND_TAGS) + r")" + TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE
-)
-# 貼り付けを包むタグ（開始・終了）。中身には触れない。
-_PASTE_TAG_PATTERN = re.compile(r"</?(?:" + "|".join(PASTE_TAGS) + r")" + TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE)
-# 畳み込みで中身ごと落とすブロック。`command-message` はコマンド名の再掲、
-# `command-args` は畳んだ文字列側へ取り込み済みのため元の位置には残さない。
-_COMMAND_MESSAGE_BLOCK_PATTERN = tag_block_pattern("command-message")
-_COMMAND_ARGS_BLOCK_PATTERN = tag_block_pattern("command-args")
+class _UserMessagePatterns:
+    """`normalize_user_message` が使う正規表現一式。
+
+    保護フックは本モジュールを import するが `normalize_user_message` を使わないため、
+    import 時にコンパイルすると全 Bash / Edit の hook 起動ごとに約 0.7 ms を払う。
+    `_user_message_patterns` が初回の利用時に 1 回だけ作る。
+    """
+
+    def __init__(self) -> None:
+        """足場除去・孤立タグ検出・スラッシュコマンド畳み込み・貼り付けタグのパターンをコンパイルする。"""
+        # タグごとに自分自身の開始タグを否定先読みする必要があるため、1 本の alternation に
+        # まとめられずタグ単位のリストになる。
+        self.scaffold_blocks = [tag_block_pattern(tag) for tag in SCAFFOLD_TAGS]
+
+        # ペア除去後に残った足場タグ。ハーネスは足場タグを必ず対で書き、`read_tail_text` の
+        # 前方切り詰めで壊れる先頭 1 行は `mem.handoff.parse_entry` が不正 JSON として捨てるため、
+        # この段階で片側だけ残っているタグは、足場の中身に閉じタグリテラルを混ぜてブロックを
+        # 早期終端させた細工とみなす。断片を救う利得より、細工した文字列が「直近の依頼」として
+        # 次セッションへ注入される損失のほうが大きいため、メッセージごと破棄する。
+        #
+        # 属性部（`_TAG_ATTRS`）と閉じ括弧は**要求しない**。要求すると、属性が 512 文字を
+        # 超えるタグがブロック除去にも本検出にも一致せず素通りする。先読みも選択肢も固定幅
+        # なので走査は入力長に対して線形。
+        self.scaffold_orphan = re.compile(
+            r"</?(?:" + "|".join(SCAFFOLD_TAGS) + r")" + _ORPHAN_NAME_END, re.IGNORECASE
+        )
+
+        # スラッシュコマンド起動の足場。`<command-name>` と `<command-args>` の中身は
+        # ユーザーが実際に入力した依頼そのものなので、捨てずに `/name args` へ畳む。
+        self.command_name = tag_block_pattern("command-name", capture=True)
+        self.command_args = tag_block_pattern("command-args", capture=True)
+        self.command_scaffold = _tag_marker_pattern(COMMAND_TAGS)
+        # 貼り付けを包むタグ（開始・終了）。中身には触れない。
+        self.paste_tag = _tag_marker_pattern(PASTE_TAGS)
+        # 畳み込みで中身ごと落とすブロック。`command-message` はコマンド名の再掲、
+        # `command-args` は畳んだ文字列側へ取り込み済みのため元の位置には残さない。
+        self.command_message_block = tag_block_pattern("command-message")
+        self.command_args_block = tag_block_pattern("command-args")
+
+
+@functools.cache
+def _user_message_patterns() -> _UserMessagePatterns:
+    """`_UserMessagePatterns` をプロセス内で 1 回だけ作って返す。"""
+    return _UserMessagePatterns()
 
 
 def _drop_scaffold_blocks(text: str) -> str | None:
@@ -459,9 +485,10 @@ def _drop_scaffold_blocks(text: str) -> str | None:
     Returns:
         足場タグとその中身を除いたテキスト。メッセージごと破棄すべきなら None。
     """
-    for pattern in _SCAFFOLD_BLOCK_PATTERNS:
+    patterns = _user_message_patterns()
+    for pattern in patterns.scaffold_blocks:
         text = pattern.sub("", text)
-    if _SCAFFOLD_ORPHAN_PATTERN.search(text):
+    if patterns.scaffold_orphan.search(text):
         return None
     return text
 
@@ -482,23 +509,24 @@ def _fold_command_invocation(text: str) -> str:
     コマンド名が取れない場合でも、残った ``command-*`` タグ自体は依頼本文ではない
     ため無条件に落とす。
     """
-    matches = list(_COMMAND_NAME_PATTERN.finditer(text))
+    patterns = _user_message_patterns()
+    matches = list(patterns.command_name.finditer(text))
     if not matches:
-        return _COMMAND_SCAFFOLD_PATTERN.sub("", text)
+        return patterns.command_scaffold.sub("", text)
 
     parts: list[str] = [text[: matches[0].start()]]
-    for index, match in enumerate(matches):
-        region_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+    region_ends = [match.start() for match in matches[1:]] + [len(text)]
+    for match, region_end in zip(matches, region_ends, strict=True):
         region = text[match.end() : region_end]
         name = match.group(1).strip().lstrip("/")
         if name:
-            args_match = _COMMAND_ARGS_PATTERN.search(region)
+            args_match = patterns.command_args.search(region)
             args = args_match.group(1).strip() if args_match else ""
             parts.append(f"/{name} {args}".strip())
-            region = _COMMAND_ARGS_BLOCK_PATTERN.sub("", region, count=1)
-            region = _COMMAND_MESSAGE_BLOCK_PATTERN.sub("", region)
+            region = patterns.command_args_block.sub("", region, count=1)
+            region = patterns.command_message_block.sub("", region)
         parts.append(region)
-    return _COMMAND_SCAFFOLD_PATTERN.sub("", "".join(parts))
+    return patterns.command_scaffold.sub("", "".join(parts))
 
 
 def normalize_user_message(text: str) -> str:
@@ -520,4 +548,4 @@ def normalize_user_message(text: str) -> str:
     stripped = _drop_scaffold_blocks(text)
     if stripped is None:
         return ""
-    return _PASTE_TAG_PATTERN.sub("", _fold_command_invocation(stripped)).strip()
+    return _user_message_patterns().paste_tag.sub("", _fold_command_invocation(stripped)).strip()

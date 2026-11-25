@@ -48,15 +48,26 @@ _LINT_SECTION_HEADERS = (
     "[testenv",
 )
 
+
+def _key_assignment_pattern(keys: tuple[str, ...]) -> re.Pattern[str]:
+    """``keys`` のいずれかを行頭の空白の後に置いた代入行（``key =``）を拾う正規表現を作る。
+
+    行頭の空白は ``[ \\t]`` に限る。``\\s`` は改行を含むため、各行頭から残りの空白全体を
+    取って後退し、改行だけの入力で二次オーダーになる。hooks.json の timeout を超えて host
+    にフックを殺されると allow へ倒れ、保護そのものが無効化される。
+
+    Args:
+        keys: 照合するキー名。
+
+    Returns:
+        複数行モードでコンパイルした正規表現。
+    """
+    return re.compile(r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in keys) + r")[ \t]*=")
+
+
 # セクション見出しを伴わない値行編集（`fail_under = 100` → `80`）を拾うためのキー照合。
-#
-# 行頭の空白は ``[ \t]`` に限る。``\s`` は改行を含むため、各行頭から残りの空白全体を
-# 取って後退し、改行だけの入力で二次オーダーになる。hooks.json の timeout を超えて host
-# にフックを殺されると allow へ倒れ、保護そのものが無効化される。
 _LINT_KEYS = ("ignore", "select", "per-file-ignores", "exclude", "fail_under", "addopts")
-_LINT_KEY_PATTERN = re.compile(
-    r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in _LINT_KEYS) + r")[ \t]*="
-)
+_LINT_KEY_PATTERN = _key_assignment_pattern(_LINT_KEYS)
 
 # ホスト設定（settings.json / settings.local.json）で置換前後を比べる top-level の部分木。
 # 有無の変化も変化として扱う。`disableAllHooks` は全フックを一括で止める。
@@ -72,12 +83,9 @@ _SETTINGS_GUARDED_ENV_NAMES = ("CLAQ_PYTHON", "PATH", "PYTHONPATH", "PYTHONHOME"
 _PACKAGE_JSON_LINT_KEYS = ("eslintConfig", "prettier")
 
 # tox.ini の実行コマンドキー。`commands` は他のファイルにも現れうる汎用的な語なので、
-# `_LINT_KEYS` へは足さず tox.ini 限定にする。行頭空白を ``[ \t]`` に絞る理由は
-# `_LINT_KEY_PATTERN` と同じ。
+# `_LINT_KEYS` へは足さず tox.ini 限定にする。
 _TOX_COMMAND_KEYS = ("commands", "commands_pre", "commands_post")
-_TOX_COMMAND_KEY_PATTERN = re.compile(
-    r"(?m)^[ \t]*(" + "|".join(re.escape(key) for key in _TOX_COMMAND_KEYS) + r")[ \t]*="
-)
+_TOX_COMMAND_KEY_PATTERN = _key_assignment_pattern(_TOX_COMMAND_KEYS)
 
 
 def _editable_text(tool_name: str, container: Any) -> list[str] | None:
@@ -199,9 +207,7 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool:
     line = bisect_right(line_starts, index) - 1
     # 断片の手前で切れた行も見る（``[tool.ruff] # x`` の ``# x`` は ``[tool.ruff]`` に属する）。
     header = _section_header(text[line_starts[line] : index]) or headers_before[line]
-    if header is None:
-        return False
-    return any(header.startswith(candidate) for candidate in _LINT_SECTION_HEADERS)
+    return header is not None and header.startswith(_LINT_SECTION_HEADERS)
 
 
 def _text_has_protected_signal(text: str, file_name: str) -> bool:
