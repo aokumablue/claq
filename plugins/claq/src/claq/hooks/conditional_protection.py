@@ -199,9 +199,7 @@ def _resolve_lint_section_from_disk(file_path: str, snippet: str) -> bool:
     line = bisect_right(line_starts, index) - 1
     # 断片の手前で切れた行も見る（``[tool.ruff] # x`` の ``# x`` は ``[tool.ruff]`` に属する）。
     header = _section_header(text[line_starts[line] : index]) or headers_before[line]
-    if header is None:
-        return False
-    return any(header.startswith(candidate) for candidate in _LINT_SECTION_HEADERS)
+    return header is not None and header.startswith(_LINT_SECTION_HEADERS)
 
 
 def _text_has_protected_signal(text: str, file_name: str) -> bool:

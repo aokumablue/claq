@@ -308,8 +308,7 @@ def is_sensitive_config_key(key: str) -> bool:
     Returns:
         `_SENSITIVE_CONFIG_KEY_PREFIXES` のいずれかに前方一致すれば True。
     """
-    normalized = key.strip().lower()
-    return any(normalized.startswith(prefix) for prefix in _SENSITIVE_CONFIG_KEY_PREFIXES)
+    return key.strip().lower().startswith(_SENSITIVE_CONFIG_KEY_PREFIXES)
 
 
 def _sensitive_entries(text: str) -> list[ConfigEntry]:
