@@ -13,7 +13,6 @@ launcher は stdin を代読しないため、入力切り捨て時のブロッ�
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from claq.hooks.git_config_text import GLOBAL_GIT_CONFIG_DISPLAY_NAMES, global_git_config_path
 from claq.hooks.hook_common import (
@@ -45,6 +44,11 @@ from claq.lib.stdin_io import (
     stdin_unreadable_message,
 )
 from claq.lib.subprocess_utils import SUBPROCESS_FAILURES, run_text
+
+# `typing` の import は約 1 ms かかり、全保護フックの起動ごとに載る。注釈は `from __future__ import annotations` で評価されないので、型検査器にだけ見せる。
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from typing import Any
 
 # matcher（hooks.json）は書込み系ツールに限定されているが、matcher の綴りがズレても
 # 本体側で書込み系以外を早期 return する多重防御。
