@@ -236,9 +236,9 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     Copilot CLI では生のパッチ文字列、他ハーネスでは {"input": "..."} のような dict、
     あるいはその JSON 文字列で渡るため、すべて吸収する。判定は呼び出し側が行う。
 
-    判定とパースは同じ ``lstrip`` 後の文字列に対して行う。``\\x0c`` / ``\\x0b`` は
-    Python の空白だが JSON の空白ではないため、元の文字列をパースすると 1 文字前置
-    するだけでパースが失敗し、patch 本文ではなく生の JSON 文字列がパス候補として返る。
+    JSON 文字列の読み方は `_parse_container_value` に揃える（片側だけ前置空白の穴を塞ぐと、
+    もう片側で patch 本文ではなく生の JSON 文字列がパス候補として返る）。dict 入力で本文が
+    無ければ None、文字列入力で本文が取れなければ元の文字列（生のパッチとして読む）を返す。
     """
     if isinstance(tool_input, dict):
         patch_text = tool_input.get("input")
@@ -247,12 +247,8 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     if not isinstance(tool_input, str):
         return None
 
-    stripped = tool_input.lstrip()
-    if not stripped.startswith("{"):
-        return tool_input
-    try:
-        parsed = json.loads(stripped)
-    except JSON_PARSE_FAILURES:
+    parsed = _parse_container_value(tool_input)
+    if not isinstance(parsed, dict):
         return tool_input
     patch_text = parsed.get("input")
     return patch_text if isinstance(patch_text, str) else tool_input
@@ -414,6 +410,11 @@ def tag_block_pattern(tag: str, *, capture: bool = False) -> re.Pattern[str]:
     return re.compile(rf"<{tag}{TAG_NAME_END}{_TAG_ATTRS}>{body}</{tag}\s*>", re.IGNORECASE)
 
 
+def _tag_marker_pattern(tags: tuple[str, ...]) -> re.Pattern[str]:
+    """*tags* のいずれかの開始タグ・終了タグ単体（中身は含まない）に一致するパターンを返す。"""
+    return re.compile(r"</?(?:" + "|".join(tags) + r")" + TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE)
+
+
 # タグごとに自分自身の開始タグを否定先読みする必要があるため、1 本の alternation に
 # まとめられずタグ単位のリストになる。
 _SCAFFOLD_BLOCK_PATTERNS = [tag_block_pattern(tag) for tag in SCAFFOLD_TAGS]
@@ -435,11 +436,9 @@ _SCAFFOLD_ORPHAN_PATTERN = re.compile(
 # ユーザーが実際に入力した依頼そのものなので、捨てずに `/name args` へ畳む。
 _COMMAND_NAME_PATTERN = tag_block_pattern("command-name", capture=True)
 _COMMAND_ARGS_PATTERN = tag_block_pattern("command-args", capture=True)
-_COMMAND_SCAFFOLD_PATTERN = re.compile(
-    r"</?(?:" + "|".join(COMMAND_TAGS) + r")" + TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE
-)
+_COMMAND_SCAFFOLD_PATTERN = _tag_marker_pattern(COMMAND_TAGS)
 # 貼り付けを包むタグ（開始・終了）。中身には触れない。
-_PASTE_TAG_PATTERN = re.compile(r"</?(?:" + "|".join(PASTE_TAGS) + r")" + TAG_NAME_END + _TAG_ATTRS + r">", re.IGNORECASE)
+_PASTE_TAG_PATTERN = _tag_marker_pattern(PASTE_TAGS)
 # 畳み込みで中身ごと落とすブロック。`command-message` はコマンド名の再掲、
 # `command-args` は畳んだ文字列側へ取り込み済みのため元の位置には残さない。
 _COMMAND_MESSAGE_BLOCK_PATTERN = tag_block_pattern("command-message")
