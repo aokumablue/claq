@@ -150,10 +150,15 @@ def _check_unsupported(text: str) -> None:
         )
 
 
+def _is_comment_start(text: str, index: int) -> bool:
+    """``index`` の文字が値の途中から始まるコメント（空白またはタブの直後の ``#``）かを返す。"""
+    return text[index] == "#" and index > 0 and text[index - 1] in " \t"
+
+
 def _strip_comment(text: str) -> str:
     """プレーンスカラーから空白直前の ``#`` 以降を取り除いて右 strip する。"""
-    for index, char in enumerate(text):
-        if char == "#" and index > 0 and text[index - 1] in " \t":
+    for index in range(len(text)):
+        if _is_comment_start(text, index):
             return text[:index].rstrip()
     return text.rstrip()
 
@@ -289,7 +294,7 @@ def _find_key_separator(text: str) -> int | None:
             depth += 1
         elif char in "]}":
             depth -= 1
-        elif char == "#" and index > 0 and text[index - 1] in " \t":
+        elif _is_comment_start(text, index):
             break
         elif char == ":" and depth == 0 and (index + 1 == len(text) or text[index + 1] in " \t"):
             return index
@@ -402,6 +407,17 @@ def _next_flow_entry(text: str, index: int, close: str, kind: str, first: bool) 
     return False, index
 
 
+def _insert_unique_key(result: dict[str, object], key: str, value: object) -> None:
+    """マッピングへ (キー, 値) を加え、キーの重複はエラーにする（先勝ちで黙認すると、検証器が `tools: Read` を見る一方で後勝ちのホストは `tools: Bash` を見る、というパーサ差分になる）。
+
+    Raises:
+        FrontmatterError: ``key`` が ``result`` に既にある場合。
+    """
+    if key in result:
+        raise FrontmatterError(f"キー '{key}' が重複しています")
+    result[key] = value
+
+
 def _read_flow_key(text: str, index: int) -> tuple[str, int]:
     """フローマッピングのキーを読み取り (キー, 次の位置) を返す。
 
@@ -485,11 +501,7 @@ class _Parser:
         """
         result: dict[str, object] = {}
         for key, value in self._block_entries(indent, self._parse_mapping_entry):
-            # 先勝ちで黙認すると、検証器が `tools: Read` を見る一方で後勝ちのホストは
-            # `tools: Bash` を見る、というパーサ差分になる。
-            if key in result:
-                raise FrontmatterError(f"キー '{key}' が重複しています")
-            result[key] = value
+            _insert_unique_key(result, key, value)
         return result
 
     def _parse_mapping_entry(self, indent: int) -> tuple[str, object]:
@@ -675,9 +687,7 @@ class _Parser:
             if index >= len(text) or text[index] != ":":
                 raise FrontmatterError("フローマッピングのキーに ':' が続いていません")
             value, index = self._read_flow_item(text, _skip_spaces(text, index + 1))
-            if key in result:
-                raise FrontmatterError(f"キー '{key}' が重複しています")
-            result[key] = value
+            _insert_unique_key(result, key, value)
 
     def _read_flow_item(self, text: str, index: int) -> tuple[object, int]:
         """フローコレクションの要素を 1 つ読み取り (値, 次の位置) を返す。
