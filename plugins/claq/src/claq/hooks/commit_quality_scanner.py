@@ -478,21 +478,19 @@ def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) ->
     """
     issues = []
     budget = _ScanBudget(deadline)
-    for index, line in enumerate(lines):
-        line_num = index + 1
+    for line_num, line in enumerate(lines, start=1):
         budget.check(len(line), line_num)
 
         if "# nosec" in line:
             continue
 
-        comment_line = line.strip().startswith(_JS_COMMENT_LINE_PREFIXES)
-        if javascript and "console.log" in line and not comment_line:  # nosec
-            message = f"console.log found at line {line_num}"  # nosec
-            issues.append(_issue("console.log", message, line=line_num, severity="warning"))  # nosec
-
-        if javascript and _DEBUGGER_STATEMENT_RE.search(line) and not comment_line:
-            message = f"debugger statement at line {line_num}"  # nosec
-            issues.append(_issue("debugger", message, line=line_num, severity="error"))  # nosec
+        if javascript and not line.strip().startswith(_JS_COMMENT_LINE_PREFIXES):
+            if "console.log" in line:  # nosec
+                message = f"console.log found at line {line_num}"  # nosec
+                issues.append(_issue("console.log", message, line=line_num, severity="warning"))  # nosec
+            if _DEBUGGER_STATEMENT_RE.search(line):
+                message = f"debugger statement at line {line_num}"  # nosec
+                issues.append(_issue("debugger", message, line=line_num, severity="error"))  # nosec
 
         todo_match = re.search(r"(?://|#)\s*(TODO|FIXME):?\s*(.+)", line)
         if todo_match and not re.search(r"#\d+|issue", todo_match.group(2), re.IGNORECASE):
@@ -528,13 +526,15 @@ def _scan_secret_issues(lines: list[str], *, deadline: float, report_lines: bool
     """
     issues = []
     budget = _ScanBudget(deadline)
-    for index, line in enumerate(lines):
-        line_num = index + 1 if report_lines else 0
-        location = f"at line {line_num}" if report_lines else "in extracted binary content"
+    for line_number, line in enumerate(lines, start=1):
+        reported_line = line_number if report_lines else 0
+        location = f"at line {reported_line}" if report_lines else "in extracted binary content"
         for pattern, name in _COMPILED_SECRET_PATTERNS:
-            budget.check(len(line), index + 1)
+            budget.check(len(line), line_number)
             if pattern.search(line):
-                issues.append(_issue("secret", f"Potential {name} exposed {location}", line=line_num, severity="error"))
+                issues.append(
+                    _issue("secret", f"Potential {name} exposed {location}", line=reported_line, severity="error")
+                )
 
     return issues
 
