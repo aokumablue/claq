@@ -187,8 +187,7 @@ def _parse_value(text: str, pos: int) -> tuple[str, int]:
             continue
         if not quoted and char in _COMMENT_STARTS:
             # 行内コメントは行末まで読み飛ばす（引用符・継続行はコメントの中では解釈しない）。
-            line_end = text.find("\n", pos)
-            return "".join(value), length if line_end < 0 else line_end + 1
+            return "".join(value), _skip_line(text, pos)
         if pending_spaces:
             value.append(" " * pending_spaces)
             pending_spaces = 0
