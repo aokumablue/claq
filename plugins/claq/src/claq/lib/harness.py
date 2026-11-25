@@ -241,9 +241,11 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     Copilot CLI では生のパッチ文字列、他ハーネスでは {"input": "..."} のような dict、
     あるいはその JSON 文字列で渡るため、すべて吸収する。判定は呼び出し側が行う。
 
-    JSON 文字列の読み方は `_parse_container_value` に揃える（片側だけ前置空白の穴を塞ぐと、
-    もう片側で patch 本文ではなく生の JSON 文字列がパス候補として返る）。dict 入力で本文が
-    無ければ None、文字列入力で本文が取れなければ元の文字列（生のパッチとして読む）を返す。
+    判定とパースは同じ ``lstrip`` 後の文字列に対して行う。``\\x0c`` / ``\\x0b`` は
+    Python の空白だが JSON の空白ではないため、元の文字列をパースすると 1 文字前置
+    するだけでパースが失敗し、patch 本文ではなく生の JSON 文字列がパス候補として返る。
+    ``[`` で始まる文字列はパースせず生のパッチとして返す（`_parse_container_value` と違い
+    dict の JSON だけを読む）。
     """
     if isinstance(tool_input, dict):
         patch_text = tool_input.get("input")
@@ -252,8 +254,12 @@ def _extract_patch_text(tool_input: dict | str | None) -> str | None:
     if not isinstance(tool_input, str):
         return None
 
-    parsed = _parse_container_value(tool_input)
-    if not isinstance(parsed, dict):
+    stripped = tool_input.lstrip()
+    if not stripped.startswith("{"):
+        return tool_input
+    try:
+        parsed = json.loads(stripped)
+    except JSON_PARSE_FAILURES:
         return tool_input
     patch_text = parsed.get("input")
     return patch_text if isinstance(patch_text, str) else tool_input
