@@ -83,6 +83,9 @@ _JS_COMMENT_LINE_PREFIXES = ("//", "*", "/*")
 # デバッガ文だけを拾う。プロパティ（`chrome.` の後・オブジェクトのキー）と引用符の中の語（ESLint のルール名・
 # バンドラの除去指定）は文ではなく、拾うと設定ファイルの commit を止める。
 _DEBUGGER_STATEMENT_RE = re.compile(r"(?<![\w.$'\"`-])debugger(?![\w$'\"`-]|\s*:)")  # nosec
+# 行ごとに走る TODO/FIXME コメントと issue 参照の検出。行ループ内で `re.search` に文字列を渡すと毎行キャッシュを引く。
+_TODO_COMMENT_RE = re.compile(r"(?://|#)\s*(TODO|FIXME):?\s*(.+)")
+_ISSUE_REFERENCE_RE = re.compile(r"#\d+|issue", re.IGNORECASE)
 _MINIFIED_SUFFIXES = (".min.js", ".min.css")
 _SECRET_SCAN_EXCLUDED_FILENAMES = {
     "package-lock.json",
@@ -492,8 +495,8 @@ def _scan_lint_issues(lines: list[str], *, deadline: float, javascript: bool) ->
                 message = f"debugger statement at line {line_num}"  # nosec
                 issues.append(_issue("debugger", message, line=line_num, severity="error"))  # nosec
 
-        todo_match = re.search(r"(?://|#)\s*(TODO|FIXME):?\s*(.+)", line)
-        if todo_match and not re.search(r"#\d+|issue", todo_match.group(2), re.IGNORECASE):
+        todo_match = _TODO_COMMENT_RE.search(line)
+        if todo_match and not _ISSUE_REFERENCE_RE.search(todo_match.group(2)):
             # 行内容は不信データで、deny 時にモデルのコンテキストへ入るため無害化する。
             excerpt = _sanitize_untrusted_excerpt(todo_match.group(2))
             message = f'TODO/FIXME without issue reference at line {line_num}: "{excerpt}"'
