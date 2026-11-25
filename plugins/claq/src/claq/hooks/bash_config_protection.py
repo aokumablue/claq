@@ -142,6 +142,8 @@ _MODE_COMMANDS = frozenset({"chmod", "chown", "chgrp", "chflags"})
 
 # 非オプション引数がすべて書き込み先になるコマンド。
 _TEE_COMMANDS = frozenset({"tee"})
+
+# ``of=<path>`` の値が書き込み先になるコマンド（`_dd_of_args`）。
 _DD_COMMANDS = frozenset({"dd"})
 
 # 保護対象の名前を空で新規作成するだけで検査を無効化できる（多くの linter は設定
@@ -451,7 +453,8 @@ def _changes_working_directory(segment: list[str]) -> bool:
         wrapper が作業ディレクトリを指定する（`WRAPPER_CHDIR_OPTION_RE`）なら True。
     """
     index = _command_index(segment)
-    if any(WRAPPER_CHDIR_OPTION_RE.match(token) for token in segment[: len(segment) if index is None else index]):
+    # 実行位置が無ければ（`segment[:None]`）全トークンが wrapper 側の前置になる。
+    if any(WRAPPER_CHDIR_OPTION_RE.match(token) for token in segment[:index]):
         return True
     return index is not None and normalize_executable_name(segment[index]) in DIRECTORY_CHANGE_COMMANDS
 
