@@ -104,8 +104,7 @@ def _walk_dir(root_path: Path) -> Iterator[os.DirEntry[str]]:
     """
     stack = [root_path]
     while stack:
-        entries = _list_dir(stack.pop())
-        for entry in entries:
+        for entry in _list_dir(stack.pop()):
             if not entry.is_dir(follow_symlinks=False):
                 yield entry
             elif entry.name not in _VENDOR_DIR_NAMES:
@@ -140,8 +139,7 @@ def has_python_tests(root_dir: Path, minimum: int) -> bool:
 
 def count_files(root_dir: Path, relative_dir: str, extension: str | None) -> int:
     """指定ディレクトリ以下の、``extension`` で終わる（None なら全）ファイル数を数える。"""
-    dir_path = root_dir / relative_dir
-    return sum(1 for entry in _walk_dir(dir_path) if extension is None or entry.name.endswith(extension))
+    return sum(1 for entry in _walk_dir(root_dir / relative_dir) if extension is None or entry.name.endswith(extension))
 
 
 def safe_read(root_dir: Path, relative_path: str) -> str:

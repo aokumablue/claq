@@ -168,17 +168,16 @@ def _hosting_layout(root_dir: Path, hosting_service: str | None) -> _HostingLayo
 
 def _consumer_tool_checks(root_dir: Path) -> list[dict[str, Any]]:
     """consumer モードの Tool Coverage カテゴリのチェックを返す。"""
-    category = TOOL_COVERAGE
     return [
         make_check(
-            check_id="consumer-plugin-install", category=category, points=4, scopes=["repo"],
+            check_id="consumer-plugin-install", category=TOOL_COVERAGE, points=4, scopes=["repo"],
             path="~/.claude/plugins/",
             description="プラグインがインストールされている",
             passed=has_plugin_install(root_dir),
             fix="Install the claq plugin for this user or project before auditing project-specific harness quality.",
         ),
         make_check(
-            check_id="consumer-project-overrides", category=category, points=3,
+            check_id="consumer-project-overrides", category=TOOL_COVERAGE, points=3,
             scopes=sorted(VALID_SCOPES),
             path=".claude/",
             description="プロジェクト固有のハーネスオーバーライドが .claude/ 配下に存在する",
@@ -194,10 +193,9 @@ def _consumer_tool_checks(root_dir: Path) -> list[dict[str, Any]]:
 
 def _consumer_context_checks(root_dir: Path) -> list[dict[str, Any]]:
     """consumer モードの Context Efficiency カテゴリのチェックを返す。"""
-    category = CONTEXT_EFFICIENCY
     return [
         make_check(
-            check_id="consumer-instructions", category=category, points=3, scopes=["repo"],
+            check_id="consumer-instructions", category=CONTEXT_EFFICIENCY, points=3, scopes=["repo"],
             path="AGENTS.md",
             description="プロジェクトが明示的なエージェント・命令コンテキストを持つ",
             passed=file_has_content(root_dir, "AGENTS.md")
@@ -206,7 +204,7 @@ def _consumer_context_checks(root_dir: Path) -> list[dict[str, Any]]:
             fix="Add AGENTS.md or CLAUDE.md so the harness has project-specific instructions.",
         ),
         make_check(
-            check_id="consumer-project-config", category=category, points=2, scopes=["repo", "hooks"],
+            check_id="consumer-project-config", category=CONTEXT_EFFICIENCY, points=2, scopes=["repo", "hooks"],
             path=".mcp.json",
             description="プロジェクトがローカル MCP・Claude 設定を宣言している",
             passed=file_has_content(root_dir, ".mcp.json")
@@ -230,10 +228,9 @@ def _consumer_quality_checks(
     root_dir: Path, hosting_label: str, ci_path: str, ci_pass: bool
 ) -> list[dict[str, Any]]:
     """consumer モードの Quality Gates カテゴリのチェックを返す。"""
-    category = QUALITY_GATES
     return [
         make_check(
-            check_id="consumer-test-suite", category=category, points=4, scopes=["repo"],
+            check_id="consumer-test-suite", category=QUALITY_GATES, points=4, scopes=["repo"],
             path="tests/",
             description="プロジェクトが自動テストのエントリポイントを持つ",
             # 最初のヒットで打ち切る判定（has_python_tests / has_file_with_extension）を
@@ -246,7 +243,7 @@ def _consumer_quality_checks(
             "or pytest test_*.py) so harness recommendations can be verified automatically.",
         ),
         make_check(
-            check_id="consumer-ci-workflow", category=category, points=3, scopes=["repo"],
+            check_id="consumer-ci-workflow", category=QUALITY_GATES, points=3, scopes=["repo"],
             path=ci_path,
             description=f"プロジェクトが {hosting_label} CI 設定をチェックインしている",
             passed=ci_pass,
@@ -312,6 +309,12 @@ def get_consumer_checks(root_dir: Path, hosting_service: str | None) -> list[dic
     ]
 
 
+def _point_totals(checks: list[dict[str, Any]]) -> tuple[int, int]:
+    """チェック群の（獲得点, 配点合計）を返す。カテゴリ別と全体の集計が同じ数え方をするため 1 か所に置く。"""
+    earned = sum(check["points"] for check in checks if check["pass"])
+    return earned, sum(check["points"] for check in checks)
+
+
 def summarize_category_scores(checks: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     """カテゴリ別スコアを集計する。
 
@@ -323,9 +326,7 @@ def summarize_category_scores(checks: list[dict[str, Any]]) -> dict[str, dict[st
     """
     scores: dict[str, dict[str, int]] = {}
     for category in CATEGORIES:
-        in_category = [check for check in checks if check["category"] == category]
-        max_points = sum(check["points"] for check in in_category)
-        earned_points = sum(check["points"] for check in in_category if check["pass"])
+        earned_points, max_points = _point_totals([check for check in checks if check["category"] == category])
         scores[category] = {
             "earned_points": earned_points,
             "max_points": max_points,
@@ -357,10 +358,7 @@ def assemble_report(
         checks_source: 採点モードのチェック定義。
     """
     checks = [check for check in checks_source if scope in check["scopes"]]
-    category_scores = summarize_category_scores(checks)
-    max_score = sum(check["points"] for check in checks)
-    overall_score = sum(check["points"] for check in checks if check["pass"])
-
+    overall_score, max_score = _point_totals(checks)
     failed_checks = sorted((check for check in checks if not check["pass"]), key=lambda c: c["points"], reverse=True)
     return {
         "scope": scope,
@@ -370,7 +368,7 @@ def assemble_report(
         "rubric_version": RUBRIC_VERSION,
         "overall_score": overall_score,
         "max_score": max_score,
-        "categories": category_scores,
+        "categories": summarize_category_scores(checks),
         "checks": [
             {key: check[key] for key in ("id", "category", "points", "path", "description", "pass")}
             for check in checks
