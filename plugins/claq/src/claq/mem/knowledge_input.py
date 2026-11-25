@@ -271,8 +271,8 @@ class KnowledgeDraft:
         )
 
 
-def _stripped_optional(value: Any) -> str | None:
-    """許可した文字だけを残した上で、空でない値だけを文字列にして返す。
+def _sanitized_optional(value: Any) -> str | None:
+    """許可した文字だけを残してから redact し、空でない値だけを文字列にして返す。
 
     不可視文字・制御文字で分断した鍵が ``redact_knowledge_text`` をすり抜けて保存され、
     注入側の除去で 1 本に戻るのを防ぐため、除去は redact より前に行う。
@@ -281,9 +281,10 @@ def _stripped_optional(value: Any) -> str | None:
         value: JSON から得た任意の値。
 
     Returns:
-        許可した文字だけの文字列。None・空・除去後に空になる値なら None。
+        許可した文字だけを残して redact した文字列。None・空・除去後に空になる値なら None。
     """
-    return keep_allowed_chars(optional_str(value) or "") or None
+    stripped = keep_allowed_chars(optional_str(value) or "")
+    return redact_knowledge_text(stripped) if stripped else None
 
 
 def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
@@ -334,16 +335,13 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     key = slug_with_hash_fallback(redact_knowledge_text(raw_key), kind) if raw_key else generate_key(title, kind)
     body = keep_allowed_chars(str(payload.get("body") or ""))
 
-    source_ref = _stripped_optional(payload.get("source_ref"))
-    domain = _stripped_optional(payload.get("domain"))
-
     return KnowledgeDraft(
         key=key,
         scope=scope,
         kind=kind,
         title=redact_knowledge_text(title),
         body=redact_knowledge_text(body),
-        domain=redact_knowledge_text(domain) if domain else None,
+        domain=_sanitized_optional(payload.get("domain")),
         confidence=coerce_confidence(payload.get("confidence")),
-        source_ref=redact_knowledge_text(source_ref) if source_ref else None,
+        source_ref=_sanitized_optional(payload.get("source_ref")),
     )
