@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, NoReturn
 
 from claq.hooks.edit_text import (
     FULL_TEXT_MAX_BYTES,
@@ -26,6 +25,11 @@ from claq.hooks.edit_text import (
 from claq.hooks.git_config_text import GitConfigParseError, adds_sensitive_entries
 from claq.hooks.hook_common import HOST_SETTINGS_FILES, memoized_in_scan, normalize_protected_name
 from claq.lib.stdin_io import MAX_STDIN_BYTES
+
+# `typing` の import は約 1 ms かかり、このモジュールを遅延 import する Edit/Write ごとに載る。注釈は `from __future__ import annotations` で評価されないので、型検査器にだけ見せる。
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from typing import Any, NoReturn
 
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
 # サブセクションも拾うため prefix 一致にする。`[testenv` は tox.ini の
