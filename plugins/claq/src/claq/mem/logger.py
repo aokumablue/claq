@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from claq.lib.core_utils import ensure_private_dir
+from claq.lib.redaction import redact
 
 
 class _RedactingFormatter(logging.Formatter):
@@ -17,8 +18,6 @@ class _RedactingFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """整形済みログメッセージから PII / シークレットを除去して返す。"""
-        from claq.lib.redaction import redact
-
         return redact(super().format(record))
 
 

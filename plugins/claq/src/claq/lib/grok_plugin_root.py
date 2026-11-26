@@ -118,17 +118,6 @@ def _resolve_symlink_target(home: Path) -> Path | None:
     return found.resolve()
 
 
-def _remove_empty_or_file(link: Path) -> bool:
-    """空ディレクトリまたは通常ファイルを削除する。触ってはいけないなら False。"""
-    if not link.is_dir():
-        link.unlink()
-        return True
-    if any(link.iterdir()):
-        return False
-    link.rmdir()
-    return True
-
-
 def _is_link_to(link: Path, target: Path) -> bool:
     """``link`` が ``target`` へ解決されるシンボリックリンクか。resolve が OSError なら False。"""
     try:
@@ -138,12 +127,16 @@ def _is_link_to(link: Path, target: Path) -> bool:
 
 
 def _clear_existing(link: Path) -> bool:
-    """``link`` の既存物を片付ける。触ってはいけない（空でないディレクトリ。launcher を含むものもここに入る）なら False。"""
-    if link.is_symlink():
-        link.unlink()
+    """``link`` の既存物（symlink・ファイル・空ディレクトリ）を片付ける。
+
+    触ってはいけない（空でないディレクトリ。launcher を含むものもここに入る）なら False。
+    """
+    if link.is_symlink() or not link.is_dir():
+        link.unlink(missing_ok=True)
         return True
-    if link.exists():
-        return _remove_empty_or_file(link)
+    if any(link.iterdir()):
+        return False
+    link.rmdir()
     return True
 
 
