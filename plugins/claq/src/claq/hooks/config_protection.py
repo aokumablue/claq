@@ -335,23 +335,25 @@ def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> st
         開発用 checkout で保護しない場合は None。
     """
     target = fold_path_parts(resolved.parts)
-    for segments, guarded in _folded_running_plugin_guarded_dirs():
+    for display, guarded in _folded_running_plugin_guarded_dirs():
         if is_path_prefix(guarded, target) or (include_ancestors and is_path_prefix(target, guarded)):
-            return "/".join(segments) + "/" if running_plugin_root_is_guarded() else None
+            return display if running_plugin_root_is_guarded() else None
     return None
 
 
 @memoized_in_scan
-def _folded_running_plugin_guarded_dirs() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
-    """実行中の plugin root の保護ディレクトリを (要素列, 畳んだ実体パス) の組で返す。
+def _folded_running_plugin_guarded_dirs() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """実行中の plugin root の保護ディレクトリを (表示名, 畳んだ実体パス) の組で返す。
 
     書込み先トークンごとに畳み直さないよう、`scan_memo` の間は 1 回だけ作る。
 
     Returns:
-        `_RUNNING_PLUGIN_GUARDED_DIRS` の各要素と、plugin root に連ねて畳んだ要素列。
+        `_RUNNING_PLUGIN_GUARDED_DIRS` の各要素の表示名（``runtime/`` / ``src/claq/``）と、plugin root に連ねて畳んだ要素列。
     """
     root = _running_plugin_root()
-    return tuple((segments, fold_path_parts(root.joinpath(*segments).parts)) for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
+    return tuple(
+        ("/".join(segments) + "/", fold_path_parts(root.joinpath(*segments).parts)) for segments in _RUNNING_PLUGIN_GUARDED_DIRS
+    )
 
 
 def _running_plugin_blocked_message(display_name: str) -> str:

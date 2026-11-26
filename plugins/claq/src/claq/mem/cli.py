@@ -277,7 +277,7 @@ def main() -> int:
     try:
         # 不明なコマンドの引数は解析しない。オプションの誤りとして報告すると、コマンド名の誤りに気づけない。
         if spec is None:
-            settings, args = _load_settings_or_raise(), CommandArgs()
+            _load_settings_or_raise()
         else:
             settings, args = _prepare_command(command, sys.argv[2:])
     except CommandError as e:

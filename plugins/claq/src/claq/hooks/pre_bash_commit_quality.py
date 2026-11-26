@@ -343,8 +343,8 @@ def _partition_commit_all_files(
     if unstaged is None:
         return None
 
-    worktree_files = sorted(set(unstaged))
-    return sorted(set(staged_files) - set(worktree_files)), worktree_files
+    worktree_files = set(unstaged)
+    return sorted(set(staged_files) - worktree_files), sorted(worktree_files)
 
 
 def _count_file_issues(files_to_check: list[str], repo_root: Path | None = None, *, deadline: float) -> Counter[str]:
