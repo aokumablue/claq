@@ -11,6 +11,7 @@ from claq_dev.ci_common import (
     emit_error,
     frontmatter_spelling_errors,
     list_markdown_files,
+    list_subdirectories,
     parse_validator_args,
     read_or_report,
     report_errors,
@@ -155,7 +156,7 @@ def validate_commands(
     files = list_markdown_files(commands_path)
     valid_commands = {path.stem for path in files}
     valid_agents = {path.stem for path in list_markdown_files(agents_path)}
-    valid_skills = {entry.name for entry in skills_path.iterdir() if entry.is_dir()} if skills_path.exists() else set()
+    valid_skills = {entry.name for entry in list_subdirectories(skills_path)}
 
     has_errors = False
     warn_count = 0

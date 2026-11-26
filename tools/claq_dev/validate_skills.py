@@ -10,6 +10,7 @@ from claq_dev.ci_common import (
     emit_error,
     frontmatter_or_report,
     frontmatter_spelling_errors,
+    list_subdirectories,
     parse_validator_args,
     read_or_report,
     report_errors,
@@ -86,7 +87,7 @@ def validate_skills(skills_dir: str | Path) -> int:
     skills_path = Path(skills_dir)
     if not skills_path.exists():
         return report_missing("skills ディレクトリ", skills_path)
-    skill_dirs = [entry for entry in skills_path.iterdir() if entry.is_dir()]
+    skill_dirs = list_subdirectories(skills_path)
     # 全ディレクトリの誤りを出し切るため、短絡させずに検証する。
     failed = [directory for directory in skill_dirs if _validate_skill_dir(directory)]
     if failed:

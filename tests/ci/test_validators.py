@@ -269,6 +269,16 @@ def test_validate_commands_warns_on_missing_skill_but_passes(
     assert "1 件の警告" in capsys.readouterr().out
 
 
+def test_validate_commands_warns_on_every_skill_reference_without_skills_dir(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """skills ディレクトリが無くても失敗せず、skill 参照はすべてローカルに無いものとして警告すること。"""
+    _write_files(tmp_path, {"commands/build.md": "skills/clean/docs\nskills/other/docs\n"})
+
+    assert _run_commands(tmp_path) == 0
+    assert "2 件の警告" in capsys.readouterr().out
+
+
 def test_validate_commands_reports_errors_and_io_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
