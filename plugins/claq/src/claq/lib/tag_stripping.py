@@ -519,9 +519,6 @@ def strip_tags(text: str) -> str:
         既知タグ名の直前に生の ``<`` を含まないテキスト。前後の空白と
         3 つ以上連続する改行は詰める。秘密の分断を検出した場合は ``[REDACTED]``。
     """
-    if not text:
-        return text
-
     neutralized = _collapse_blank_lines(_neutralize(drop_known_tag_blocks(text)))
     if _hides_secret_behind_tags(neutralized):
         # 空文字列にはしない — 呼び出し側の `redact` を通しても `[REDACTED]` が残ることが、
