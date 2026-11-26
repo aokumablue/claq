@@ -8,7 +8,7 @@ from pathlib import Path
 from claq_dev.ci_common import (
     PLUGIN_ROOT,
     emit_error,
-    extract_frontmatter,
+    frontmatter_or_report,
     frontmatter_spelling_errors,
     parse_validator_args,
     read_or_report,
@@ -62,9 +62,8 @@ def _validate_skill_dir(directory: Path) -> bool:
         return True
     # agents と同じく frontmatter を必須にする。名前と説明が無い
     # SKILL.md はホストが登録できず、あるいは「いつ呼ぶか」を判断できない。
-    frontmatter = extract_frontmatter(content)
+    frontmatter = frontmatter_or_report(content, label)
     if frontmatter is None:
-        emit_error(f"{label} - フロントマターが無いか、解析できません")
         return True
     missing = [field for field in _REQUIRED_FRONTMATTER_FIELDS if not frontmatter.get(field)]
     if missing:

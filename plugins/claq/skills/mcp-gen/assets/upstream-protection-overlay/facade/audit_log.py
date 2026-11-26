@@ -38,8 +38,7 @@ class AuditLog:
         Returns:
             16 進数 32 文字の要約（同じ主体なら同じ値）。
         """
-        digest = hmac.new(self._key, principal.encode("utf-8", "surrogatepass"), hashlib.sha256)
-        return digest.hexdigest()[:32]
+        return hmac.new(self._key, principal.encode("utf-8", "surrogatepass"), hashlib.sha256).hexdigest()[:32]
 
     def personal_returned(self, tool: str, paths: Sequence[str], count: int, *, principal: Callable[[], str]) -> None:
         """個人情報（personal）の項目を返したことを残す（値は残さない）。

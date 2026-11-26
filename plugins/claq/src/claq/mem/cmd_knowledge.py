@@ -48,7 +48,7 @@ _SEARCH_FIELD_WEIGHTS: tuple[tuple[str, float], ...] = (
     ("domain", 1.0),
     ("body", 0.5),
 )
-"""検索語がどの項目に当たったかの重み。
+"""検索語がどの項目に当たったかの重み。名前は ``Knowledge`` の属性名で、`_match_score` が ``getattr`` で引く。
 
 ``title`` は人が書いた 1 行要約で、語が出るならそれが主題そのものなので最重量。
 ``key`` は title 由来のスラッグで意味は同じだが機械生成で語が落ちるため半減。
@@ -254,16 +254,8 @@ def _match_score(row: Knowledge, terms: tuple[str, ...]) -> float:
     Returns:
         一致の重み合計。1 語も当たらなければ 0.0。
     """
-    haystacks = {
-        "title": row.title.lower(),
-        "key": row.key.lower(),
-        "domain": (row.domain or "").lower(),
-        "body": row.body.lower(),
-    }
-    return sum(
-        (weight for term in terms for name, weight in _SEARCH_FIELD_WEIGHTS if term in haystacks[name]),
-        0.0,
-    )
+    haystacks = [((getattr(row, name) or "").lower(), weight) for name, weight in _SEARCH_FIELD_WEIGHTS]
+    return sum((weight for term in terms for haystack, weight in haystacks if term in haystack), 0.0)
 
 
 def _scaled_factor(value: float) -> float:

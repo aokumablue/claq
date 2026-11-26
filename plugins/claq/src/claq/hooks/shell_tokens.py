@@ -71,8 +71,7 @@ def normalize_executable_name(token: str) -> str:
     Returns:
         basename を大小無視へ畳み、末尾の `.exe` を除いた名前を返します。
     """
-    name = basename_any_separator(token).casefold()
-    return name[: -len(".exe")] if name.endswith(".exe") else name
+    return basename_any_separator(token).casefold().removesuffix(".exe")
 
 
 def is_shell_wrapper_token(token: str) -> bool:

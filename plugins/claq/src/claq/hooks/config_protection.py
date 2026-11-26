@@ -162,8 +162,14 @@ CONDITIONALLY_PROTECTED_FILES = frozenset({
 # `claq-hook`、`src/claq/` はフック本体で、書き換えると次のツール呼び出しから全保護フックが外れる。
 _RUNNING_PLUGIN_GUARDED_DIRS = ((RUNTIME_DIR_NAME,), ("src", "claq"))
 
+
+def _guarded_dir_display(segments: tuple[str, ...]) -> str:
+    """`_RUNNING_PLUGIN_GUARDED_DIRS` の要素列を、ブロック文言に出す表示名（``runtime/`` / ``src/claq/``）にする。"""
+    return "/".join(segments) + "/"
+
+
 # 上の表示名。`blocked_message_for_file` がブロック文言を選ぶ鍵（Edit/Write と Bash で共有）。
-RUNNING_PLUGIN_DISPLAY_NAMES = frozenset("/".join(segments) + "/" for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
+RUNNING_PLUGIN_DISPLAY_NAMES = frozenset(_guarded_dir_display(segments) for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
 # `cd` を含むコマンドで起動ファイルの basename に当たったときの表示名（`host_guard_targets` が返す）。
 RUNNING_PLUGIN_RUNTIME_DISPLAY = f"{RUNTIME_DIR_NAME}/"
 
@@ -335,23 +341,26 @@ def running_plugin_guarded_dir(resolved: Path, *, include_ancestors: bool) -> st
         開発用 checkout で保護しない場合は None。
     """
     target = fold_path_parts(resolved.parts)
-    for segments, guarded in _folded_running_plugin_guarded_dirs():
+    for display, guarded in _folded_running_plugin_guarded_dirs():
         if is_path_prefix(guarded, target) or (include_ancestors and is_path_prefix(target, guarded)):
-            return "/".join(segments) + "/" if running_plugin_root_is_guarded() else None
+            return display if running_plugin_root_is_guarded() else None
     return None
 
 
 @memoized_in_scan
-def _folded_running_plugin_guarded_dirs() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
-    """実行中の plugin root の保護ディレクトリを (要素列, 畳んだ実体パス) の組で返す。
+def _folded_running_plugin_guarded_dirs() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """実行中の plugin root の保護ディレクトリを (表示名, 畳んだ実体パス) の組で返す。
 
     書込み先トークンごとに畳み直さないよう、`scan_memo` の間は 1 回だけ作る。
 
     Returns:
-        `_RUNNING_PLUGIN_GUARDED_DIRS` の各要素と、plugin root に連ねて畳んだ要素列。
+        `_RUNNING_PLUGIN_GUARDED_DIRS` の各要素の表示名（``runtime/`` / ``src/claq/``）と、plugin root に連ねて畳んだ要素列。
     """
     root = _running_plugin_root()
-    return tuple((segments, fold_path_parts(root.joinpath(*segments).parts)) for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
+    return tuple(
+        (_guarded_dir_display(segments), fold_path_parts(root.joinpath(*segments).parts))
+        for segments in _RUNNING_PLUGIN_GUARDED_DIRS
+    )
 
 
 def _running_plugin_blocked_message(display_name: str) -> str:

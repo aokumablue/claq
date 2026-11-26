@@ -183,8 +183,7 @@ def _sanitize_structured(value: str) -> str:
     Returns:
         タグ・制御文字・改行・過剰な長さを落とした値。無害化の結果が空なら空文字列。
     """
-    cleaned = _neutralize(value)
-    return " ".join(cleaned.split())[:_STRUCTURED_VALUE_LIMIT]
+    return " ".join(_neutralize(value).split())[:_STRUCTURED_VALUE_LIMIT]
 
 
 def build_handoff(payload: dict[str, Any]) -> str:

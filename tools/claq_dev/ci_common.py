@@ -103,6 +103,14 @@ def extract_frontmatter(content: str) -> dict[str, object] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def frontmatter_or_report(content: str, label: str) -> dict[str, object] | None:
+    """frontmatter を辞書として返す。得られなければ ``label`` 付きのエラーを書き出して None を返す。"""
+    frontmatter = extract_frontmatter(content)
+    if frontmatter is None:
+        emit_error(f"{label} - フロントマターが無いか、解析できません")
+    return frontmatter
+
+
 def frontmatter_spelling_errors(label: str, frontmatter: dict[str, object], known_fields: frozenset[str]) -> Iterator[str]:
     """frontmatter のキーのうち、既知フィールドのハイフン／アンダースコア取り違えを返す。
 

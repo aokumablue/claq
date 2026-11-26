@@ -212,7 +212,7 @@ def _dev_root(root_dir: Path) -> Path:
     return root_dir.parents[1]
 
 
-def _coverage_gate_configured(dev_root: Path) -> bool:
+def _coverage_gate_configured(pyproject_toml: str) -> bool:
     """``[tool.coverage.report].fail_under`` がゲートとして機能する値（数値かつ 1 以上）かを判定する。
 
     部分文字列照合では ``fail_under = 0``（何も落とさない）もコメントアウトも
@@ -220,14 +220,14 @@ def _coverage_gate_configured(dev_root: Path) -> bool:
     ゲートはゲートとして機能しない」と同じく、字面ではなく有効な値を条件にする。
     ``bool`` を弾くのは ``isinstance(True, int)`` が True になるため
     （``fail_under = true`` は TOML としては通るが閾値ではない）。
+    TOML として読めない場合（`tomllib.TOMLDecodeError`）は False として扱う。
 
-    Raises:
-        UnicodeDecodeError: ``pyproject.toml`` が UTF-8 で読めない場合。
-            `safe_read` は `OSError` しか捕捉しないため素通りする。TOML として
-            読めないだけの場合（`tomllib.TOMLDecodeError`）は False として扱う。
+    Args:
+        pyproject_toml: `get_repo_checks` が 1 回だけ読んだ ``pyproject.toml`` の生テキスト
+            （`safe_read` の返り値なので、読めない・UTF-8 でない場合は空文字）。
     """
     try:
-        threshold: Any = tomllib.loads(safe_read(dev_root, "pyproject.toml"))
+        threshold: Any = tomllib.loads(pyproject_toml)
     except tomllib.TOMLDecodeError:
         return False
     for key in ("tool", "coverage", "report", "fail_under"):
@@ -262,38 +262,37 @@ def _declares_preflight_hook(hooks_json: str) -> bool:
 
 def _tool_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Tool Coverage カテゴリのチェックを返す。"""
-    category = TOOL_COVERAGE
     return [
         make_check(
-            check_id="tool-hooks-config", category=category, points=2, scopes=["repo", "hooks"],
+            check_id="tool-hooks-config", category=TOOL_COVERAGE, points=2, scopes=["repo", "hooks"],
             path="hooks/hooks.json",
             description="フック設定ファイルが存在する",
-            passed=file_has_content(root_dir, "hooks/hooks.json"),
+            passed=bool(hooks_json.strip()),
             fix="Create hooks/hooks.json and define baseline hook events.",
         ),
         make_check(
-            check_id="tool-hooks-manifest-consistent", category=category, points=2, scopes=["repo", "hooks"],
+            check_id="tool-hooks-manifest-consistent", category=TOOL_COVERAGE, points=2, scopes=["repo", "hooks"],
             path="hooks/hooks.json",
             description="hooks.json が参照する実装モジュールがすべて実在する（個数ではなく整合を見る）",
             passed=_hook_modules_resolve(root_dir, hooks_json),
             fix="Fix hooks.json entries that point at modules which do not exist under src/claq/hooks/.",
         ),
         make_check(
-            check_id="tool-agent-count", category=category, points=2, scopes=["repo", "agents"],
+            check_id="tool-agent-count", category=TOOL_COVERAGE, points=2, scopes=["repo", "agents"],
             path="agents/",
             description="エージェント定義の surface が失われていない（破損検知の下限。数は品質指標ではない — docs/adr/definition-and-subagent-design.md）",
             passed=count_files(root_dir, "agents", ".md") >= 5,
             fix="Restore agent definitions under agents/ if the surface was emptied. Do NOT split agents to raise this count.",
         ),
         make_check(
-            check_id="tool-skill-count", category=category, points=2, scopes=["repo", "skills"],
+            check_id="tool-skill-count", category=TOOL_COVERAGE, points=2, scopes=["repo", "skills"],
             path="skills/",
             description="スキル定義の surface が失われていない（破損検知の下限。数は品質指標ではない — docs/adr/definition-and-subagent-design.md）",
             passed=count_files(root_dir, "skills", "SKILL.md") >= 1,
             fix="Restore skill directories under skills/ if the surface was emptied. Do NOT split skills to raise this count.",
         ),
         make_check(
-            check_id="tool-manifest-surface-consistent", category=category, points=2, scopes=["repo", "commands"],
+            check_id="tool-manifest-surface-consistent", category=TOOL_COVERAGE, points=2, scopes=["repo", "commands"],
             path=".claude-plugin/plugin.json",
             description="manifest が宣言する surface とディスク上の実体が一致している",
             passed=_manifest_surfaces_resolve(root_dir),
@@ -304,17 +303,16 @@ def _tool_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
 
 def _context_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モードの Context Efficiency カテゴリのチェックを返す。"""
-    category = CONTEXT_EFFICIENCY
     return [
         make_check(
-            check_id="context-model-route", category=category, points=2, scopes=["repo", "commands"],
+            check_id="context-model-route", category=CONTEXT_EFFICIENCY, points=2, scopes=["repo", "commands"],
             path="commands/plan.md",
             description="モデルルーティングコマンドが存在する（タスク複雑度に応じたモデル選択）",
             passed=file_has_content(root_dir, "commands/plan.md"),
             fix="Add plan command guidance in commands/plan.md.",
         ),
         make_check(
-            check_id="context-always-on-budget", category=category, points=2, scopes=["repo"],
+            check_id="context-always-on-budget", category=CONTEXT_EFFICIENCY, points=2, scopes=["repo"],
             path="skills/, commands/, agents/",
             description=f"常時注入される frontmatter description の総量が予算内（{_ALWAYS_ON_DESCRIPTION_BUDGET_CHARS} 文字）",
             passed=always_on_description_chars(root_dir) <= _ALWAYS_ON_DESCRIPTION_BUDGET_CHARS,
@@ -323,29 +321,27 @@ def _context_checks(root_dir: Path) -> list[dict[str, Any]]:
     ]
 
 
-def _quality_checks(root_dir: Path) -> list[dict[str, Any]]:
+def _quality_checks(root_dir: Path, pyproject_toml: str) -> list[dict[str, Any]]:
     """repo モードの Quality Gates カテゴリのチェックを返す。"""
-    category = QUALITY_GATES
     dev_root = _dev_root(root_dir)
-    pyproject_toml = safe_read(dev_root, "pyproject.toml")
     validators_test = safe_read(dev_root, "tests/ci/test_validators.py")
     return [
         make_check(
-            check_id="quality-test-runner", category=category, points=3, scopes=["repo"],
+            check_id="quality-test-runner", category=QUALITY_GATES, points=3, scopes=["repo"],
             path="pyproject.toml",
             description="一元化されたテストランナー設定が存在する（pytest testpaths）",
             passed="[tool.pytest.ini_options]" in pyproject_toml and "testpaths" in pyproject_toml,
             fix="Add [tool.pytest.ini_options] with testpaths in pyproject.toml to enforce complete suite execution.",
         ),
         make_check(
-            check_id="quality-ci-validations", category=category, points=3, scopes=["repo"],
+            check_id="quality-ci-validations", category=QUALITY_GATES, points=3, scopes=["repo"],
             path="tests/ci/test_validators.py",
             description="検証(validate_*)チェーンが pytest 実行に組み込まれている",
             passed="validate_commands" in validators_test and "validate_agents" in validators_test,
             fix="Wire validate_*.py checks into tests/ci/test_validators.py so validation runs inside the standard pytest suite.",
         ),
         make_check(
-            check_id="quality-hook-tests", category=category, points=2, scopes=["repo", "hooks"],
+            check_id="quality-hook-tests", category=QUALITY_GATES, points=2, scopes=["repo", "hooks"],
             path="tests/hooks/test_hook_edge_cases.py",
             description="フックカバレッジテストファイルが存在する",
             passed=file_has_content(dev_root, "tests/hooks/test_hook_edge_cases.py"),
@@ -356,10 +352,9 @@ def _quality_checks(root_dir: Path) -> list[dict[str, Any]]:
 
 def _memory_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Memory Persistence カテゴリのチェックを返す。"""
-    category = MEMORY_PERSISTENCE
     return [
         make_check(
-            check_id="memory-hooks-lifecycle", category=category, points=4, scopes=["repo", "hooks"],
+            check_id="memory-hooks-lifecycle", category=MEMORY_PERSISTENCE, points=4, scopes=["repo", "hooks"],
             path="hooks/hooks.json",
             description="実際に使用されるメモリ永続化ライフサイクル定義が hooks/hooks.json に存在する",
             passed=_has_memory_lifecycle_hooks(hooks_json),
@@ -367,14 +362,14 @@ def _memory_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
             "hooks/hooks.json's SessionStart/SessionEnd events.",
         ),
         make_check(
-            check_id="memory-session-hooks", category=category, points=4, scopes=["repo", "hooks"],
+            check_id="memory-session-hooks", category=MEMORY_PERSISTENCE, points=4, scopes=["repo", "hooks"],
             path="src/claq/mem/cli.py",
             description="セッション永続化を担う mem CLI 実装が存在する",
             passed=file_has_content(root_dir, "src/claq/mem/cli.py"),
             fix="Implement src/claq/mem/cli.py for session persistence (context/handoff commands).",
         ),
         make_check(
-            check_id="memory-learning-skill", category=category, points=2, scopes=["repo", "skills"],
+            check_id="memory-learning-skill", category=MEMORY_PERSISTENCE, points=2, scopes=["repo", "skills"],
             path="skills/learn/SKILL.md",
             description="継続学習スキルが存在する（セッション観測→インスティンクト作成→スキル進化）",
             passed=file_has_content(root_dir, "skills/learn/SKILL.md"),
@@ -383,30 +378,29 @@ def _memory_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
     ]
 
 
-def _eval_checks(root_dir: Path) -> list[dict[str, Any]]:
+def _eval_checks(root_dir: Path, pyproject_toml: str) -> list[dict[str, Any]]:
     """repo モードの Eval Coverage カテゴリのチェックを返す。"""
-    category = EVAL_COVERAGE
     dev_root = _dev_root(root_dir)
     return [
         make_check(
-            check_id="eval-skill", category=category, points=4, scopes=["repo", "skills"],
+            check_id="eval-skill", category=EVAL_COVERAGE, points=4, scopes=["repo", "skills"],
             path="commands/harness.md",
             description="品質監査コマンドが存在する（ハーネス監査・スキル棚卸し・遵守率測定）",
             passed=file_has_content(root_dir, "commands/harness.md"),
             fix="Add commands/harness.md for quality audit evaluation.",
         ),
         make_check(
-            check_id="eval-commands", category=category, points=4, scopes=["repo", "commands"],
+            check_id="eval-commands", category=EVAL_COVERAGE, points=4, scopes=["repo", "commands"],
             path="commands/review.md",
             description="検証コマンドとプランコマンドが存在する",
             passed=file_has_content(root_dir, "commands/review.md") and file_has_content(root_dir, "commands/plan.md"),
             fix="Add commands/review.md and commands/plan.md to standardize verification loops.",
         ),
         make_check(
-            check_id="eval-tests-presence", category=category, points=2, scopes=["repo"],
+            check_id="eval-tests-presence", category=EVAL_COVERAGE, points=2, scopes=["repo"],
             path="tests/",
             description="カバレッジゲートが設定され、テスト surface が失われていない（数は品質指標ではない）",
-            passed=count_files(dev_root, "tests", ".py") >= 1 and _coverage_gate_configured(dev_root),
+            passed=count_files(dev_root, "tests", ".py") >= 1 and _coverage_gate_configured(pyproject_toml),
             fix="Keep tests/ populated and configure a coverage threshold (fail_under) in pyproject.toml.",
         ),
     ]
@@ -414,31 +408,30 @@ def _eval_checks(root_dir: Path) -> list[dict[str, Any]]:
 
 def _security_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
     """repo モードの Security Guardrails カテゴリのチェックを返す。"""
-    category = SECURITY_GUARDRAILS
     return [
         make_check(
-            check_id="security-review-skill", category=category, points=3, scopes=["repo", "skills"],
+            check_id="security-review-skill", category=SECURITY_GUARDRAILS, points=3, scopes=["repo", "skills"],
             path="skills/secure/SKILL.md",
             description="セキュリティレビュースキルが存在する（認証・入力処理・シークレット管理）",
             passed=file_has_content(root_dir, "skills/secure/SKILL.md"),
             fix="Add skills/secure/SKILL.md for security checklist coverage.",
         ),
         make_check(
-            check_id="security-agent", category=category, points=3, scopes=["repo", "agents"],
+            check_id="security-agent", category=SECURITY_GUARDRAILS, points=3, scopes=["repo", "agents"],
             path="agents/security-auditor.md",
             description="セキュリティレビューエージェントが存在する",
             passed=file_has_content(root_dir, "agents/security-auditor.md"),
             fix="Add agents/security-auditor.md for delegated security audits.",
         ),
         make_check(
-            check_id="security-prompt-hook", category=category, points=2, scopes=["repo", "hooks"],
+            check_id="security-prompt-hook", category=SECURITY_GUARDRAILS, points=2, scopes=["repo", "hooks"],
             path="hooks/hooks.json",
             description="フックにプロンプト送信・ツール実行時のセキュリティガードが含まれている",
             passed=_declares_preflight_hook(hooks_json),
             fix="Add prompt/tool preflight security guards in hooks/hooks.json.",
         ),
         make_check(
-            check_id="security-scan-command", category=category, points=2, scopes=["repo", "commands"],
+            check_id="security-scan-command", category=SECURITY_GUARDRAILS, points=2, scopes=["repo", "commands"],
             path="commands/review.md",
             description="セキュリティスキャンコマンドが存在する",
             passed=file_has_content(root_dir, "commands/review.md"),
@@ -449,17 +442,16 @@ def _security_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
 
 def _cost_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モードの Cost Efficiency カテゴリのチェックを返す。"""
-    category = COST_EFFICIENCY
     return [
         make_check(
-            check_id="cost-no-oversized-surface", category=category, points=3, scopes=["repo"],
+            check_id="cost-no-oversized-surface", category=COST_EFFICIENCY, points=3, scopes=["repo"],
             path="skills/, commands/",
             description=f"起動ごとに読まれる定義が 1 件も肥大化していない（各 {_ON_INVOKE_BUDGET_CHARS} 文字以内）",
             passed=not has_oversized_surface(root_dir),
             fix="Split or trim the oversized SKILL.md / command definitions; each is paid in full on every invocation.",
         ),
         make_check(
-            check_id="cost-model-route-command", category=category, points=3, scopes=["repo", "commands"],
+            check_id="cost-model-route-command", category=COST_EFFICIENCY, points=3, scopes=["repo", "commands"],
             path="commands/plan.md",
             description="モデルルーティングコマンドが存在する（複雑度に応じたモデル選択ポリシー）",
             passed=file_has_content(root_dir, "commands/plan.md"),
@@ -471,12 +463,13 @@ def _cost_checks(root_dir: Path) -> list[dict[str, Any]]:
 def get_repo_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モード向けのチェック定義を、カテゴリ順に連結して返す。"""
     hooks_json = safe_read(root_dir, "hooks/hooks.json")
+    pyproject_toml = safe_read(_dev_root(root_dir), "pyproject.toml")
     return [
         *_tool_checks(root_dir, hooks_json),
         *_context_checks(root_dir),
-        *_quality_checks(root_dir),
+        *_quality_checks(root_dir, pyproject_toml),
         *_memory_checks(root_dir, hooks_json),
-        *_eval_checks(root_dir),
+        *_eval_checks(root_dir, pyproject_toml),
         *_security_checks(root_dir, hooks_json),
         *_cost_checks(root_dir),
     ]

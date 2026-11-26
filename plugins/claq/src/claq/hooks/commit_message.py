@@ -112,22 +112,6 @@ def _commit_message_issues(subject: str) -> list[dict]:
     return issues
 
 
-def _short_cluster_message(token: str) -> str | None:
-    """短形式のトークン（``-m`` / ``-am`` / ``-mmsg``）から ``-m`` に結合した値を返す。
-
-    Args:
-        token: ``-`` 1 つで始まる引数トークン。
-
-    Returns:
-        ``m`` より後ろの文字列（``-m`` 単独や ``-am`` は空文字）。フラグ（`short_option_flags`）が
-        ``m`` で終わらない（``m`` が無い、または値を取る別の短形式が先に現れた）場合は None。
-    """
-    flags = short_option_flags(token)
-    if not flags.endswith("m"):
-        return None
-    return token[1 + len(flags) :]
-
-
 def _message_from_args(commit_args: list[str]) -> str | None:
     """commit の引数トークンから最初の ``-m`` / ``--message`` の値を取り出す。
 
@@ -149,9 +133,11 @@ def _message_from_args(commit_args: list[str]) -> str | None:
         if token.startswith("--message="):
             return token.removeprefix("--message=")
         if token.startswith("-") and not token.startswith("--"):
-            attached = _short_cluster_message(token)
-            if attached is not None:
-                return attached or next_token
+            # 短形式（``-m`` / ``-am`` / ``-mmsg``）は、フラグが ``m`` で終わるときだけ ``m`` より後ろが
+            # 値になる。``m`` が無い、または値を取る別の短形式が先に現れたフラグは ``-m`` ではない。
+            flags = short_option_flags(token)
+            if flags.endswith("m"):
+                return token[1 + len(flags) :] or next_token
     return None
 
 

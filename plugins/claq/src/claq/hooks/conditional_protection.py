@@ -231,9 +231,7 @@ def _text_has_protected_signal(text: str, file_name: str) -> bool:
         return any(key in text for key in _PACKAGE_JSON_LINT_KEYS)
     if folded_name == "tox.ini" and _TOX_COMMAND_KEY_PATTERN.search(text):
         return True
-    if any(header in text for header in _LINT_SECTION_HEADERS):
-        return True
-    return bool(_LINT_KEY_PATTERN.search(text))
+    return any(header in text for header in _LINT_SECTION_HEADERS) or bool(_LINT_KEY_PATTERN.search(text))
 
 
 def _conditional_blocked_message(file_name: str) -> str:

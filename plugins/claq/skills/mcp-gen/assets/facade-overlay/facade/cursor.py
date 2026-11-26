@@ -243,8 +243,7 @@ class PageCursor:
             FacadeError: 位置が形を満たさないか、cursor が上限を超えるとき（上流のページトークンが長すぎる）。
                 開けない cursor は返さない。
         """
-        payload = {"v": _VERSION, "pos": dict(position)}
-        body = encode_payload(payload)
+        body = encode_payload({"v": _VERSION, "pos": dict(position)})
         token = f"{body}.{self._check(body, fingerprint)}"
         if not self._accepts(token, position):
             raise FacadeError(PAGE_TOKEN_TOO_LONG)

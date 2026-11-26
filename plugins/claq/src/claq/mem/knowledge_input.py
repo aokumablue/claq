@@ -345,14 +345,13 @@ def parse_knowledge_payload(payload: dict[str, Any]) -> KnowledgeDraft:
     # `日本語` と `別` のような ASCII を含まない明示 key が同じ slug へ潰れ、
     # upsert で別の知識を黙って上書きする。
     key = slug_with_hash_fallback(redact_knowledge_text(raw_key), kind) if raw_key else generate_key(title, kind)
-    body = _allowed_text(payload.get("body"))
 
     return KnowledgeDraft(
         key=key,
         scope=scope,
         kind=kind,
         title=redact_knowledge_text(title),
-        body=redact_knowledge_text(body),
+        body=redact_knowledge_text(_allowed_text(payload.get("body"))),
         domain=_sanitized_optional(payload.get("domain")),
         confidence=coerce_confidence(payload.get("confidence")),
         source_ref=_sanitized_optional(payload.get("source_ref")),

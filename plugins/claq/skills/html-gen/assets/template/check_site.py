@@ -471,7 +471,11 @@ def _radius_lines(tokens: dict[str, Any]) -> list[str]:
     radius = tokens["radius"]
     lines = [f'  --radius: {radius["base_rem"]}rem;']
     for name, delta in radius["steps"].items():
-        value = "var(--radius)" if delta == 0 else f"calc(var(--radius) {'+' if delta > 0 else '-'} {abs(delta)}px)"
+        if delta == 0:
+            value = "var(--radius)"
+        else:
+            sign = "+" if delta > 0 else "-"
+            value = f"calc(var(--radius) {sign} {abs(delta)}px)"
         lines.append(f"  --radius-{name}: {value};")
     return lines
 

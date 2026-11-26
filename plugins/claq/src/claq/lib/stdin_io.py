@@ -63,40 +63,21 @@ def _stdin_is_absent() -> bool:
         return False
 
 
-def _stdin_chunk_reader(stdin_buffer: Any) -> Any:
-    """ワーカースレッドが使う「n バイト読む」関数を返す。
-
-    ``os.read()`` で読む。``read1()`` は BufferedReader のロックを保持したままブロックするため、
-    本スレッドがタイムアウトで先に進むと、終了時の stdin 後始末がロックを取れず
-    ``Fatal Python error: _enter_buffered_busy`` で abort し、deny の exit code 2 が失われる。
-
-    Args:
-        stdin_buffer: 読み取り対象のバイナリストリーム（``sys.stdin.buffer``）。
-
-    Returns:
-        ``reader(n) -> bytes`` の callable。
-
-    Raises:
-        StdinUnavailableError: fd を取れない（閉じた stdin など）場合。
-    """
-    try:
-        fd = stdin_buffer.fileno()
-    except (OSError, ValueError) as exc:
-        raise StdinUnavailableError(f"stdin の読み取りに失敗しました: {exc}") from exc
-    return lambda size: os.read(fd, size)
-
-
-def _pump_stdin(reader: Any, max_bytes: int, sink: queue.Queue) -> None:
+def _pump_stdin(fd: int, max_bytes: int, sink: queue.Queue) -> None:
     """stdin をチャンク単位で読み、結果を `sink` へ流す（ワーカースレッド本体）。
 
     ``select.select`` は使わない。Windows では通常のパイプに ``OSError`` を投げ、
     それを「入力なし」と読むと保護 hook が許可側へ抜ける。ブロッキング read を
     ワーカースレッドへ隔離し、呼び出し側が queue のタイムアウトで待つ形にすると、
     3 プラットフォームで同一のロジックになる。各チャンクは ``n`` バイト揃うまで
-    待たない読み方で読み、書き手が途中で止まってもデッドライン判定へ戻れるようにする。
+    待たない ``os.read()`` で読み、書き手が途中で止まってもデッドライン判定へ戻れるようにする。
+
+    ``read1()`` は使わない。BufferedReader のロックを保持したままブロックするため、
+    本スレッドがタイムアウトで先に進むと、終了時の stdin 後始末がロックを取れず
+    ``Fatal Python error: _enter_buffered_busy`` で abort し、deny の exit code 2 が失われる。
 
     Args:
-        reader: ``reader(n) -> bytes`` の読み取り関数（`_stdin_chunk_reader`）。
+        fd: 読み取り対象の stdin のファイルディスクリプタ。
         max_bytes: 読み取る最大バイト数。
         sink: ``("data", bytes)`` / ``("error", Exception)`` を受け取るキュー。
 
@@ -106,7 +87,7 @@ def _pump_stdin(reader: Any, max_bytes: int, sink: queue.Queue) -> None:
     collected = 0
     try:
         while collected < max_bytes:
-            chunk = reader(min(STDIN_CHUNK_BYTES, max_bytes - collected))
+            chunk = os.read(fd, min(STDIN_CHUNK_BYTES, max_bytes - collected))
             sink.put(("data", chunk))
             if not chunk:
                 return
@@ -134,10 +115,12 @@ def _read_stdin_bytes(max_bytes: int) -> bytes:
         StdinUnavailableError: fd を取れない、または 1 バイトも受け取れないまま、読み取りが
             例外化したか最初のバイトが時間内に届かなかった場合。
     """
+    try:
+        fd = sys.stdin.buffer.fileno()
+    except (OSError, ValueError) as exc:
+        raise StdinUnavailableError(f"stdin の読み取りに失敗しました: {exc}") from exc
     sink: queue.Queue = queue.Queue()
-    threading.Thread(
-        target=_pump_stdin, args=(_stdin_chunk_reader(sys.stdin.buffer), max_bytes, sink), daemon=True
-    ).start()
+    threading.Thread(target=_pump_stdin, args=(fd, max_bytes, sink), daemon=True).start()
 
     # bytes の `+=` は毎回全体を複製し、チャンクが細かいとき上限 1 MB まで二次になるため bytearray に溜める。
     collected = bytearray()

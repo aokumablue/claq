@@ -185,8 +185,6 @@ def normalize_user_message(text: str) -> str:
     Returns:
         依頼本文。足場しか含まれていない、または細工が検出された場合は空文字列。
     """
-    if not text:
-        return text
     stripped = _drop_scaffold_blocks(text)
     if stripped is None:
         return ""
