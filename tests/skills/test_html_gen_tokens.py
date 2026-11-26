@@ -162,6 +162,15 @@ def test_series_colors_share_hues_across_themes() -> None:
     assert check_site.parse_oklch(dark["--chart-1"])[0] == TOKENS["series"]["dark_lightness"]
 
 
+def test_resolved_hex_composites_sidebar_border_on_background_without_sidebar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--sidebar`` の無いスキームでは ``--sidebar-border`` を ``--background`` へ合成すること。"""
+    raw = check_site.scheme(TOKENS, "neutral", "dark")
+    del raw["--sidebar"]
+    monkeypatch.setattr(check_site, "scheme", lambda *_: raw)
+    colors = check_site.resolved_hex(TOKENS, "neutral", "dark")
+    assert colors["--sidebar-border"] == check_site.oklch_to_hex(raw["--sidebar-border"], raw["--background"])
+
+
 def test_resolved_hex_flattens_translucent_borders() -> None:
     """半透明の border は下地に合成された hex で返る。"""
     colors = check_site.resolved_hex(TOKENS, "neutral", "dark")

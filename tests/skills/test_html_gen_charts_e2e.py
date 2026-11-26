@@ -436,6 +436,13 @@ def test_css_length_returns_none_for_missing_declarations() -> None:
     assert check_site._css_length(".chart{color:red}", ".chart", "min-inline-size") is None
 
 
+def test_min_render_width_reports_broken_base_width_even_when_modifier_declares_one() -> None:
+    """修飾クラスが最小幅を宣言していても、読めない ``.chart`` の値は例外として伝えること。"""
+    css = ".chart{min-inline-size:1.2.3px} .chart--wide{min-inline-size:640px}"
+    with pytest.raises(ValueError):
+        check_site._min_render_width(css, ["chart", "chart--wide"])
+
+
 @pytest.mark.parametrize(
     ("html", "reported"),
     [
