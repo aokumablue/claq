@@ -162,8 +162,14 @@ CONDITIONALLY_PROTECTED_FILES = frozenset({
 # `claq-hook`、`src/claq/` はフック本体で、書き換えると次のツール呼び出しから全保護フックが外れる。
 _RUNNING_PLUGIN_GUARDED_DIRS = ((RUNTIME_DIR_NAME,), ("src", "claq"))
 
+
+def _guarded_dir_display(segments: tuple[str, ...]) -> str:
+    """`_RUNNING_PLUGIN_GUARDED_DIRS` の要素列を、ブロック文言に出す表示名（``runtime/`` / ``src/claq/``）にする。"""
+    return "/".join(segments) + "/"
+
+
 # 上の表示名。`blocked_message_for_file` がブロック文言を選ぶ鍵（Edit/Write と Bash で共有）。
-RUNNING_PLUGIN_DISPLAY_NAMES = frozenset("/".join(segments) + "/" for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
+RUNNING_PLUGIN_DISPLAY_NAMES = frozenset(_guarded_dir_display(segments) for segments in _RUNNING_PLUGIN_GUARDED_DIRS)
 # `cd` を含むコマンドで起動ファイルの basename に当たったときの表示名（`host_guard_targets` が返す）。
 RUNNING_PLUGIN_RUNTIME_DISPLAY = f"{RUNTIME_DIR_NAME}/"
 
@@ -352,7 +358,8 @@ def _folded_running_plugin_guarded_dirs() -> tuple[tuple[str, tuple[str, ...]], 
     """
     root = _running_plugin_root()
     return tuple(
-        ("/".join(segments) + "/", fold_path_parts(root.joinpath(*segments).parts)) for segments in _RUNNING_PLUGIN_GUARDED_DIRS
+        (_guarded_dir_display(segments), fold_path_parts(root.joinpath(*segments).parts))
+        for segments in _RUNNING_PLUGIN_GUARDED_DIRS
     )
 
 

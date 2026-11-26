@@ -129,6 +129,7 @@ def _is_link_to(link: Path, target: Path) -> bool:
 def _clear_existing(link: Path) -> bool:
     """``link`` の既存物（symlink・ファイル・空ディレクトリ）を片付ける。
 
+    何も無ければ何もしない（``unlink(missing_ok=True)`` がこの経路を担う）。
     触ってはいけない（空でないディレクトリ。launcher を含むものもここに入る）なら False。
     """
     if link.is_symlink() or not link.is_dir():

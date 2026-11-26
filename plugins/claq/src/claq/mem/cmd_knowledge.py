@@ -48,7 +48,7 @@ _SEARCH_FIELD_WEIGHTS: tuple[tuple[str, float], ...] = (
     ("domain", 1.0),
     ("body", 0.5),
 )
-"""検索語がどの項目に当たったかの重み。
+"""検索語がどの項目に当たったかの重み。名前は ``Knowledge`` の属性名で、`_match_score` が ``getattr`` で引く。
 
 ``title`` は人が書いた 1 行要約で、語が出るならそれが主題そのものなので最重量。
 ``key`` は title 由来のスラッグで意味は同じだが機械生成で語が落ちるため半減。

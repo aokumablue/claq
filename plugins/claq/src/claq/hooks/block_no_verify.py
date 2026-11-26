@@ -441,7 +441,7 @@ class _GitScan:
             return True
         word = self._word[start]
         subcommand = self._segment[word] if word is not None else None
-        if subcommand == "config" and self._is_sensitive_config_mutation(start, word):
+        if word is not None and subcommand == "config" and self._is_sensitive_config_mutation(start, word):
             return True
         if not self._short_n[start]:
             return False
