@@ -143,10 +143,10 @@ def count_files(root_dir: Path, relative_dir: str, extension: str | None) -> int
 
 
 def safe_read(root_dir: Path, relative_path: str) -> str:
-    """読めなければ空文字を返す読み込み。"""
+    """読めなければ（存在しない・UTF-8 でない）空文字を返す読み込み。"""
     try:
         return (root_dir / relative_path).read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return ""
 
 

@@ -29,6 +29,7 @@ def test_safe_helpers_and_counting(tmp_path: Path) -> None:
     assert not harness_audit.file_has_content(tmp_path, "dir")
     assert harness_audit.safe_read(tmp_path, "dir/a.js") == "a\n"
     assert harness_audit.safe_read(tmp_path, "missing.txt") == ""
+    assert harness_audit.safe_read(tmp_path, "binary.bin") == ""
     assert harness_audit.count_files(tmp_path, "dir", ".js") == 2
     assert harness_audit.count_files(tmp_path, "missing", ".js") == 0
     assert harness_audit.has_file_with_extension(tmp_path, "dir", [".js"])
