@@ -7,7 +7,7 @@ from pathlib import Path
 from claq_dev.ci_common import (
     PLUGIN_ROOT,
     emit_error,
-    extract_frontmatter,
+    frontmatter_or_report,
     list_markdown_files,
     parse_validator_args,
     read_or_report,
@@ -22,9 +22,8 @@ def _validate_agent_file(file_path: Path) -> bool:
     content = read_or_report(file_path, file_path.name)
     if content is None:
         return True
-    frontmatter = extract_frontmatter(content)
+    frontmatter = frontmatter_or_report(content, file_path.name)
     if frontmatter is None:
-        emit_error(f"{file_path.name} - フロントマターが無いか、解析できません")
         return True
     for key in ("name", "description"):
         if not frontmatter.get(key):
