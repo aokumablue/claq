@@ -69,7 +69,9 @@ _PATCH_FILE_MARKERS = ("*** Add File: ", "*** Update File: ", "*** Delete File: 
 # 保護フックが例外で exit 1（= PreToolUse の non-blocking error。ツールはそのまま
 # 実行される）へ倒れ、fail-open になる。パース失敗として扱えば生文字列が返り、
 # 以降のトークナイザ検査（fail-closed 側）に載る。
-JSON_PARSE_FAILURES = (json.JSONDecodeError, TypeError, RecursionError)
+# ``ValueError`` で受けるのも同じ理由。4300 桁を超える整数は ``JSONDecodeError`` ではなく
+# 素の ``ValueError`` になる（``JSONDecodeError`` は ``ValueError`` の派生なので両方を受ける）。
+JSON_PARSE_FAILURES = (ValueError, TypeError, RecursionError)
 
 
 def extract_tool_input(payload: dict[str, Any]) -> Any:

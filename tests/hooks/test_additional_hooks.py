@@ -338,12 +338,13 @@ _NESTED = "[" * 200_000 + "]" * 200_000
         ('{"tool_name":"Bash","tool_input":' + _NESTED + "}", {2}),
         # バイパスフラグを載せた形は tool_input 側の実コマンドが検査され deny される（toolArgs は生文字列に倒れる）。
         (json.dumps({"tool_name": "Bash", "tool_input": {"command": f"git commit {NV} -m x"}, "toolArgs": _NESTED}), {2}),
+        # 4300 桁を超える整数は json.loads が素の ValueError を送出する。外側で受ければ判定不能なので deny。
+        ('{"tool_name":"Bash","tool_input":{"command":"echo hi"},"n":1' + "0" * 5000 + "}", {2}),
     ],
-    ids=["nested-inside-json-string", "nested-in-outer-payload", "nested-with-bypass-flag"],
+    ids=["nested-inside-json-string", "nested-in-outer-payload", "nested-with-bypass-flag", "huge-int-in-outer-payload"],
 )
 def test_deep_nesting_does_not_fail_open(monkeypatch: pytest.MonkeyPatch, payload: str, expected_codes: set[int]) -> None:
-    """深さ 200,000 の入れ子（1 MiB の内側の 400KB 超）でも exit 1（PreToolUse の non-blocking error = fail-open）へ倒れないこと。"""
-    assert len(payload) > 400_000
+    """解析できない JSON（深さ 200,000 の入れ子・桁上限を超える整数）でも exit 1（PreToolUse の non-blocking error = fail-open）へ倒れないこと。"""
     monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False))
 
     assert block_no_verify.main() in expected_codes
