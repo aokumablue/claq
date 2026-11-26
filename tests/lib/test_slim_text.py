@@ -20,9 +20,12 @@ from claq.lib import slim_text
         ("# heading", 200, "heading"),
         ("- item", 200, "item"),
         ("1. numbered", 200, "numbered"),
+        ("  -   item  ", 200, "item"),
+        ("#   heading", 200, "heading"),
+        ("2)  x", 200, "x"),
     ],
     ids=["wording-kept", "trimmed", "empty", "whitespace-only", "fence", "fence-lang", "table",
-         "heading", "bullet", "numbered"],
+         "heading", "bullet", "numbered", "bullet-padded", "heading-padded", "numbered-padded"],
 )
 def test_compact_line(text: str, max_length: int, expected: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """空白を畳みマークダウンの行頭記号を落とし、長すぎれば切って ``...`` を付ける。言い回しと句読点は変えない。フェンスと表の行は空になる。"""

@@ -399,7 +399,7 @@ def _sanitize_untrusted_excerpt(text: str) -> str:
     """ファイル由来の抜粋を deny 出力へ載せる前に無害化する。
 
     抜粋は攻撃者が内容を選べるファイル本文で、deny 時に stderr 経由でモデルの
-    コンテキストへ入る。パスと同じ `sanitize_untrusted_path` で無害化し（許可リスト→タグ→改行畳み）、
+    コンテキストへ入る。パスと同じ `sanitize_untrusted_path` で無害化し、
     パスと違って長さにも上限を置く（`mem` の注入経路と同じ扱い）。
 
     Args:
