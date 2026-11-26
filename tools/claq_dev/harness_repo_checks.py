@@ -212,7 +212,7 @@ def _dev_root(root_dir: Path) -> Path:
     return root_dir.parents[1]
 
 
-def _coverage_gate_configured(dev_root: Path) -> bool:
+def _coverage_gate_configured(pyproject_toml: str) -> bool:
     """``[tool.coverage.report].fail_under`` がゲートとして機能する値（数値かつ 1 以上）かを判定する。
 
     部分文字列照合では ``fail_under = 0``（何も落とさない）もコメントアウトも
@@ -220,14 +220,14 @@ def _coverage_gate_configured(dev_root: Path) -> bool:
     ゲートはゲートとして機能しない」と同じく、字面ではなく有効な値を条件にする。
     ``bool`` を弾くのは ``isinstance(True, int)`` が True になるため
     （``fail_under = true`` は TOML としては通るが閾値ではない）。
+    TOML として読めない場合（`tomllib.TOMLDecodeError`）は False として扱う。
 
-    Raises:
-        UnicodeDecodeError: ``pyproject.toml`` が UTF-8 で読めない場合。
-            `safe_read` は `OSError` しか捕捉しないため素通りする。TOML として
-            読めないだけの場合（`tomllib.TOMLDecodeError`）は False として扱う。
+    Args:
+        pyproject_toml: `get_repo_checks` が 1 回だけ読んだ ``pyproject.toml`` の生テキスト
+            （`safe_read` の返り値なので、読めない・UTF-8 でない場合は空文字）。
     """
     try:
-        threshold: Any = tomllib.loads(safe_read(dev_root, "pyproject.toml"))
+        threshold: Any = tomllib.loads(pyproject_toml)
     except tomllib.TOMLDecodeError:
         return False
     for key in ("tool", "coverage", "report", "fail_under"):
@@ -267,7 +267,7 @@ def _tool_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
             check_id="tool-hooks-config", category=TOOL_COVERAGE, points=2, scopes=["repo", "hooks"],
             path="hooks/hooks.json",
             description="フック設定ファイルが存在する",
-            passed=file_has_content(root_dir, "hooks/hooks.json"),
+            passed=bool(hooks_json.strip()),
             fix="Create hooks/hooks.json and define baseline hook events.",
         ),
         make_check(
@@ -321,10 +321,9 @@ def _context_checks(root_dir: Path) -> list[dict[str, Any]]:
     ]
 
 
-def _quality_checks(root_dir: Path) -> list[dict[str, Any]]:
+def _quality_checks(root_dir: Path, pyproject_toml: str) -> list[dict[str, Any]]:
     """repo モードの Quality Gates カテゴリのチェックを返す。"""
     dev_root = _dev_root(root_dir)
-    pyproject_toml = safe_read(dev_root, "pyproject.toml")
     validators_test = safe_read(dev_root, "tests/ci/test_validators.py")
     return [
         make_check(
@@ -379,7 +378,7 @@ def _memory_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
     ]
 
 
-def _eval_checks(root_dir: Path) -> list[dict[str, Any]]:
+def _eval_checks(root_dir: Path, pyproject_toml: str) -> list[dict[str, Any]]:
     """repo モードの Eval Coverage カテゴリのチェックを返す。"""
     dev_root = _dev_root(root_dir)
     return [
@@ -401,7 +400,7 @@ def _eval_checks(root_dir: Path) -> list[dict[str, Any]]:
             check_id="eval-tests-presence", category=EVAL_COVERAGE, points=2, scopes=["repo"],
             path="tests/",
             description="カバレッジゲートが設定され、テスト surface が失われていない（数は品質指標ではない）",
-            passed=count_files(dev_root, "tests", ".py") >= 1 and _coverage_gate_configured(dev_root),
+            passed=count_files(dev_root, "tests", ".py") >= 1 and _coverage_gate_configured(pyproject_toml),
             fix="Keep tests/ populated and configure a coverage threshold (fail_under) in pyproject.toml.",
         ),
     ]
@@ -464,12 +463,13 @@ def _cost_checks(root_dir: Path) -> list[dict[str, Any]]:
 def get_repo_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モード向けのチェック定義を、カテゴリ順に連結して返す。"""
     hooks_json = safe_read(root_dir, "hooks/hooks.json")
+    pyproject_toml = safe_read(_dev_root(root_dir), "pyproject.toml")
     return [
         *_tool_checks(root_dir, hooks_json),
         *_context_checks(root_dir),
-        *_quality_checks(root_dir),
+        *_quality_checks(root_dir, pyproject_toml),
         *_memory_checks(root_dir, hooks_json),
-        *_eval_checks(root_dir),
+        *_eval_checks(root_dir, pyproject_toml),
         *_security_checks(root_dir, hooks_json),
         *_cost_checks(root_dir),
     ]
