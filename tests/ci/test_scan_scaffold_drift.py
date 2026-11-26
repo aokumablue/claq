@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS
+from claq.lib.scaffold import COMMAND_TAGS, SCAFFOLD_TAGS
 from claq.lib.tag_stripping import STRIPPED_TAGS
 from claq_dev import scan_scaffold_drift as scanner
 
