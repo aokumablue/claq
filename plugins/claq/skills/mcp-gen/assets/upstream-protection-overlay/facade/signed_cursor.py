@@ -84,8 +84,7 @@ class CursorCodec:
         Returns:
             カーソル文字列。
         """
-        payload = {"v": _VERSION, "pos": dict(position), "exp": int(self._clock()) + self._ttl_seconds}
-        body = encode_payload(payload)
+        body = encode_payload({"v": _VERSION, "pos": dict(position), "exp": int(self._clock()) + self._ttl_seconds})
         return f"{body}.{self._sign(body, scope=scope, principal=principal, fingerprint=fingerprint)}"
 
     def open(self, token: str, *, scope: str, principal: str, fingerprint: str) -> dict[str, Any]:
