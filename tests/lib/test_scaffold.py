@@ -1,4 +1,4 @@
-"""claq.lib.harness.normalize_user_message のテスト。
+"""claq.lib.scaffold.normalize_user_message のテスト。
 
 足場タグの除去、コマンド起動の畳み込み、記憶ブロックとの併用、
 病的入力に対する線形時間性、別エージェント配信の扱いを検査する。
@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from claq.lib import harness
+from claq.lib import scaffold
 from claq.lib.tag_stripping import strip_tags
 
 _SCAFFOLD_TAGS = (
@@ -72,7 +72,7 @@ _SCAFFOLD_TAGS = (
 )
 def test_scaffold_is_dropped_or_message_discarded(text: str) -> None:
     """足場ブロックは中身ごと除去し、孤立した足場タグが残ればメッセージごと破棄する。"""
-    assert harness.normalize_user_message(text) == ""
+    assert scaffold.normalize_user_message(text) == ""
 
 
 @pytest.mark.parametrize(
@@ -90,7 +90,7 @@ def test_scaffold_is_dropped_or_message_discarded(text: str) -> None:
 )
 def test_non_scaffold_text_survives_verbatim(text: str) -> None:
     """足場でない文字列は逐語で残る（全メッセージを空にする退化実装を落とす偽陽性方向）。"""
-    assert harness.normalize_user_message(text) == text
+    assert scaffold.normalize_user_message(text) == text
 
 
 _LONG_BODY = (
@@ -172,7 +172,7 @@ _LONG_BODY = (
 )
 def test_request_and_command_folding(text: str, expected: str) -> None:
     """足場を落とした残りの依頼を保ち、コマンド起動を /name args へ畳む。"""
-    assert harness.normalize_user_message(text) == expected
+    assert scaffold.normalize_user_message(text) == expected
 
 
 @pytest.mark.parametrize(
@@ -192,7 +192,7 @@ def test_request_and_command_folding(text: str, expected: str) -> None:
 )
 def test_drop_scaffold_blocks_detects_orphan(text: str) -> None:
     """除去後に孤立タグが残る入力は破棄（None）へ倒れる。"""
-    assert harness._drop_scaffold_blocks(text) is None
+    assert scaffold._drop_scaffold_blocks(text) is None
 
 
 @pytest.mark.parametrize(
@@ -216,7 +216,7 @@ def test_drop_scaffold_blocks_detects_orphan(text: str) -> None:
 )
 def test_memory_block_echo_does_not_displace_request(raw: str, expected: str) -> None:
     """記憶ブロック内のコマンドエコーが実依頼を押し退けない。"""
-    assert strip_tags(harness.normalize_user_message(raw)) == expected
+    assert strip_tags(scaffold.normalize_user_message(raw)) == expected
 
 
 def test_other_agents_instructions_do_not_survive() -> None:
@@ -232,7 +232,7 @@ def test_other_agents_instructions_do_not_survive() -> None:
         "</agent-message>"
     )
 
-    result = strip_tags(harness.normalize_user_message(raw))
+    result = strip_tags(scaffold.normalize_user_message(raw))
 
     assert "修正せよ" not in result
     assert "触れるな" not in result
@@ -273,7 +273,7 @@ class TestScaffoldRemovalStaysLinear:
         text = payload * self._PATHOLOGICAL_REPEATS
 
         started = time.monotonic()
-        harness.normalize_user_message(text)
+        scaffold.normalize_user_message(text)
         elapsed = time.monotonic() - started
 
         assert elapsed < self._BUDGET_SECONDS, f"{len(text)} 文字で {elapsed:.2f} 秒（複雑度クラスの退行）"

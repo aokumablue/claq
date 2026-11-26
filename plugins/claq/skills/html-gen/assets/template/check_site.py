@@ -327,8 +327,10 @@ def scheme(tokens: dict[str, Any], base_id: str, theme: str) -> dict[str, str]:
 def resolved_hex(tokens: dict[str, Any], base_id: str, theme: str) -> dict[str, str]:
     """スキームを、半透明を下地へ合成した実効 hex に落とす。"""
     raw = scheme(tokens, base_id, theme)
-    backdrops = {"--border": "--background", "--input": "--background", "--sidebar-border": "--sidebar"}
-    return {name: oklch_to_hex(value, raw[backdrops.get(name, "--background")]) for name, value in raw.items()}
+    backdrops = {"--sidebar-border": "--sidebar"}
+    # ``--background`` は常に要る。``--sidebar`` が無いスキームでは ``--sidebar-border`` も ``--background`` へ合成する。
+    background = raw["--background"]
+    return {name: oklch_to_hex(value, raw.get(backdrops.get(name, ""), background)) for name, value in raw.items()}
 
 
 def color_var_names(tokens: dict[str, Any]) -> tuple[str, ...]:
@@ -1497,10 +1499,12 @@ def _min_render_width(css: str, class_names: list[str]) -> float | None:
     Returns:
         ``min-inline-size`` の px 値。どこにも宣言が無ければ None
     """
+    # 修飾クラスが宣言を持っていても、壊れた ``.chart`` の値は例外として呼び出し元へ伝えるため先に読む。
+    base_width = _css_length(css, ".chart", "min-inline-size")
     for name in class_names:
         if name.startswith("chart--") and (width := _css_length(css, f".{name}", "min-inline-size")):
             return width
-    return _css_length(css, ".chart", "min-inline-size")
+    return base_width
 
 
 def _axis_text_scale_violations(index: int, svg: str, css: str, declared: float) -> list[str]:

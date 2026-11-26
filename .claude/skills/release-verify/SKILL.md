@@ -211,7 +211,7 @@ mtime は判定に使わない（WAL のチェックポイントは読み取り�
 
 ### scan_scaffold_drift（足場タグ denylist の陳腐化検知）
 
-`tools/claq_dev/scan_scaffold_drift.py` は、`lib/harness.py` の `SCAFFOLD_TAGS` から漏れた新しい足場タグを実 transcript から検知する。
+`tools/claq_dev/scan_scaffold_drift.py` は、`lib/scaffold.py` の `SCAFFOLD_TAGS` から漏れた新しい足場タグを実 transcript から検知する。
 コンポーネントのインベントリとは別の単位で、コンポーネント数には加えない。
 
 ```bash

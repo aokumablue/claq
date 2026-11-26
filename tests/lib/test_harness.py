@@ -383,3 +383,25 @@ class TestDeepNestingIsParseFailureNotCrash:
         text = self._DEEP_JSON_TEXT
         assert harness.extract_tool_input({"toolArgs": text}) == text
         assert harness._extract_patch_text("{" + text + "}") == "{" + text + "}"
+
+
+class TestHugeIntegerIsParseFailureNotCrash:
+    """桁上限を超える整数の JSON が例外で貫通しないこと。
+
+    CPython の JSON デコーダは 4300 桁を超える整数に ``JSONDecodeError`` ではなく素の
+    ``ValueError`` を送出する。取りこぼすと深いネストと同じく保護フックが exit 1 へ倒れる。
+    """
+
+    _HUGE_INT_TEXT = '{"a": 1' + "0" * 5000 + "}"
+
+    def test_huge_integer_actually_raises_plain_value_error(self) -> None:
+        """前提の実測: この入力は json.loads が JSONDecodeError でない ValueError を投げる。"""
+        with pytest.raises(ValueError) as excinfo:
+            json.loads(self._HUGE_INT_TEXT)
+        assert not isinstance(excinfo.value, json.JSONDecodeError)
+
+    def test_both_json_loads_call_sites_return_raw_string(self) -> None:
+        """`extract_tool_input` と `_extract_patch_text` の両方が生文字列を返す。"""
+        text = self._HUGE_INT_TEXT
+        assert harness.extract_tool_input({"toolArgs": text}) == text
+        assert harness._extract_patch_text(text) == text

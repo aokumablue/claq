@@ -302,7 +302,7 @@ class TestScaffoldTagsAreNeutralizedButNotRemoved:
 
     注入側 ``mem/cmd_context._handoff_section`` は ``strip_tags`` しか掛けないため、
     語彙に無い足場タグは ``<claq-memory>`` ブロックの内側へ生のまま入る。
-    中身ごと除去する規則（``lib/harness``）との合流は docs/adr/untrusted-input-prompt-boundary.md が却下している
+    中身ごと除去する規則（``lib/scaffold``）との合流は docs/adr/untrusted-input-prompt-boundary.md が却下している
     が、却下理由は「中身を残すべき用途と捨てるべき用途の同居」であり、escape は
     どちらの用途でも中身を残すためこの衝突が起きない。
     """

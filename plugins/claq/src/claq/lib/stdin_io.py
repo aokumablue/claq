@@ -252,8 +252,9 @@ def parse_json_object(raw: str) -> dict[str, Any] | None:
     """JSON 文字列を辞書としてパースします。
 
     パース不能は ``JSON_PARSE_FAILURES`` で一括して受ける。``json.JSONDecodeError``
-    だけだと、深いネストで送出される ``RecursionError`` が貫通して保護フックが
-    exit 1（PreToolUse では non-blocking error ＝ ツールが実行される）へ倒れる。
+    だけだと、深いネストで送出される ``RecursionError`` や桁上限を超える整数の
+    ``ValueError`` が貫通して保護フックが exit 1（PreToolUse では non-blocking error ＝
+    ツールが実行される）へ倒れる。
     None は呼び出し元で「判定不能 → deny」として扱われる fail-closed 側の値。
 
     Args:

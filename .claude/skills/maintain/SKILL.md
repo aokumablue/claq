@@ -77,7 +77,7 @@ baseline を取る（リポジトリ直下の `.venv` を有効化する）。
   - 保護を弱める変更は、自リポジトリでの実測（実 payload の exit code）でしか正当化しない
 
 囲いを偽装するタグ・区切りを含む本文は、除去できなければ丸ごと捨てる（fail closed）。
-対象のタグ集合は `src/claq/lib/harness.py` の `SCAFFOLD_TAGS` を正とし、ここに複製しない（複製すると片方だけ古くなる）。
+対象のタグ集合は `src/claq/lib/scaffold.py` の `SCAFFOLD_TAGS` を正とし、ここに複製しない（複製すると片方だけ古くなる）。
 
 ## ステップ2: レビュー（READ-ONLY・並列）
 
@@ -153,7 +153,7 @@ python3 -m claq_dev.scan_scaffold_drift
 
 exit 1（未知の足場タグを検出）は、次の 3 択から判断して振り分ける。
 
-1. ホストが生成した足場 → `lib/harness.py` の `SCAFFOLD_TAGS` へ追加
+1. ホストが生成した足場 → `lib/scaffold.py` の `SCAFFOLD_TAGS` へ追加
 2. 依頼本文に現れる良性の HTML タグ → `tools/claq_dev/scan_scaffold_drift.py` の `BENIGN_TAGS` へ追加
 3. どちらでもない（依頼本文がコード片として引用しただけ等）→ コードスパンの除去で落ちるはずなので、落ちないなら除去側の穴
 

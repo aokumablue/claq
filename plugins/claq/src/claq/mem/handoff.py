@@ -30,9 +30,9 @@ from claq.lib.harness import (
     extract_raw_tool_name,
     extract_tool_input,
     normalize_tool_name,
-    normalize_user_message,
 )
 from claq.lib.redaction import PLACEHOLDER, redact
+from claq.lib.scaffold import normalize_user_message
 from claq.lib.slim_text import TRUNCATION_MARKER, compact_line
 from claq.lib.stdin_io import parse_json_object
 from claq.lib.tag_stripping import keep_allowed_chars, strip_tags

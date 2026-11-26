@@ -1,6 +1,6 @@
 """実 transcript を走査し、足場タグ denylist から漏れたタグを検出する診断。
 
-``lib/harness.py`` の ``SCAFFOLD_TAGS`` は denylist であり、列挙漏れは「素通り」
+``lib/scaffold.py`` の ``SCAFFOLD_TAGS`` は denylist であり、列挙漏れは「素通り」
 として現れる。ホストが新しい足場タグを追加しても、テストも CI も緑のまま
 引き継ぎがノイズで埋まる（docs/adr/untrusted-input-prompt-boundary.md の残存リスク筆頭）。
 
@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from claq.lib.core_utils import log, read_tail_text
-from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, normalize_user_message
+from claq.lib.scaffold import COMMAND_TAGS, SCAFFOLD_TAGS, normalize_user_message
 from claq.lib.tag_stripping import STRIPPED_TAGS, drop_known_tag_blocks
 from claq.mem.handoff import (
     TRANSCRIPT_MAX_BYTES,
@@ -252,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, files in counts.most_common(_REPORT_LIMIT):
         log(f"  {name}: {files} ファイル")
     log(
-        "足場なら lib/harness.py の SCAFFOLD_TAGS へ、依頼本文に現れる良性タグなら"
+        "足場なら lib/scaffold.py の SCAFFOLD_TAGS へ、依頼本文に現れる良性タグなら"
         " tools/claq_dev/scan_scaffold_drift.py の BENIGN_TAGS へ追加してください。"
     )
     return EXIT_DRIFT

@@ -49,7 +49,7 @@
     文字を消す変換を置かない（消した前後が接着して生きたタグに戻る）。
 
 なお ``<system-reminder>`` 等のハーネス足場タグを**中身ごと除去する**規則は今も
-本モジュールの管轄外である（``lib/harness.normalize_user_message`` が担う。
+本モジュールの管轄外である（``lib/scaffold.normalize_user_message`` が担う。
 docs/adr/untrusted-input-prompt-boundary.md が「中身を残すべき用途と捨てるべき用途を
 同じ関数に同居させない」と定めている）。escape の語彙にだけ足場タグを含めるのはこの
 合流に当たらない — escape はどちらの用途でも中身を残すのでこの衝突が起きない。実際に
@@ -74,8 +74,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from claq.lib.harness import COMMAND_TAGS, SCAFFOLD_TAGS, TAG_NAME_END, tag_block_pattern
 from claq.lib.redaction import PLACEHOLDER, redact
+from claq.lib.scaffold import COMMAND_TAGS, SCAFFOLD_TAGS, TAG_NAME_END, tag_block_pattern
 
 # 無害化対象タグ（大文字小文字区別なし）。正規表現へ literal として埋めるため、
 # 正規表現メタ文字を含まない名前だけを置く。
@@ -133,7 +133,7 @@ _ERASE_PATTERN = re.compile(
 
 # escape 対象のタグ語彙。ペア除去（`STRIPPED_TAGS`）より広く、ハーネス足場タグと
 # スラッシュコマンド起動タグを含める。**`_PAIR_PATTERNS` は決してこの語彙へ
-# 広げない** — 中身を捨てる規則は `lib/harness` の管轄で、合流は docs/adr/untrusted-input-prompt-boundary.md が
+# 広げない** — 中身を捨てる規則は `lib/scaffold` の管轄で、合流は docs/adr/untrusted-input-prompt-boundary.md が
 # 却下している。escape はどちらの用途でも中身を残すため衝突しない。
 # 値は各定義モジュールから導出する（写経すると片方だけ更新されて穴が開く）。
 _NEUTRALIZE_TAGS = (*STRIPPED_TAGS, *SCAFFOLD_TAGS, *COMMAND_TAGS)

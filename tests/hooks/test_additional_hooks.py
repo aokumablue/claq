@@ -349,6 +349,14 @@ def test_deep_nesting_does_not_fail_open(monkeypatch: pytest.MonkeyPatch, payloa
     assert block_no_verify.main() in expected_codes
 
 
+def test_huge_integer_in_outer_payload_is_denied(monkeypatch: pytest.MonkeyPatch) -> None:
+    """4300 桁を超える整数で json.loads が素の ValueError を送出しても、判定不能として deny すること。"""
+    payload = '{"tool_name":"Bash","tool_input":{"command":"echo hi"},"n":1' + "0" * 5000 + "}"
+    monkeypatch.setattr(block_no_verify, "read_raw_stdin_with_truncation", lambda: (payload, False))
+
+    assert block_no_verify.main() == 2
+
+
 @pytest.mark.parametrize(
     ("command", "blocked"),
     [
