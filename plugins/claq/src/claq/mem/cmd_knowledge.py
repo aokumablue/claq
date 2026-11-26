@@ -254,16 +254,8 @@ def _match_score(row: Knowledge, terms: tuple[str, ...]) -> float:
     Returns:
         一致の重み合計。1 語も当たらなければ 0.0。
     """
-    haystacks = {
-        "title": row.title.lower(),
-        "key": row.key.lower(),
-        "domain": (row.domain or "").lower(),
-        "body": row.body.lower(),
-    }
-    return sum(
-        (weight for term in terms for name, weight in _SEARCH_FIELD_WEIGHTS if term in haystacks[name]),
-        0.0,
-    )
+    haystacks = [((getattr(row, name) or "").lower(), weight) for name, weight in _SEARCH_FIELD_WEIGHTS]
+    return sum((weight for term in terms for haystack, weight in haystacks if term in haystack), 0.0)
 
 
 def _scaled_factor(value: float) -> float:
