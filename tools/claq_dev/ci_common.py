@@ -70,6 +70,13 @@ def list_markdown_files(directory: Path) -> list[Path]:
     return [entry for entry in directory.iterdir() if entry.is_file() and entry.name.endswith(".md")]
 
 
+def list_subdirectories(directory: Path) -> list[Path]:
+    """ディレクトリ直下のサブディレクトリを返す。ディレクトリが無ければ空リスト。"""
+    if not directory.exists():
+        return []
+    return [entry for entry in directory.iterdir() if entry.is_dir()]
+
+
 def read_json(file_path: str | Path) -> Any:
     """JSON を読み取り、パースエラーをファイル名付きの ValueError に正規化する。"""
     path = Path(file_path)
