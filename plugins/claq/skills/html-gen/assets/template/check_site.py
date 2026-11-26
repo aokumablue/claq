@@ -245,7 +245,7 @@ def oklch_to_hex(value: str, backdrop: str | None = None) -> str:
             raise ValueError(f"半透明色の合成先が無い: {value}")
         base = oklch_to_linear_rgb(*parse_oklch(backdrop)[:3])
         channels = tuple(alpha * top + (1 - alpha) * under for top, under in zip(channels, base, strict=True))
-    body = "".join(f"{round(_clamp_unit(_to_srgb(_clamp_unit(channel))) * 255):02X}" for channel in channels)
+    body = "".join(f"{round(_to_srgb(_clamp_unit(channel)) * 255):02X}" for channel in channels)
     return f"#{body}"
 
 
@@ -327,10 +327,12 @@ def scheme(tokens: dict[str, Any], base_id: str, theme: str) -> dict[str, str]:
 def resolved_hex(tokens: dict[str, Any], base_id: str, theme: str) -> dict[str, str]:
     """スキームを、半透明を下地へ合成した実効 hex に落とす。"""
     raw = scheme(tokens, base_id, theme)
-    backdrops = {"--sidebar-border": "--sidebar"}
     # ``--background`` は常に要る。``--sidebar`` が無いスキームでは ``--sidebar-border`` も ``--background`` へ合成する。
     background = raw["--background"]
-    return {name: oklch_to_hex(value, raw.get(backdrops.get(name, ""), background)) for name, value in raw.items()}
+    sidebar = raw.get("--sidebar", background)
+    return {
+        name: oklch_to_hex(value, sidebar if name == "--sidebar-border" else background) for name, value in raw.items()
+    }
 
 
 def color_var_names(tokens: dict[str, Any]) -> tuple[str, ...]:
