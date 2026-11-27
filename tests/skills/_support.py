@@ -63,6 +63,15 @@ def _violations(dest: Path) -> str:
     return "\n".join(check_site.validate_site(dest))
 
 
+def _assert_reported(violations: list[str], needle: str | None) -> None:
+    """needle が None なら違反 0 件、そうでなければ違反のどれかに needle が出ることを確かめる。"""
+    if needle is None:
+        assert violations == [], violations
+    else:
+        # このモジュールは pytest の assert 書き換えの対象外なので、探した語をメッセージに残す
+        assert needle in "\n".join(violations), f"{needle!r} が違反に無い: {violations}"
+
+
 def _edit(dest: Path, filename: str, *replacements: tuple[str, str]) -> str:
     """サイト内のファイルを置換して書き戻し、違反を 1 本の文字列で返す（置換元が無ければ空振りなので落とす）。"""
     path = dest / filename

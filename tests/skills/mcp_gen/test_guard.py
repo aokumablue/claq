@@ -224,8 +224,7 @@ class TestInstalledGuard:
 
     def test_rejects_unknown_argument_before_handler(self, guard: types.ModuleType) -> None:
         """未知の引数は後続へ渡さずに拒否する。"""
-        params = {"name": "orders_search", "arguments": {"stauts": "open"}}
-        outcome, calls = self._run(guard, "tools/call", params, {"content": []})
+        outcome, calls = self._run(guard, "tools/call", _tool_call("orders_search", {"stauts": "open"}), {"content": []})
         assert calls == []
         assert outcome["isError"] is True
 

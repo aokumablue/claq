@@ -42,6 +42,10 @@ _PROTECTION_DISABLED_KEY = "claqProtectionDisabled"
 # stdin（ツール入力 JSON）を読み、exit code も自由に決められる。
 _HIJACK_MARKER = "CLAQ-HIJACKED"
 _HIJACK_BODY = f'printf "{_HIJACK_MARKER}\\n"\nexit 0'
+# 3.12+ probe（`-c`）に通り、起動されたら選ばれた名前と launcher のパスを出す python。
+_RECENT_PYTHON = 'if [ "$1" = "-c" ]; then exit 0; fi\nprintf "python:%s\\n" "$1"'
+# Windows の Store の App execution alias の代わり。Python を動かさず 9009 で終わる。
+_STORE_STUB = 'printf "STORE-STUB\\n"\nexit 9009'
 
 
 def _stub_dir(parent: Path, name: str, **stubs: str) -> Path:
@@ -188,7 +192,7 @@ def test_wrapper_prefers_python3_on_path(tmp_path: Path, with_python: bool) -> N
 
 def test_wrapper_falls_back_to_python_when_recent_enough(tmp_path: Path) -> None:
     """python3 が無く python が 3.12+ なら python で起動する。"""
-    bin_dir = _stub_dir(tmp_path, "bin", python='if [ "$1" = "-c" ]; then exit 0; fi\nprintf "python:%s\\n" "$1"')
+    bin_dir = _stub_dir(tmp_path, "bin", python=_RECENT_PYTHON)
 
     result = _run_wrapper(_env(tmp_path, str(bin_dir)))
 
@@ -203,9 +207,8 @@ def test_wrapper_drops_store_alias_directory_from_path(tmp_path: Path, dirname: 
     Git Bash では Store の App execution alias（python3 / python）が PATH に並ぶ。スタブは
     Python を動かさず exit 9009 で終わるので、採ると保護が診断無しで外れる。
     """
-    stub = 'printf "STORE-STUB\\n"\nexit 9009'
-    store = _stub_dir(tmp_path / "AppData" / "Local" / "Microsoft", dirname, python3=stub, python=stub)
-    real = _stub_dir(tmp_path, "bin", python='if [ "$1" = "-c" ]; then exit 0; fi\nprintf "python:%s\\n" "$1"')
+    store = _stub_dir(tmp_path / "AppData" / "Local" / "Microsoft", dirname, python3=_STORE_STUB, python=_STORE_STUB)
+    real = _stub_dir(tmp_path, "bin", python=_RECENT_PYTHON)
 
     result = _run_wrapper(_env(tmp_path, f"{store}:{real}"))
 
@@ -216,8 +219,7 @@ def test_wrapper_drops_store_alias_directory_from_path(tmp_path: Path, dirname: 
 
 def test_wrapper_reports_python_not_found_when_only_store_stubs_exist(tmp_path: Path) -> None:
     """Store のスタブしか無ければ、9009 で黙って落ちずに診断付きで fail-open すること。"""
-    stub = 'printf "STORE-STUB\\n"\nexit 9009'
-    store = _stub_dir(tmp_path / "AppData" / "Local" / "Microsoft", "WindowsApps", python3=stub, python=stub)
+    store = _stub_dir(tmp_path / "AppData" / "Local" / "Microsoft", "WindowsApps", python3=_STORE_STUB, python=_STORE_STUB)
 
     result = _run_wrapper(_env(tmp_path, f"{store}:{_stub_dir(tmp_path, 'empty-bin')}"))
 

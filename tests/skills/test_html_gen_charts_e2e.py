@@ -10,7 +10,20 @@ from pathlib import Path
 
 import pytest
 
-from ._support import _SKILL_DIR, BASES, BLOCKS, CSS, E2E_JS, HTML, JS, TOKENS, _copy_site, _edit, check_site
+from ._support import (
+    _SKILL_DIR,
+    BASES,
+    BLOCKS,
+    CSS,
+    E2E_JS,
+    HTML,
+    JS,
+    TOKENS,
+    _assert_reported,
+    _copy_site,
+    _edit,
+    check_site,
+)
 
 
 def _chart_svg(marker: str) -> str:
@@ -184,8 +197,7 @@ _OVERLAID = (
 )
 def test_time_series_hit_areas_must_reach_every_point_on_the_line(svg: str, needle: str | None) -> None:
     """線の時点より当たり判定が少ない時系列は違反になる（横軸のラベルで数えていたため、年の行を置いた正しい図が落ち、ラベルを間引いた図の間引きを見逃していた）。"""
-    violations = check_site._validate_time_point_hits(svg)
-    assert (needle in "\n".join(violations)) if needle else violations == [], violations
+    _assert_reported(check_site._validate_time_point_hits(svg), needle)
 
 
 @pytest.mark.parametrize(
@@ -378,8 +390,7 @@ def test_stretched_svg_with_text_is_reported() -> None:
 )
 def test_chart_form_rules_are_enforced(svg: str, needle: str | None) -> None:
     """数えれば決まる種別規則 3 つ（ドーナツの分類数・棒 1 本・縦棒の分類数）がそれぞれ違反になる。"""
-    violations = check_site._validate_chart_form(svg)
-    assert (needle in "\n".join(violations)) if needle else violations == [], violations
+    _assert_reported(check_site._validate_chart_form(svg), needle)
 
 
 def test_bar_orientation_is_read_from_dimensions() -> None:
@@ -426,8 +437,7 @@ _AXIS_CSS = ".axis-text{font-size:15px}.chart{min-inline-size:600px}"
 )
 def test_axis_text_rendered_scale_is_checked(svg: str, css: str, needle: str | None) -> None:
     """目盛り文字の描画時の大きさは、宣言・viewBox・class・最小幅が揃った図でだけ計算し、宣言が読めないか大きく伸びれば違反にする。"""
-    violations = check_site._validate_axis_text_scale(svg, css)
-    assert (needle in "\n".join(violations)) if needle else violations == [], violations
+    _assert_reported(check_site._validate_axis_text_scale(svg, css), needle)
 
 
 def test_css_length_returns_none_for_missing_declarations() -> None:
@@ -490,8 +500,7 @@ def _ticks(**axes: tuple[str, ...]) -> str:
 )
 def test_tick_steps_must_be_even_nice_numbers_per_axis(svg: str, needle: str | None) -> None:
     """値の目盛りは軸（揃え）ごとに等間隔で、刻みが 1・2・5 の倍数でなければ違反になる。"""
-    violations = check_site._validate_tick_steps(svg)
-    assert (needle in "\n".join(violations)) if needle else violations == [], violations
+    _assert_reported(check_site._validate_tick_steps(svg), needle)
 
 
 def test_nice_step_rejects_non_decade_mantissas() -> None:
