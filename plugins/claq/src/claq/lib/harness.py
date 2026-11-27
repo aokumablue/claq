@@ -235,7 +235,7 @@ def is_known_tool_outside(tool_name: str, scope: frozenset[str]) -> bool:
     return normalized not in scope and normalized in _IDENTIFIABLE_TOOL_NAMES
 
 
-def _extract_patch_text(tool_input: dict | str | None) -> str | None:
+def _extract_patch_text(tool_input: dict | list | str | None) -> str | None:
     """入力から構造化パッチ本文候補を取り出す。
 
     Copilot CLI では生のパッチ文字列、他ハーネスでは {"input": "..."} のような dict、
@@ -293,7 +293,7 @@ def _path_strings(value: Any) -> list[str] | None:
     return _concat_or_none(_path_strings(item) for item in value)
 
 
-def extract_file_paths(tool_name: str, tool_input: dict | str | None) -> list[str] | None:
+def extract_file_paths(tool_name: str, tool_input: dict | list | str | None) -> list[str] | None:
     """ツール入力から操作対象のファイルパス一覧を抽出する。
 
     Edit/Write/MultiEdit は file_path フィールド（旧名 ``file`` も同義）を使う。
