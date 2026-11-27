@@ -488,3 +488,17 @@ def test_unclosed_keyframes_do_not_stall_the_check() -> None:
 def test_block_without_a_selector_is_reported_instead_of_crashing() -> None:
     """セレクタが空白だけのブロックでも検査が落ちず、違反として報告する。"""
     assert ["(セレクタなし)" in violation for violation in check_site._validate_resting_state("\n{ animation: a 1s both; }")] == [True]
+
+
+def test_csp_parser_skips_empty_directives() -> None:
+    """末尾の `;` や `;;` が作る空の指令を読み飛ばし、残りの指令を小文字の名前と値の集合で返す。"""
+    assert check_site._parse_csp("Default-Src 'self';; script-src 'self' data: ; ") == {
+        "default-src": {"'self'"},
+        "script-src": {"'self'", "data:"},
+    }
+
+
+@pytest.mark.parametrize("missing", ["light", "dark"])
+def test_app_script_must_handle_both_themes(missing: str) -> None:
+    """app.js がテーマ名の片方でも扱わなくなったら、light/dark を扱っていない違反として報告する。"""
+    assert check_site._validate_js(JS.replace(missing, "x")) == ["app.js が light/dark を扱っていない"]
