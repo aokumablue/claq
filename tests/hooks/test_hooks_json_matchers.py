@@ -35,14 +35,13 @@ no-op になるが、その手前で Python プロセスが 1 つ起動する分
 
 from __future__ import annotations
 
-import json
 import re
 
 import pytest
 
 from claq.lib.harness import _TOOL_NAME_MAP, normalize_tool_name
 
-from ._support import HOOKS_JSON, _run
+from ._support import _declared_hooks, _run
 
 # 全ツールを表す特別値。正規表現として評価されないためアンカー化しない。
 WILDCARD_MATCHER = "*"
@@ -65,8 +64,7 @@ ANCHORED_MATCHER_RE = re.compile(r"^\^\((?P<alternatives>[^()]+)\)\$$")
 
 def _iter_entries() -> list[tuple[str, dict]]:
     """hooks.json の (イベント名, matcher エントリ) のリストを返す。"""
-    hooks = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
-    return [(event, entry) for event, entries in hooks.items() for entry in entries]
+    return [(event, entry) for event, entries in _declared_hooks().items() for entry in entries]
 
 
 def _tool_gated_entries() -> list[tuple[str, str, frozenset[str]]]:
@@ -123,10 +121,9 @@ def test_pre_tool_use_hooks_continue_on_failure() -> None:
     フックの失敗が、未設定のままだとツール呼び出しを止める。環境の故障は fail-open に倒す
     （docs/adr/hook-failure-direction.md）。
     """
-    hooks = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
     missing = [
         hook["command"]
-        for entry in hooks["PreToolUse"]
+        for entry in _declared_hooks()["PreToolUse"]
         for hook in entry["hooks"]
         if hook.get("onFailure") != "continue"
     ]

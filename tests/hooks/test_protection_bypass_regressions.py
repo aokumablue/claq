@@ -720,7 +720,6 @@ def test_heredoc_after_a_hash_inside_a_word_keeps_its_data_body_out_of_the_scan(
         # 閉じクォートの直後の ``#`` は語の一部。コメントと読むと行の残りのクォートを読み落とす。
         pytest.param("echo 'a\nb'#x '\ncat <<EOF '\n{run}\nEOF", id="single-quote-closed-on-a-later-line"),
         pytest.param("echo \"a\nb\"#'\ncat <<EOF\n'; {run}\nEOF", id="double-quote-closed-on-a-later-line"),
-        # 語の途中の行継続の次行の ``#`` も語の一部。
         # 読めない区切り語の本物の本文を、演算子として読み直さない。
         pytest.param('cat <<E"O"F\ncat <<B\nEOF\n{run}\nB', id="operator-inside-the-real-body"),
         pytest.param('cat <<E"O"F <<A\ncat <<B\nEOF\nA\n{run}\nB', id="unreadable-next-to-a-readable-delimiter"),
@@ -730,21 +729,14 @@ def test_heredoc_after_a_hash_inside_a_word_keeps_its_data_body_out_of_the_scan(
         pytest.param("cat a\\\n#<<EOF\n{run}\nEOF", id="line-start-comment-in-the-windows-reading"),
         # 区切り語に ``\`` が入ると、シェルの区切り語と読み違えるか、残した終端行が次行と連結する。
         pytest.param("cat <<'E\\'\nE\\\n{run}", id="backslash-in-single-quoted-delimiter"),
-        # 残した終端行の引用符が、後ろの実行行を引用へ飲み込む。
         # 本文を実行する形の行は読み飛ばさないので、その本文の ``<<`` を演算子と読み直さない。
         pytest.param("bash <<'X'\ncat <<'Y'\nX\n{run}\nY", id="operator-inside-an-executed-body"),
         pytest.param("cat <<'X' |\ncat <<'Y'\nX\n{run}\nY", id="operator-inside-a-piped-body"),
         # 本文を実行するシェルが演算子行の外にある。
         pytest.param("cat <<'EOF' | # c\n{run}\nEOF\nbash", id="pipe-followed-by-a-comment"),
         pytest.param("cat <<'EOF' | {\n{run}\nEOF\nbash; }", id="pipe-into-a-group"),
-        # 算術の ``<<`` は heredoc ではない。
-        # クォートが行をまたぐ演算子行は、本文の開始位置を確定できない。
-        # 未クォートの区切り語の本文は ``\`` + 改行で連結する。
         # 読めない heredoc の本文に残った引用符が、後ろの実行行を引用へ飲み込む。
         pytest.param("cat <<E\"O\"F\ndon't\nEOF\n{run}", id="apostrophe-in-a-kept-body"),
-        # ``|`` の後ろの空行・コメント行はパイプラインを切らない。
-        # heredoc と同じトップレベルの文にあるシェル・本文実行ビルトイン・``exec`` は、パイプ・グループ・
-        # 複合コマンドの stdin・プロセス置換を経て本文を受け取りうる。
     ],
 )
 class TestHeredocScanKeepsExecutedLines:

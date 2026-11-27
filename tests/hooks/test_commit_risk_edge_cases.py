@@ -67,17 +67,16 @@ def test_parse_git_commit_command(command: str, expected: tuple[bool, list[str]]
 @pytest.mark.parametrize(
     ("commit_args", "expected"),
     [
-        (["-a", "-m", "x"], True),
-        (["--all", "-m", "x"], True),
-        (["-am", "x"], True),
-        (["-qam", "x"], True),
-        (_MX, False),
-        (["--amend", *_MX], False),
-        (["-mfix: add x"], False),
-        (["-Cmain"], False),
-        (["-uall", *_MX], False),
+        pytest.param(["-a", "-m", "x"], True, id="short"),
+        pytest.param(["--all", "-m", "x"], True, id="long"),
+        pytest.param(["-am", "x"], True, id="combined"),
+        pytest.param(["-qam", "x"], True, id="combined-before-message"),
+        pytest.param(_MX, False, id="without-all"),
+        pytest.param(["--amend", *_MX], False, id="amend"),
+        pytest.param(["-mfix: add x"], False, id="attached-message"),
+        pytest.param(["-Cmain"], False, id="attached-commit"),
+        pytest.param(["-uall", *_MX], False, id="attached-mode"),
     ],
-    ids=["short", "long", "combined", "combined-before-message", "without-all", "amend", "attached-message", "attached-commit", "attached-mode"],
 )
 def test_is_commit_all_flag(commit_args: list[str], expected: bool) -> None:
     """-a / --all / -am のような結合短形式だけを -a 相当と判定すること。
@@ -90,8 +89,11 @@ def test_is_commit_all_flag(commit_args: list[str], expected: bool) -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["(printf x)>app.py;git commit -m x", "true;(rm app.py);git commit -am x", "printf x <>app.py && git commit -m x"],
-    ids=["paren-redirect", "semicolon-paren", "read-write-open"],
+    [
+        pytest.param("(printf x)>app.py;git commit -m x", id="paren-redirect"),
+        pytest.param("true;(rm app.py);git commit -am x", id="semicolon-paren"),
+        pytest.param("printf x <>app.py && git commit -m x", id="read-write-open"),
+    ],
 )
 def test_compound_commit_risk_sees_glued_operator_runs(command: str) -> None:
     """`shlex` が記号の連なりを 1 語にしても、commit 前の変更を見落とさない。"""
