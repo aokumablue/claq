@@ -92,7 +92,7 @@ cp /abs/skill/html-gen/references/tokens.json /abs/path/to/dest/tokens.json
 
 サイドバーと一覧は、結線済みの仕組みへ載せるだけにする（`check_site.py` が外れを落とす）。
 
-- サイドバーの項目は `<a class="nav-item" href="#id">` で、飛び先の節に同じ `id` を付ける。`<button>` にしない
+- サイドバーの項目は `<a class="nav-item" href="#id">` で、飛び先の節に同じ `id` を付ける（`<button>` にしない）
   - 飛び先の無い項目は置かない（項目を増やすなら節も増やす）
   - 現在地・狭い画面で閉じる動作・スクロール位置の追従は `app.js` が担う
 - 一覧の `<table>` には `data-list` を付け、`<thead>` と `<tbody>` を持たせる

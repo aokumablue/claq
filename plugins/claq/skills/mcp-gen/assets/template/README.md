@@ -21,8 +21,7 @@
 uv venv && source .venv/bin/activate && uv pip install -e .
 ```
 
-1 つのサーバに 1 つの venv を使う。
-このサーバはトップレベルに `server`・`guard`・`transport` などの汎用の名前のモジュールを置くため、同じ venv に別のサーバを入れると名前が衝突する。
+1 つのサーバに 1 つの venv を使う（トップレベルに `server`・`guard`・`transport` などの汎用の名前のモジュールを置くため、同じ venv に別のサーバを入れると名前が衝突する）。
 
 以降のコマンドは**すべて `mcp` が入った interpreter の絶対パス**（以下 `$PY`）で実行する。
 `smoke_check.py` はサーバを `sys.executable` で起動するため、裸の `python3` で呼ぶとサーバ側だけが `ModuleNotFoundError` で死ぬ。

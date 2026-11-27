@@ -54,7 +54,7 @@ cp /abs/skill/mcp-gen/assets/upstream-protection-overlay/facade/audit_log.py /ab
 | `merge_same_requests=True` | 共有のリモート | 値は無い |
 
 渡した `UPSTREAM_BURST`・`UPSTREAM_CONCURRENCY`・`PRINCIPAL_CONCURRENCY` が、smoke_check.py が 1 回の起動で送るツール呼び出しの数を下回ると、smoke が `Throttled` で落ちる。
-そのときも定数は契約の値のままにし、smoke の失敗として報告する。
+smoke が落ちても定数は契約の値のままにし、smoke の失敗として報告する。
 
 ```python
 from facade.limits import ConcurrencyLimit, UpstreamPolicy, UpstreamQuota
