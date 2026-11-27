@@ -2,7 +2,7 @@
 
 ツール名の別名解決、JSON 文字列コンテナの解釈、Bash コマンドの取り出し、
 入力コンテナ・ファイルパスの抽出、深いネストの JSON の扱いを検査する。
-ユーザーメッセージの正規化は test_harness_user_message.py が検査する。
+ユーザーメッセージの正規化（claq.lib.scaffold）は test_scaffold.py が検査する。
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from claq.hooks import bash_config_protection, block_no_verify, config_protectio
 from claq.lib import harness
 
 _NO_VERIFY = "git commit --no-verify"
-_PATCH_ADD_UPDATE = "*** Begin Patch\n*** Add File: new.py\n+x = 1\n*** Update File: mod.py\n@@\n*** End Patch"
 
 
 @pytest.mark.parametrize(
@@ -327,7 +326,10 @@ def test_extract_raw_tool_name(payload: dict, expected: str) -> None:
             "edit", "*** Update File: model.json\n@@\n-old\n+new\n", ["model.json"], id="mismatched-name-raw-patch"
         ),
         pytest.param(
-            "unknown-harness-tool", {"input": _PATCH_ADD_UPDATE}, ["new.py", "mod.py"], id="mismatched-name-dict-patch"
+            "unknown-harness-tool",
+            {"input": "*** Begin Patch\n*** Add File: new.py\n+x = 1\n*** Update File: mod.py\n@@\n*** End Patch"},
+            ["new.py", "mod.py"],
+            id="mismatched-name-dict-patch",
         ),
         pytest.param(
             "Edit",

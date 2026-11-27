@@ -12,7 +12,7 @@ from claq.mem import cmd_knowledge, command_support
 from claq.mem.database import Database
 from claq.mem.models import Knowledge
 
-from ._support import _all_knowledge, _repo_id, _run_cli, _seed
+from ._support import _all_knowledge, _make_knowledge, _repo_id, _run_cli, _seed
 
 # learn の自己承認拒否テストが共有する、それ自体は正当な payload。
 _OBSERVED = {"scope": "global", "kind": "fact", "title": "observed"}
@@ -374,24 +374,9 @@ class TestScoring:
     _NOW = datetime(2026, 8, 9, tzinfo=UTC)
 
     def _card(self, **overrides: object) -> Knowledge:
-        """採点用の Knowledge を組み立てる。"""
-        fields: dict = {
-            "key": "k",
-            "scope": "global",
-            "kind": "fact",
-            "title": "title",
-            "source": "agent",
-            "status": "active",
-            "repo_id": None,
-            "body": "",
-            "domain": None,
-            "confidence": 0.5,
-            "source_ref": None,
-            "created_at": self._NOW.isoformat(),
-            "updated_at": self._NOW.isoformat(),
-        }
-        fields.update(overrides)
-        return Knowledge(**fields)
+        """採点用の Knowledge を組み立てる（作成・更新時刻は _NOW、既定の title・key・domain は検索語に当たらない）。"""
+        now = self._NOW.isoformat()
+        return _make_knowledge(**{"created_at": now, "updated_at": now, **overrides})
 
     @pytest.mark.parametrize(
         ("overrides", "terms", "expected"),

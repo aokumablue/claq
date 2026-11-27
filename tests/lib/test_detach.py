@@ -17,6 +17,8 @@ import pytest
 from claq.lib import detach
 from claq.lib.detach import detach_process
 
+from ._support import _failing, _raise
+
 
 @pytest.fixture(autouse=True)
 def _home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -25,17 +27,12 @@ def _home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("CLAQ_HOME", raising=False)
 
 
-def _raise_oserror(*args: object, **kwargs: object) -> None:
-    """注入した OSError を送出する。"""
-    raise OSError("injected")
-
-
 def test_unreadable_bg_log_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """読めない bg ログは通知材料にせず読み飛ばすこと。"""
     log_dir = tmp_path / ".claq" / "logs"
     log_dir.mkdir(parents=True)
     (log_dir / f"bg-{datetime.now():%Y-%m-%d}.log").write_text("boom\n", encoding="utf-8")
-    monkeypatch.setattr(detach, "read_tail_text", _raise_oserror)
+    monkeypatch.setattr(detach, "read_tail_text", _raise(OSError("injected")))
 
     assert detach.recent_bg_failure_notice() == ""
 
@@ -87,9 +84,7 @@ def test_recent_bg_failure_notice(
     ],
     ids=["stale-orphan-removed", "fresh-orphan-kept", "other-suffix-kept", "stat-failure-ignored"],
 )
-def test_gc_detach_stdin_orphans(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str, stale: bool, stat_fails: bool, survives: bool
-) -> None:
+def test_gc_detach_stdin_orphans(tmp_path: Path, name: str, stale: bool, stat_fails: bool, survives: bool) -> None:
     """猶予を過ぎた `*.stdin` 孤児だけを回収すること（Windows は開いたファイルを消せず SessionEnd ごとに積み上がる）。"""
     entry = tmp_path / ".claq" / name
     entry.parent.mkdir()
@@ -97,18 +92,9 @@ def test_gc_detach_stdin_orphans(
     if stale:
         old = time.time() - detach._DETACH_STDIN_GRACE_SECONDS - 60
         os.utime(entry, (old, old))
-    if stat_fails:
-        real_stat = Path.stat
 
-        def _stat(self: Path, *args: object, **kwargs: object) -> object:
-            """対象エントリの stat だけを失敗させる。"""
-            if self == entry:
-                raise OSError("boom")
-            return real_stat(self, *args, **kwargs)
-
-        monkeypatch.setattr(Path, "stat", _stat)
-
-    detach.gc_detach_stdin_orphans()
+    with _failing("stat", lambda path: stat_fails and path == entry, OSError("boom")):
+        detach.gc_detach_stdin_orphans()
 
     assert os.path.exists(entry) is survives
 
@@ -188,7 +174,7 @@ def test_detach_process_failures_are_raised(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, target: object, name: str
 ) -> None:
     """一時ファイル作成・起動の失敗は OSError をそのまま伝え（launcher が原因を表示する）、一時ファイルは残さない。"""
-    monkeypatch.setattr(target, name, _raise_oserror)
+    monkeypatch.setattr(target, name, _raise(OSError("injected")))
 
     with pytest.raises(OSError, match="injected"):
         detach_process(["true"], "raw", env={})
@@ -208,7 +194,7 @@ def test_detach_process_log_dir_failure_is_raised(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("popen_calls")
 def test_detach_process_unlink_failure_keeps_the_launch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """起動後の unlink 失敗は起動成功のまま（孤児の一時ファイルは次回の掃除で消える）。"""
-    monkeypatch.setattr(os, "unlink", _raise_oserror)
+    monkeypatch.setattr(os, "unlink", _raise(OSError("injected")))
 
     detach_process(["true"], "raw", env={})
     assert len(list((tmp_path / ".claq").glob("*.stdin"))) == 1

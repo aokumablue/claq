@@ -21,7 +21,7 @@ import pytest
 from claq.lib import env_pointer as mod
 from claq.lib.constants import BASE_DIR_NAME
 
-from ._support import _ENV_TEMPLATE, _make_plugin_root, _raise, _write_env_pointer_for
+from ._support import _ENV_TEMPLATE, _failing, _make_plugin_root, _raise, _write_env_pointer_for
 from ._support import _isolate_home as _isolate_home
 
 _PAST_GRACE = mod._DEAD_PID_GRACE_SECONDS + 60
@@ -163,7 +163,7 @@ class TestGcRoots:
         assert not stale.exists()
         assert {path: path.read_text(encoding="utf-8") for path in kept} == kept
 
-    def test_env_sh_tmp_stat_failure_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_env_sh_tmp_stat_failure_is_ignored(self, tmp_path: Path) -> None:
         """env.sh.tmp.* の stat 失敗は無視する。"""
         claq_dir = tmp_path / "bc"
         claq_dir.mkdir()
@@ -171,16 +171,8 @@ class TestGcRoots:
         entry.write_text("x\n", encoding="utf-8")
         # 古くしておき、stat の失敗だけが削除を止めていることにする（新しいファイルは失敗が無くても残る）
         _age(entry, _PAST_GRACE)
-        real_stat = Path.stat
 
-        def _boom_stat(self: Path, *args: object, **kwargs: object) -> object:
-            """対象エントリだけ stat を失敗させる。"""
-            if self == entry:
-                raise OSError("boom")
-            return real_stat(self, *args, **kwargs)
-
-        with monkeypatch.context() as patched:
-            patched.setattr(Path, "stat", _boom_stat)
+        with _failing("stat", lambda path: path == entry, OSError("boom")):
             mod._gc_stale_temp_files(claq_dir, time.time())
 
         assert entry.exists()
@@ -224,22 +216,12 @@ class TestGcThrottle:
         assert stale_env_tmp.exists() is not runs
         assert stamp.exists()
 
-    def test_stamp_stat_failure_is_treated_as_absent(
-        self, gc_dirs: tuple[Path, Path, Path, Path], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """stamp が無い（初回）なら GC を走らせる。"""
+    def test_stamp_stat_failure_is_treated_as_absent(self, gc_dirs: tuple[Path, Path, Path, Path]) -> None:
+        """stamp の stat が「無い」で失敗したら初回とみなして GC を走らせる。"""
         claq_dir, roots_dir, legacy, _tmp = gc_dirs
-        real_stat = Path.stat
 
-        def _boom_stat(self: Path, *args: object, **kwargs: object) -> object:
-            """stamp だけ「無い」ことにする。"""
-            if self.name == mod._GC_STAMP_FILENAME:
-                raise FileNotFoundError(2, "no stamp")
-            return real_stat(self, *args, **kwargs)
-
-        monkeypatch.setattr(Path, "stat", _boom_stat)
-
-        mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
+        with _failing("stat", lambda path: path.name == mod._GC_STAMP_FILENAME, FileNotFoundError(2, "no stamp")):
+            mod._maybe_run_gc(claq_dir, roots_dir, keep_pids=frozenset())
 
         assert not legacy.exists()
 
