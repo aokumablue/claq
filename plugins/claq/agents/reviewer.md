@@ -159,7 +159,7 @@ Blockers: 2
 
 ## 一次検証（`verify_mode: reexecute` 指定時のみ）
 
-未指定（`/review` 等）なら本節は読まない。指定時は次が渡される。
+`verify_mode` 未指定（`/review` 等）なら本節は読まない。指定時は次が渡される。
 
 - 失敗テストのシグネチャ一覧（pytest なら nodeid）
 - テストコマンド `test_cmd`（呼び出し元が変更適用前の baseline step で自ら検出・実行したもの）
