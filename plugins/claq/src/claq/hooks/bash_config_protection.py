@@ -470,10 +470,30 @@ def _within_repo_root(resolved: Path, repo_root: Path) -> bool:
         `repo_root` 配下にあれば True。配下外、または `repo_root` の解決に失敗したら False。
     """
     try:
-        root_parts = fold_path_parts(repo_root.resolve().parts)
+        root_parts = _folded_repo_root(repo_root)
     except (OSError, RuntimeError):
         return False
     return is_path_prefix(root_parts, fold_path_parts(resolved.parts))
+
+
+@memoized_in_scan
+def _folded_repo_root(repo_root: Path) -> tuple[str, ...]:
+    """`repo_root` の実体パスを畳んだ要素列を返す。
+
+    保護名に当たった書込み先ごとに realpath を引き直さないよう、`scan_memo` の間は 1 回だけ解決する
+    （1 回の判定の間はファイルシステムを変えない）。例外は使い回さないので、失敗は呼び出しごとに同じく送られる。
+
+    Args:
+        repo_root: `resolve_repo_root` が返したリポジトリルート。
+
+    Returns:
+        symlink を解決して畳んだ要素列。
+
+    Raises:
+        OSError: 解決に失敗した場合。
+        RuntimeError: symlink が循環している場合。
+    """
+    return fold_path_parts(repo_root.resolve().parts)
 
 
 @memoized_in_scan
