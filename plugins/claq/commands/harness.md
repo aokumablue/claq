@@ -24,10 +24,6 @@ command: /harness
 - 相対パスの md: このファイルは `commands/` にある
   - プラグインルートを `. "$HOME/.claq/env.sh" && claq_plugin_root` で得て、その `commands/` を基準に読む
 
-## 使い方
-
-- `claq_run` には `--root` を常に渡す（ユーザーが省いたら、監査対象のプロジェクトのルートを自分で決めて渡す）
-
 ## ステップ1: ベースライン取得
 
 ```bash
@@ -39,7 +35,7 @@ claq_run claq.ci.harness_audit <scope> --format <text|json> --root <path>
 
 - `--apply` 指定時は harness-tuner へ生の JSON を渡すため `--format json` で実行し、表示はその JSON から整形する（text 出力に JSON は含まれない）
 - `--audit-only` は /harness の制御フラグで `claq_run` へは渡さない
-- `--root` はステップ4 の比較まで同じ値を保つ
+- `--root` は常に渡し、ステップ4 の比較まで同じ値を保つ（ユーザーが省いたら、監査対象のプロジェクトのルートを自分で決めて渡す）
 
 採点はこのスクリプトの出力だけを根拠にし、手で採点しない。
 

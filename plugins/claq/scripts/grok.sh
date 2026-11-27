@@ -15,9 +15,6 @@
 #
 # このスクリプトは自身の配置場所（$0）には依存せず、常に
 # ~/.grok/installed-plugins/claq-* を直接探索して実体を見つける。
-# 複数インストールが同居する場合は mtime 最新を選ぶ（Python 側の
-# find_latest_installed_claq と同じ規則。両者が食い違うと、実行される
-# bootstrap コードと symlink の張り先が別バージョンになる）。
 # そのため `curl ... | sh` のようにパイプ経由で実行され $0 が bash/sh に
 # なる場合でも正しく動く（ダウンロードと同時実行が可能）。
 #
@@ -25,10 +22,10 @@
 #   curl -fsSL <配布スクリプトのURL> | sh
 #   curl -fsSL <配布スクリプトのURL> | bash
 
-# 候補の選択規則は grok_plugin_root.find_latest_installed_claq と揃える
-# （launcher.py を含む claq-* のうち mtime 最新。列挙後に消えた候補は除く）。食い違うと、複数インストールが
-# 同居したとき「実行される bootstrap コード」と「symlink の張り先」が別バージョンになる。選択は stdlib だけで
-# 済むので、PYTHONPATH を用意する前に python3 へ委ねる。
+# 候補の選択規則は grok_plugin_root.find_latest_installed_claq と揃える（launcher.py を含む claq-* のうち
+# mtime 最新。列挙後に消えた候補は除く）。食い違うと、複数インストールが同居したとき「実行される bootstrap
+# コード」と「symlink の張り先」が別バージョンになる。選択は stdlib だけで済むので、PYTHONPATH を用意する前に
+# python3 へ委ねる。
 SRC_DIR="$(python3 -c '
 import pathlib
 import sys
