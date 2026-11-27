@@ -337,7 +337,7 @@ def _partition_commit_all_files(
         失敗した場合は None を返します（呼び出し元で fail-closed にする）。
     """
     if not is_commit_all_flag(commit_args):
-        return list(staged_files), []
+        return staged_files, []
 
     unstaged = get_unstaged_modified_files()
     if unstaged is None:

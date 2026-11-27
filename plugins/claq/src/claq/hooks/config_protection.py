@@ -16,6 +16,7 @@ from pathlib import Path
 
 from claq.hooks.git_config_text import GLOBAL_GIT_CONFIG_DISPLAY_NAMES, global_git_config_path
 from claq.hooks.hook_common import (
+    ASK_USER_INSTEAD,
     HOST_SETTINGS_FILES,
     effective_basename,
     emit_block_output,
@@ -241,9 +242,7 @@ def hook_control_blocked_message(display_name: str) -> str:
     """
     return (
         f"BLOCKED: Modifying {display_name} is not allowed. "
-        "It decides whether git hooks or the claq protection hooks run, so changing it can disable them. "
-        "If this change is genuinely necessary, ask the user to make it — "
-        "do not disable the protection hook yourself."
+        f"It decides whether git hooks or the claq protection hooks run, so changing it can disable them. {ASK_USER_INSTEAD}"
     )
 
 
@@ -267,8 +266,7 @@ def blocked_message_for_file(file_name: str) -> str:
     return (
         f"BLOCKED: Modifying {file_name} is not allowed. "
         "Fix the source code to satisfy linter/formatter rules instead of "
-        "weakening the config. If this change is genuinely necessary, "
-        "ask the user to make it — do not disable the protection hook yourself."
+        f"weakening the config. {ASK_USER_INSTEAD}"
     )
 
 
@@ -375,8 +373,7 @@ def _running_plugin_blocked_message(display_name: str) -> str:
     return (
         f"BLOCKED: Modifying {display_name} of the running claq plugin is not allowed. "
         "Every protection hook runs from this code, so changing it would disable all of them "
-        "from the next tool call. If this change is genuinely necessary, ask the user to make it — "
-        "do not disable the protection hook yourself."
+        f"from the next tool call. {ASK_USER_INSTEAD}"
     )
 
 

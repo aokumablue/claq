@@ -371,7 +371,7 @@ def _inplace_edit_args(args: list[str]) -> list[str]:
     Returns:
         in-place フラグがあれば全引数、無ければ空リスト。
     """
-    return list(args) if any(is_inplace_edit_flag(token) for token in args) else []
+    return args if any(is_inplace_edit_flag(token) for token in args) else []
 
 
 def _dd_of_args(args: list[str]) -> list[str]:

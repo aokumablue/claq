@@ -26,6 +26,12 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from typing import TextIO
 
+# 保護対象の変更を止めるブロック文言の結び。止めた変更を利用者へ委ね、エージェント自身に保護を外させない方針を
+# 同じ綴りで伝えるため 1 か所に持つ（`config_protection`・`conditional_protection` が共有する）。
+ASK_USER_INSTEAD = (
+    "If this change is genuinely necessary, ask the user to make it — do not disable the protection hook yourself."
+)
+
 # `scan_memo` の with の中でだけ使う、引数ごとの結果の置き場。with の外では None（毎回計算する）。
 _scan_memo: dict[tuple[object, ...], object] | None = None
 
