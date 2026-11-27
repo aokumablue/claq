@@ -15,6 +15,8 @@ import pytest
 
 from claq.hooks import config_protection
 
+from ._support import _write_content
+
 
 def _apply_patch(path: str) -> dict[str, Any]:
     """tool_input が生のパッチ文字列（dict ではない Copilot CLI 実行パス）の apply_patch payload を作る。"""
@@ -205,8 +207,7 @@ class TestProtectionHookOwnConfig:
         self, file_path: str, expected: int, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """プラグインの hooks.json だけを守り、consumer 側は通すこと。"""
-        payload = {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": "{}"}}
-        assert _run_protection(monkeypatch, payload)[0] == expected
+        assert _run_protection(monkeypatch, _write_content(file_path, "{}"))[0] == expected
 
     @pytest.mark.parametrize(
         ("content", "expected"),
@@ -228,8 +229,7 @@ class TestProtectionHookOwnConfig:
         self, content: str, expected: int, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """ホスト設定は保護を外せるキーのときだけ deny すること。"""
-        payload = {"tool_name": "Write", "tool_input": {"file_path": "/repo/.claude/settings.json", "content": content}}
-        assert _run_protection(monkeypatch, payload)[0] == expected
+        assert _run_protection(monkeypatch, _write_content("/repo/.claude/settings.json", content))[0] == expected
 
 
 @pytest.mark.parametrize("display_name", [".git/hooks/", "hooks/hooks.json"])

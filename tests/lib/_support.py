@@ -1,8 +1,9 @@
-"""tests/lib のテストが共有する補助（必ず失敗するスタブ・env テンプレートの場所・最小 plugin root・HOME 隔離）。"""
+"""tests/lib のテストが共有する補助（必ず失敗するスタブ・特定パスだけ失敗させる Path パッチ・env テンプレートの場所・最小 plugin root・HOME 隔離）。"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
 from unittest import mock
 
@@ -21,6 +22,19 @@ def _raise(exc: BaseException) -> Callable[..., None]:
         raise exc
 
     return _boom
+
+
+def _failing(method: str, should_fail: Callable[[Path], bool], exc: BaseException) -> AbstractContextManager[object]:
+    """``Path.<method>`` を ``should_fail`` に合う self でだけ ``exc`` にするパッチ（コンテキストマネージャ）。"""
+    original = getattr(Path, method)
+
+    def fake(self: Path, *args: object, **kwargs: object) -> object:
+        """対象の self なら ``exc`` を送出し、それ以外は元の実装へ委ねる。"""
+        if should_fail(self):
+            raise exc
+        return original(self, *args, **kwargs)
+
+    return mock.patch.object(Path, method, fake)
 
 
 def _make_plugin_root(root: Path) -> Path:

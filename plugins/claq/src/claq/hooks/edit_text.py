@@ -6,10 +6,13 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from claq.hooks.hook_common import resolve_effective_target
 from claq.lib.harness import normalize_tool_name
+
+# `typing` の import は約 1 ms かかり、pyproject.toml・settings.json・git config への Edit/Write ごとに載る。注釈は `from __future__ import annotations` で評価されないので、型検査器にだけ見せる。
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from typing import Any
 
 # git config・ホスト設定の置換前後の全文の上限。置換前はディスクから読むので stdin の上限が効かず、
 # 置換後は MultiEdit の replace_all を重ねると倍々に伸びる（`a`→`aa` を 20 回で 1 KiB が 1 GiB）。

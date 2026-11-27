@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, NoReturn
 
 from claq.hooks.edit_text import (
     FULL_TEXT_MAX_BYTES,
@@ -24,8 +23,13 @@ from claq.hooks.edit_text import (
     text_after_edit,
 )
 from claq.hooks.git_config_text import GitConfigParseError, adds_sensitive_entries
-from claq.hooks.hook_common import HOST_SETTINGS_FILES, memoized_in_scan, normalize_protected_name
+from claq.hooks.hook_common import ASK_USER_INSTEAD, HOST_SETTINGS_FILES, memoized_in_scan, normalize_protected_name
 from claq.lib.stdin_io import MAX_STDIN_BYTES
+
+# `typing` の import は約 1 ms かかり、このモジュールを遅延 import する Edit/Write ごとに載る。注釈は `from __future__ import annotations` で評価されないので、型検査器にだけ見せる。
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from typing import Any, NoReturn
 
 # セクション見出しの照合パターン（前方一致）。[tool.ruff.lint] のような
 # サブセクションも拾うため prefix 一致にする。`[testenv` は tox.ini の
@@ -246,9 +250,7 @@ def _conditional_blocked_message(file_name: str) -> str:
     return (
         f"BLOCKED: The change to {file_name} appears to touch a protected setting "
         "(a lint/format/coverage section or key). "
-        "Fix the source code to satisfy the rules instead of weakening the config. "
-        "If this change is genuinely necessary, ask the user to make it — "
-        "do not disable the protection hook yourself."
+        f"Fix the source code to satisfy the rules instead of weakening the config. {ASK_USER_INSTEAD}"
     )
 
 
@@ -339,9 +341,7 @@ def _settings_blocked_message(file_name: str) -> str:
     return (
         f"BLOCKED: The change to {file_name} changes a setting that can disable the protection hooks "
         "(hooks, enabledPlugins/disabledPlugins, disableAllHooks, env CLAQ_PYTHON/PATH/PYTHONPATH/PYTHONHOME). "
-        "Other settings (model, permissions, other env entries) can be changed freely. "
-        "If this change is genuinely necessary, ask the user to make it — "
-        "do not disable the protection hook yourself."
+        f"Other settings (model, permissions, other env entries) can be changed freely. {ASK_USER_INSTEAD}"
     )
 
 

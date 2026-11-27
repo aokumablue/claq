@@ -14,19 +14,21 @@ COMPACT_LINE_MAX_CHARS = 200
 
 
 def _strip_markdown_prefix(line: str) -> str:
-    """見出しや箇条書きの先頭記号を落とす。コードフェンス行と表の行は空にする。"""
-    stripped = line.lstrip()
-    if not stripped or stripped.startswith(("```", "|")):
+    """見出しや箇条書きの先頭記号を落とす。コードフェンス行と表の行は空にする。
+
+    ``line`` は ``compact_line`` が空白を畳んだ 1 行（前後に空白が無く、語の間は空白 1 つ）に限る。
+    そのため記号と直後の空白 1 つを切るだけで、前後に空白は残らない。
+    """
+    if not line or line.startswith(("```", "|")):
         return ""
 
-    if stripped[0] == "#":
-        stripped = stripped.lstrip("#").strip()
-    elif stripped.startswith(("- ", "* ", "+ ", "> ")):
-        stripped = stripped[2:].strip()
-    elif len(stripped) >= 3 and stripped[0].isdigit() and stripped[1:3] in {". ", ") "}:
-        stripped = stripped[3:].strip()
-
-    return stripped
+    if line[0] == "#":
+        return line.lstrip("#").lstrip()
+    if line.startswith(("- ", "* ", "+ ", "> ")):
+        return line[2:]
+    if line[0].isdigit() and line[1:3] in {". ", ") "}:
+        return line[3:]
+    return line
 
 
 def compact_line(text: str) -> str:

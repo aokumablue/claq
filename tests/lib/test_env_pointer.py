@@ -462,15 +462,6 @@ class TestWriteTextIfChanged:
         assert (_isolate_home / BASE_DIR_NAME / mod._ENV_FILENAME).read_text(encoding="utf-8") == "# v2\n"
 
 
-class _PsResult:
-    """``subprocess.run`` の戻り値の代わりに使う最小の結果。"""
-
-    def __init__(self, returncode: int, stdout: str) -> None:
-        """終了コードと標準出力を保持する。"""
-        self.returncode = returncode
-        self.stdout = stdout
-
-
 class TestResolveAncestorChain:
     """_resolve_ancestor_chain の祖先探索ロジックのテスト。"""
 
@@ -538,10 +529,12 @@ class TestResolveAncestorChain:
             for line in table.replace("{ppid}", str(own_ppid)).splitlines()
         }
 
-        def _ps(args: list[str], **_kwargs: object) -> _PsResult:
+        def _ps(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
             """``ps -o ppid=,lstart= -p <pid>`` を合成表から答える（表に無い PID は非 0 終了）。"""
             row = rows.get(args[-1])
-            return _PsResult(returncode, row) if row is not None else _PsResult(1, "")
+            if row is None:
+                return subprocess.CompletedProcess(args, 1, "")
+            return subprocess.CompletedProcess(args, returncode, row)
 
         monkeypatch.setattr(subprocess, "run", _ps)
         monkeypatch.setattr(mod, "_MAX_ANCESTOR_DEPTH", depth)
@@ -555,10 +548,10 @@ class TestResolveAncestorChain:
         clock = iter([0.0, 1.0, 5.0])
         timeouts: list[float] = []
 
-        def _ps(args: list[str], **kwargs: object) -> _PsResult:
+        def _ps(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
             """渡された timeout を記録し、親 5000 を答える。"""
             timeouts.append(kwargs["timeout"])
-            return _PsResult(0, "5000 t0\n")
+            return subprocess.CompletedProcess(args, 0, "5000 t0\n")
 
         monkeypatch.setattr(mod.time, "monotonic", lambda: next(clock))
         monkeypatch.setattr(subprocess, "run", _ps)

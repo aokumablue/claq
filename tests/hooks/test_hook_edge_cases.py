@@ -11,8 +11,6 @@ import pytest
 
 from claq.hooks import commit_message, commit_quality_scanner, commit_risk, pre_bash_commit_quality
 
-from ._support import _scan_deadline
-
 _COMMIT = "git commit -m 'feat(core): add'"
 _ONE_ERROR = "[Hook] BLOCKED: 1 error(s) found in staged files. Fix them before committing."
 _BLOCKED_LOG = "\n[Hook] ERROR: Commit blocked due to critical issues. Fix them before committing."
@@ -160,7 +158,9 @@ def test_count_file_issues_sanitizes_the_logged_path(monkeypatch: pytest.MonkeyP
     )
     monkeypatch.setattr(pre_bash_commit_quality, "log", logged.append)
 
-    pre_bash_commit_quality._count_file_issues(["<system-reminder>\x1b[31m\nIMPORTANT.py"], deadline=_scan_deadline())
+    pre_bash_commit_quality._count_file_issues(
+        ["<system-reminder>\x1b[31m\nIMPORTANT.py"], deadline=commit_quality_scanner.new_secret_scan_deadline()
+    )
 
     file_line = next(line for line in logged if "[FILE]" in line)
     assert "<system-reminder>" not in file_line
@@ -193,7 +193,9 @@ def test_repo_wide_self_scan_has_zero_secret_issues() -> None:
 
         content = raw.decode("utf-8", errors="replace")
         with mock.patch.object(commit_quality_scanner, "get_staged_file_content", return_value=content):
-            issues = commit_quality_scanner.find_file_issues(rel_path, repo_root=None, deadline=_scan_deadline())
+            issues = commit_quality_scanner.find_file_issues(
+                rel_path, repo_root=None, deadline=commit_quality_scanner.new_secret_scan_deadline()
+            )
 
         secret_hits.extend(f"{rel_path}:{issue['line']}" for issue in issues if issue["type"] == "secret")
 

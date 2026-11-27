@@ -54,13 +54,12 @@ def test_unreadable_stdin_is_denied(
     assert hook_name in reason
     assert "pipe read failed" in reason
     assert "BLOCKED" in reason
+    module = importlib.import_module(hook)
     monkeypatch.setattr(
-        importlib.import_module(hook),
-        "read_raw_stdin_with_truncation",
-        mock.Mock(side_effect=StdinUnavailableError("pipe read failed")),
+        module, "read_raw_stdin_with_truncation", mock.Mock(side_effect=StdinUnavailableError("pipe read failed"))
     )
 
-    rc = importlib.import_module(hook).main()
+    rc = module.main()
     captured = capsys.readouterr()
 
     assert (rc, json.loads(captured.out), captured.err) == (
@@ -78,9 +77,10 @@ def test_absent_stdin_still_passes_through(
 
     ここまで deny にすると、payload を渡さない host で全ツール呼び出しが拒否され、セッションが復旧不能になる。
     """
-    monkeypatch.setattr(importlib.import_module(hook), "read_raw_stdin_with_truncation", lambda: ("", False))
+    module = importlib.import_module(hook)
+    monkeypatch.setattr(module, "read_raw_stdin_with_truncation", lambda: ("", False))
 
-    rc = importlib.import_module(hook).main()
+    rc = module.main()
 
     assert (rc, *capsys.readouterr()) == (0, "", "")
 

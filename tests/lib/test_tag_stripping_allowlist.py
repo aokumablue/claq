@@ -131,14 +131,14 @@ class TestKeepAllowedChars:
                 allowed.add(cp)
         line_breaks = {0x0B, 0x0C, 0x0D, 0x85, 0x2028, 0x2029}
         assert allowed.isdisjoint(line_breaks)
-        invisible_but_allowed = {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x3164, 0xFFA0, 0x2800, 0x16FE4}
+        invisible_but_allowed = {ord(ch) for ch in _INVISIBLE_FILLERS}
         selectors = {0x180B, 0x180C, 0x180D, 0x180F, *range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0)}
         assert invisible_but_allowed <= allowed
         assert selectors <= allowed
         for cp in range(0x110000):
             result = keep_allowed_chars(chr(cp))
             if cp in invisible_but_allowed or cp in selectors:
-                # 許可カテゴリだが、ASCII の間へ挟めば分断できる不可視文字。常に落とす 6 文字と、
+                # 許可カテゴリだが、ASCII の間へ挟めば分断できる不可視文字。常に落とす filler と、
                 # 先頭（ASCII と同じ文脈）に置かれた異体字セレクタ。
                 assert result == "", hex(cp)
             elif cp in allowed or cp in (0x09, 0x0A):

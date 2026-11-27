@@ -321,9 +321,8 @@ def _context_checks(root_dir: Path) -> list[dict[str, Any]]:
     ]
 
 
-def _quality_checks(root_dir: Path, pyproject_toml: str) -> list[dict[str, Any]]:
-    """repo モードの Quality Gates カテゴリのチェックを返す。"""
-    dev_root = _dev_root(root_dir)
+def _quality_checks(dev_root: Path, pyproject_toml: str) -> list[dict[str, Any]]:
+    """repo モードの Quality Gates カテゴリのチェックを返す（検査対象はすべて開発リポジトリ直下）。"""
     validators_test = safe_read(dev_root, "tests/ci/test_validators.py")
     return [
         make_check(
@@ -378,9 +377,8 @@ def _memory_checks(root_dir: Path, hooks_json: str) -> list[dict[str, Any]]:
     ]
 
 
-def _eval_checks(root_dir: Path, pyproject_toml: str) -> list[dict[str, Any]]:
+def _eval_checks(root_dir: Path, dev_root: Path, pyproject_toml: str) -> list[dict[str, Any]]:
     """repo モードの Eval Coverage カテゴリのチェックを返す。"""
-    dev_root = _dev_root(root_dir)
     return [
         make_check(
             check_id="eval-skill", category=EVAL_COVERAGE, points=4, scopes=["repo", "skills"],
@@ -463,13 +461,14 @@ def _cost_checks(root_dir: Path) -> list[dict[str, Any]]:
 def get_repo_checks(root_dir: Path) -> list[dict[str, Any]]:
     """repo モード向けのチェック定義を、カテゴリ順に連結して返す。"""
     hooks_json = safe_read(root_dir, "hooks/hooks.json")
-    pyproject_toml = safe_read(_dev_root(root_dir), "pyproject.toml")
+    dev_root = _dev_root(root_dir)
+    pyproject_toml = safe_read(dev_root, "pyproject.toml")
     return [
         *_tool_checks(root_dir, hooks_json),
         *_context_checks(root_dir),
-        *_quality_checks(root_dir, pyproject_toml),
+        *_quality_checks(dev_root, pyproject_toml),
         *_memory_checks(root_dir, hooks_json),
-        *_eval_checks(root_dir, pyproject_toml),
+        *_eval_checks(root_dir, dev_root, pyproject_toml),
         *_security_checks(root_dir, hooks_json),
         *_cost_checks(root_dir),
     ]

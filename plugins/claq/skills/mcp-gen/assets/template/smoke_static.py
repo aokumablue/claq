@@ -47,8 +47,7 @@ def _read_lines(path: Path) -> list[str]:
         OSError: 通常のファイルでない・読めないとき（文面に理由を書く）。
         UnicodeDecodeError: UTF-8 として読めない（バイナリの）とき。
     """
-    status = os.lstat(path)
-    if not stat.S_ISREG(status.st_mode):
+    if not stat.S_ISREG(os.lstat(path).st_mode):
         raise OSError("通常のファイルではない")
     return path.read_text(encoding="utf-8").splitlines()
 

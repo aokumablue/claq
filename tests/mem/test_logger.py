@@ -24,6 +24,13 @@ def _mem_root() -> logging.Logger:
     return logging.getLogger("claq.mem")
 
 
+def _flushed_log_text(log_dir: Path) -> str:
+    """全ハンドラを flush し、log_dir の日次ログファイルの中身を返す。"""
+    for handler in _mem_root().handlers:
+        handler.flush()
+    return next(log_dir.glob("mem-*.log")).read_text()
+
+
 def test_get_returns_child_logger() -> None:
     """get はコンポーネント名を付けた claq.mem 配下のロガーを返す。"""
     log = logger.get("TEST")
@@ -68,9 +75,7 @@ def test_messages_are_written_to_file_with_secrets_redacted(tmp_path: Path) -> N
     log = logger.get("TEST")
     log.info("test message 12345")
     log.info("token=" + "sk-ant-" + "api03-" + "A" * 90)
-    for handler in _mem_root().handlers:
-        handler.flush()
-    content = next(tmp_path.glob("mem-*.log")).read_text()
+    content = _flushed_log_text(tmp_path)
     assert "test message 12345" in content
     assert "[REDACTED]" in content
     assert "sk-ant-api03-" not in content
@@ -85,11 +90,9 @@ def test_file_only_records_skip_stderr_but_reach_file(tmp_path: Path, capsys: py
     log = logger.get("TEST")
     log.error("file only failure", extra=logger.FILE_ONLY)
     log.error("shared failure")
-    for handler in _mem_root().handlers:
-        handler.flush()
 
+    content = _flushed_log_text(tmp_path)
     stderr = capsys.readouterr().err
-    content = next(tmp_path.glob("mem-*.log")).read_text()
     assert "file only failure" in content
     assert "shared failure" in content
     assert "file only failure" not in stderr

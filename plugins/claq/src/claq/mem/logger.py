@@ -81,11 +81,9 @@ def setup(log_dir: Path) -> None:
         log_dir: 日次ログファイルを置くディレクトリ。
     """
     package_logger = logging.getLogger(_PACKAGE_LOGGER_NAME)
-    file_handler = _file_handler(log_dir)
-    stderr_handler = _stderr_handler()
+    package_logger.addHandler(_file_handler(log_dir))
+    package_logger.addHandler(_stderr_handler())
     package_logger.setLevel(logging.INFO)
-    package_logger.addHandler(file_handler)
-    package_logger.addHandler(stderr_handler)
 
 
 def get(component: str) -> logging.Logger:

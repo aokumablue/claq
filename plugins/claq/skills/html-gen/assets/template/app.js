@@ -312,7 +312,6 @@
    *   「素の状態」に戻すことで、中断しても要素が消えない。
    */
   const revealOnScroll = () => {
-    const targets = document.querySelectorAll(".reveal:not([data-animate-skip])");
     if (reduced.matches) return;
     const pending = new Set();
 
@@ -335,7 +334,7 @@
       },
       { rootMargin: "0px 0px -6% 0px", threshold: 0.08 }
     );
-    targets.forEach((element) => observer.observe(element));
+    document.querySelectorAll(".reveal:not([data-animate-skip])").forEach((element) => observer.observe(element));
 
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") return;
@@ -351,9 +350,8 @@
    * 最終値が壊れることはない。
    */
   const countUp = () => {
-    const targets = document.querySelectorAll("[data-count]");
     if (reduced.matches) return;
-    targets.forEach((element, order) => {
+    document.querySelectorAll("[data-count]").forEach((element, order) => {
       const final = element.dataset.count;
       const numeric = Number(final.replace(/,/g, ""));
       if (!Number.isFinite(numeric)) return;

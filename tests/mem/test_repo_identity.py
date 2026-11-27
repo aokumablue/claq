@@ -11,7 +11,6 @@ import pytest
 
 from claq.mem import repo_identity
 from claq.mem.database import Database
-from claq.mem.models import Knowledge, Repo, utc_now_iso
 from claq.mem.repo_identity import (
     FALLBACK_SLUG,
     MAX_SLUG_LENGTH,
@@ -26,7 +25,7 @@ from claq.mem.repo_identity import (
     slugify,
 )
 
-from ._support import _raising
+from ._support import _make_knowledge, _raising, _repo_row
 from ._support import db as db
 
 # 鍵の形の文字列はコミット品質フックが止めるため実行時に組み立てる。
@@ -34,13 +33,8 @@ _GITHUB_PAT = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"
 
 
 def _git(*args: str, cwd: Path) -> None:
-    """テスト用リポジトリ操作として git を同期実行する。
-
-    利用者のグローバル/システム設定（署名強制・hooksPath 等）に影響されないよう
-    設定ファイルを無効化した環境で実行する。
-    """
-    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
-    subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True, timeout=30, env=env)
+    """テスト用リポジトリ操作として git を同期実行する（利用者の git 設定は conftest の autouse fixture が切り離す）。"""
+    subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True, timeout=30)
 
 
 def _make_repo(root: Path, remote: str | None = None) -> Path:
@@ -369,23 +363,7 @@ class TestResolveRepo:
         """
         root = _make_repo(tmp_path / "app")
         before = resolve_repo(root, db)
-        db.upsert_knowledge(
-            Knowledge(
-                key="repo-card",
-                scope="repo",
-                repo_id=before.id,
-                kind="fact",
-                title="repo スコープの知識",
-                source="agent",
-                status="active",
-                body="",
-                domain=None,
-                confidence=0.5,
-                source_ref=None,
-                created_at=utc_now_iso(),
-                updated_at=utc_now_iso(),
-            )
-        )
+        db.upsert_knowledge(_make_knowledge(key="repo-card", scope="repo", repo_id=before.id, title="repo スコープの知識"))
         steps = [
             (("remote", "add", "origin", "git@github.com:owner/app.git"), "github.com/owner/app"),
             (("remote", "set-url", "origin", "git@gitlab.com:owner/app.git"), "gitlab.com/owner/app"),
@@ -427,14 +405,7 @@ class TestResolveRepo:
         root = _make_repo(tmp_path / "app")
         path_row = resolve_repo(root, db)
         # 同じ root_path を持つ別行を、目的の identity_key で先に登録しておく。
-        db.upsert_repo(Repo(
-                id="preexisting",
-                identity_key="github.com/owner/app",
-                root_path=os.path.realpath(root),
-                remote_url=None,
-                first_seen_at=utc_now_iso(),
-                last_seen_at=utc_now_iso(),
-            ))
+        db.upsert_repo(_repo_row("preexisting", "github.com/owner/app", os.path.realpath(root)))
 
         _git("remote", "add", "origin", "git@github.com:owner/app.git", cwd=root)
         resolved = resolve_repo(root, db)

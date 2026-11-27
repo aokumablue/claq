@@ -1,6 +1,6 @@
 """tests/hooks の複数のファイルが使う補助。
 
-- secret scan 予算の deadline 生成・コミットメッセージ検証のスパイ・secret の見本行（`_SECRET_LINE`）
+- コミットメッセージ検証のスパイ・secret の見本行（`_SECRET_LINE` / `_API_KEY_LINE`）
 - 実 git リポジトリでの commit 品質フック評価の土台（`_git` / `_init_git_repo` / `_evaluate_in_repo`）
 - 保護フックの `main()` をインプロセスで呼ぶ土台（`_HOOKS` / `_run` / payload 組み立て（`_bash` / `_write` /
   `_write_content` / `_edit`） / `_repo_scope` / `_home_outside_repo`）
@@ -8,7 +8,7 @@
   保護ファイル名の全数検査（`test_protection_bypass_regressions.py`）と語彙集合の固定
   （`test_protection_vocabulary_declarations.py`）が同じ表を使うため、ここに 1 つだけ置く。
 - launcher 経由の hook 起動の土台（`PLUGIN_ROOT` / `LAUNCHER` / `HOOK_WRAPPER` / `HOOKS_JSON`、隔離環境 `_launcher_env`、
-  `_run_launcher`、hooks.json の宣言列挙 `_iter_declared_commands`）。起動スモーク（`test_hook_cli_launch_smoke.py`）・
+  `_run_launcher`、hooks.json の読み込み `_declared_hooks` と宣言列挙 `_iter_declared_commands`）。起動スモーク（`test_hook_cli_launch_smoke.py`）・
   PreToolUse 入力軸のゲート（`test_hook_cli_contract.py`）・stdin 停止の実プロセス検査
   （`test_stdin_unavailable_fail_closed.py`）が共有する。
 - `python -m` で hook を別プロセス起動する土台（`SRC_ROOT` / `_run_module`）。launcher を通らない起動は
@@ -31,7 +31,6 @@ from claq.hooks import (
     bash_config_protection,
     block_no_verify,
     commit_message,
-    commit_quality_scanner,
     commit_risk,
     config_protection,
     hook_common,
@@ -40,6 +39,8 @@ from claq.hooks import (
 
 # 鍵の形の文字列は連結で組む。完成形を literal で書くと secret の自己走査に掛かる。
 _SECRET_LINE = "api" + "_key" + ' = "hunter2secret"\n'
+# 改行を含まない credential assignment の 1 行（行の連結に使う）。
+_API_KEY_LINE = "api" + "_key" + ' = "abc123"'
 
 
 def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
@@ -58,22 +59,6 @@ def _spy_commit_message_validation(monkeypatch: pytest.MonkeyPatch) -> list[list
 
     monkeypatch.setattr(commit_message, "validate_commit_message", _spy)
     return validated
-
-
-def _scan_deadline() -> float:
-    """テストから `find_file_issues` へ渡す secret scan 予算 1 本分の deadline を作る。
-
-    本番ではフック 1 回の起動につき 1 度だけ `new_secret_scan_deadline()` を呼び、
-    その 1 本を全ファイルで共有する。単発の `find_file_issues` を検査するテストは
-    ファイルごとに満額の予算で構わないため、呼び出しごとに新しい deadline を作る。
-
-    Returns:
-        `_monotonic()` 基準で走査を打ち切るべき時刻（秒）。
-
-    Raises:
-        例外は発生しません。
-    """
-    return commit_quality_scanner.new_secret_scan_deadline()
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -727,6 +712,11 @@ def _run_module(
 HOOKS_JSON = PLUGIN_ROOT / "hooks" / "hooks.json"
 
 
+def _declared_hooks() -> dict[str, list[dict]]:
+    """hooks.json の ``hooks``（イベント名 → matcher エントリのリスト）を返す。"""
+    return json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
+
+
 def _iter_declared_commands() -> list[tuple[str, list[str], int]]:
     """hooks.json が宣言する (イベント名, wrapper 引数, timeout) を列挙する。
 
@@ -734,9 +724,8 @@ def _iter_declared_commands() -> list[tuple[str, list[str], int]]:
         宣言順の (event, args, timeout) タプル。args は ``runtime/claq-hook``
         以降の引数。
     """
-    declared = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
     entries: list[tuple[str, list[str], int]] = []
-    for event, groups in declared.items():
+    for event, groups in _declared_hooks().items():
         for group in groups:
             for hook in group.get("hooks", []):
                 tokens = shlex.split(hook["command"])

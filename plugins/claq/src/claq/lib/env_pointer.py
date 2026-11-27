@@ -99,10 +99,8 @@ def _warn_once(reason: str) -> None:
     if _warned_this_process:
         return
     _warned_this_process = True
-    try:
+    with contextlib.suppress(OSError):
         sys.stderr.write(json.dumps({"claqEnvPointerWriteFailed": True, "reason": reason}) + "\n")
-    except OSError:
-        pass
 
 
 def _state_home() -> Path:
@@ -172,12 +170,10 @@ def _write_text_if_changed(path: Path, text: str) -> bool:
     Raises:
         OSError: 書き込みに失敗した場合（読み取り失敗は書き込みへ倒すので送出しない）。
     """
-    try:
+    # 未作成・読み取り不能は、いずれも「一致していない」として書きに行く。
+    with contextlib.suppress(OSError):
         if not path.is_symlink() and path.read_bytes() == text.encode("utf-8"):
             return False
-    except OSError:
-        # 未作成・読み取り不能。いずれも「一致していない」として書きに行く。
-        pass
     _atomic_write_text(path, text)
     return True
 
@@ -309,11 +305,9 @@ def _maybe_run_gc(claq_dir: Path, roots_dir: Path, *, keep_pids: frozenset[int])
     """
     stamp = claq_dir / _GC_STAMP_FILENAME
     now = time.time()
-    try:
+    with contextlib.suppress(FileNotFoundError):  # 初回はスタンプが無い
         if stamp.stat().st_mtime > now - _GC_THROTTLE_SECONDS:
             return
-    except FileNotFoundError:
-        pass  # 初回はスタンプが無い
 
     stamp.touch()
 

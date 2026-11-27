@@ -61,13 +61,8 @@
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
   /**
-   * 変数の値をブラウザに解決させ、sRGB の [r, g, b, a] で受け取る。
-   *
-   * `getComputedStyle` は `oklch()` を `oklch()` のまま返す（rgb へは
-   * 正規化しない）。文字列を数値として読むと L C H を R G B と取り違えて
-   * 全ペアが「ほぼ黒」になり、検査が丸ごと嘘をつく。1px の canvas へ
-   * 実際に塗って読み出せば、ブラウザが描くのと同じ sRGB 値が得られる。
-   * @param {string} name CSS カスタムプロパティ名
+   * CSS の色の値を 1px の canvas へ塗り、描かれた sRGB の [r, g, b, a] を読み出す。
+   * @param {string} value CSS の色の値
    * @returns {number[]} [r, g, b, a]
    */
   const paint = (value) => {
@@ -78,6 +73,16 @@
     return [r, g, b, a / 255];
   };
 
+  /**
+   * 変数の値をブラウザに解決させ、sRGB の [r, g, b, a] で受け取る。
+   *
+   * `getComputedStyle` は `oklch()` を `oklch()` のまま返す（rgb へは
+   * 正規化しない）。文字列を数値として読むと L C H を R G B と取り違えて
+   * 全ペアが「ほぼ黒」になり、検査が丸ごと嘘をつく。1px の canvas へ
+   * 実際に塗って読み出せば、ブラウザが描くのと同じ sRGB 値が得られる。
+   * @param {string} name CSS カスタムプロパティ名
+   * @returns {number[]} [r, g, b, a]
+   */
   const resolve = (name) => {
     probe.style.color = "rgb(0, 0, 0)";
     probe.style.color = `var(${name})`;
@@ -186,16 +191,13 @@
    */
   const measureBehavior = () => {
     const found = [];
-    const sizes = [];
     document.querySelectorAll("main svg").forEach((svg, index) => {
       if (svg.closest("[aria-hidden='true']")) return;
       const scale = svg.getScreenCTM().a;
       svg.querySelectorAll("text").forEach((text) => {
-        sizes.push({ chart: index + 1, px: parseFloat(getComputedStyle(text).fontSize) * scale });
+        const px = parseFloat(getComputedStyle(text).fontSize) * scale;
+        if (px < 11.9 || px > 13.6) found.push({ check: "chart-text-size", chart: index + 1, px: Number(px.toFixed(2)) });
       });
-    });
-    sizes.forEach(({ chart, px }) => {
-      if (px < 11.9 || px > 13.6) found.push({ check: "chart-text-size", chart, px: Number(px.toFixed(2)) });
     });
     document.querySelectorAll(".nav-item").forEach((item) => {
       const id = (item.getAttribute("href") || "").slice(1);
@@ -235,11 +237,12 @@
     THEMES.forEach((theme) => {
       root.dataset.base = base;
       root.dataset.theme = theme;
+      const block = `${theme}/${base}`;
       PAIRS.forEach(([foreground, background, minimum]) => {
         const back = resolve(background);
         const value = ratio(flatten(resolve(foreground), back), flatten(back, [255, 255, 255, 1]));
         const record = {
-          block: `${theme}/${base}`,
+          block,
           foreground,
           background,
           ratio: Number(value.toFixed(2)),
@@ -248,7 +251,7 @@
         rows.push(record);
         if (value < minimum) failures.push(record);
       });
-      textFailures.push(...measureRenderedText(`${theme}/${base}`));
+      textFailures.push(...measureRenderedText(block));
     });
   });
 

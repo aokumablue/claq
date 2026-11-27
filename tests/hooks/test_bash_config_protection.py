@@ -10,7 +10,7 @@ import pytest
 
 from claq.hooks import bash_config_protection, hook_common
 
-from ._support import _bash
+from ._support import _bash, _write
 from ._support import _home_outside_repo as _home_outside_repo
 from ._support import _repo_scope as _repo_scope
 
@@ -303,13 +303,7 @@ _BLOCKED_PYPROJECT = "BLOCKED: Modifying pyproject.toml is not allowed."
         ),
         pytest.param(json.dumps(_bash("printf x > notes.txt")), False, 0, [], id="non-protected-write"),
         pytest.param(json.dumps(_bash("cat pyproject.toml")), False, 0, [], id="read-only"),
-        pytest.param(
-            json.dumps({"tool_name": "Write", "tool_input": {"file_path": "pyproject.toml", "content": "x"}}),
-            False,
-            0,
-            [],
-            id="non-bash-tool",
-        ),
+        pytest.param(json.dumps(_write("pyproject.toml")), False, 0, [], id="non-bash-tool"),
         pytest.param("", False, 0, [], id="empty"),
         pytest.param("{not-even-json", True, 2, ["exceeded"], id="truncated-fail-closed"),
         # JSON が壊れていても生テキストに保護対象 + 書き込み指示が見えれば deny する。

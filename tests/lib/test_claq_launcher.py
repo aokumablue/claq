@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 import claq.launcher as launcher
-from claq.mem.database import Database
-from claq.mem.models import Knowledge, utc_now_iso
+
+from ..mem._support import _seed
 
 LAUNCHER_PATH = Path(launcher.__file__).resolve()
 
@@ -104,21 +104,21 @@ def test_build_env(
     assert env["PYTHONIOENCODING"] == "utf-8:replace"
 
 
-class TestUnsupportedPythonExitCode:
+class TestPythonIsUnsupported:
     """Python 3.12 未満の fail-open 判定。"""
 
-    def test_returns_none_on_312(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-        """3.12.0 なら何も書かず None を返す。"""
+    def test_supported_on_312(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        """3.12.0 なら何も書かず False を返す。"""
         monkeypatch.setattr(launcher.sys, "version_info", (3, 12, 0))
 
         assert launcher._python_is_unsupported() is False
         assert capsys.readouterr().err == ""
 
     @pytest.mark.parametrize("version", [(3, 9, 6), (3, 11, 9)])
-    def test_returns_zero_on_old_python_and_writes_stderr(
+    def test_unsupported_on_old_python_and_writes_stderr(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], version: tuple[int, int, int]
     ) -> None:
-        """3.12 未満なら stderr に実際に動いたインタプリタとその版、構造化 JSON を書いて 0 を返す。
+        """3.12 未満なら stderr に実際に動いたインタプリタとその版、構造化 JSON を書いて True を返す。
 
         wrapper は CLAQ_PYTHON も採るため、`python3` と決め打ちで書くと CLAQ_PYTHON が古いときに
         直す対象を取り違える。
@@ -343,24 +343,7 @@ class TestForceUtf8Streams:
 
 def test_non_ascii_output_survives_a_non_utf8_locale(tmp_path: Path) -> None:
     """UTF-8 でないロケールでも、非 ASCII を含む注入が壊れず exit 0 で返ること（本プロセスの stdout は UTF-8 なので実プロセスで見る）。"""
-    with Database(tmp_path / "mem.db") as db:
-        db.upsert_knowledge(
-            Knowledge(
-                key="k",
-                kind="fact",
-                scope="global",
-                title="検査 ✓ の知識",
-                body="b",
-                status="active",
-                source="agent",
-                repo_id=None,
-                domain=None,
-                confidence=0.5,
-                source_ref=None,
-                created_at=utc_now_iso(),
-                updated_at=utc_now_iso(),
-            )
-        )
+    _seed(tmp_path, key="k", title="検査 ✓ の知識", body="b")
 
     result = _run_launcher(
         tmp_path, "claq.mem.cli", "context", stdin=json.dumps({"session_id": "s", "source": "startup"})

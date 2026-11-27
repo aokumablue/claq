@@ -148,9 +148,8 @@ def _non_ascii_repo(tmp_path: Path) -> Path:
 def test_protection_holds_in_a_non_ascii_repo_under_an_ascii_locale(tmp_path: Path) -> None:
     """ロケールで git の出力を復号できなくても、検査対象が確定した書込みは deny する（例外の exit 1 は許可に等しい）。"""
     repo = _non_ascii_repo(tmp_path)
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "printf y > ruff.toml"}})
     code = "import sys\nfrom claq.hooks import bash_config_protection\nsys.exit(bash_config_protection.main())\n"
-    assert _run_under_c_locale(code, repo, stdin=payload).returncode == 2
+    assert _run_under_c_locale(code, repo, stdin=json.dumps(_bash("printf y > ruff.toml"))).returncode == 2
 
 
 def test_plugin_runtime_check_survives_an_undecodable_git_error(tmp_path: Path) -> None:

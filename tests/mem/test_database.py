@@ -12,7 +12,7 @@ import pytest
 from claq.mem.database import Database, DatabaseError
 from claq.mem.models import Knowledge, Repo, Session, utc_now_iso
 
-from ._support import _all_knowledge
+from ._support import _all_knowledge, _make_knowledge
 from ._support import db as db
 
 _TS = "2026-01-01T00:00:00+00:00"
@@ -31,26 +31,8 @@ def _repo(repo_id: str = "claq-dev", identity_key: str = "git@github.com:x/claq.
 
 
 def _knowledge(key: str = "use-python3", **overrides: object) -> Knowledge:
-    """テスト用 Knowledge を組み立てる。"""
-    params: dict[str, object] = {
-        "key": key,
-        "scope": "global",
-        "kind": "convention",
-        "title": "Python は python3 コマンドで実行する",
-        "source": "agent",
-        # status は必須引数（既定値なし）。DB 層のテストは注入対象の挙動を見る
-        # ものが多いため、ヘルパの既定は 'active' に置く。
-        "status": "active",
-        "repo_id": None,
-        "body": "",
-        "domain": None,
-        "confidence": 0.5,
-        "source_ref": None,
-        "created_at": _TS,
-        "updated_at": _TS,
-    }
-    params.update(overrides)
-    return Knowledge(**params)
+    """作成・更新時刻を _TS に固定したテスト用 Knowledge を組み立てる。"""
+    return _make_knowledge(**{"key": key, "created_at": _TS, "updated_at": _TS, **overrides})
 
 
 class TestSchema:
@@ -213,6 +195,7 @@ class TestRepos:
             repo.last_seen_at = f"2026-{month}-01T00:00:00+00:00"
             db.upsert_repo(repo)
         assert [repo.id for repo in db.list_repos()] == ["b-newest", "c-mid", "a-old"]
+
 
 class TestKnowledge:
     """knowledge の CRUD。"""

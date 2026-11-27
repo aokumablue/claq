@@ -14,22 +14,23 @@ import pytest
 
 from claq.hooks import commit_quality_scanner
 
-from ._support import _SECRET_LINE, _scan_deadline
+from ._support import _API_KEY_LINE, _SECRET_LINE
 
-_API_KEY_LINE = "api" + "_key" + ' = "abc123"'
 _OVER_1MIB = "x" * (1024 * 1024 + 1)
 
 
 def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """INDEX の内容を ``content`` に差し替えて ``find_file_issues`` を満額の予算で呼ぶ。"""
     monkeypatch.setattr(commit_quality_scanner, "get_staged_file_content", lambda path: content)
-    return commit_quality_scanner.find_file_issues(file_path, repo_root=None, deadline=_scan_deadline())
+    return commit_quality_scanner.find_file_issues(
+        file_path, repo_root=None, deadline=commit_quality_scanner.new_secret_scan_deadline()
+    )
 
 
 @pytest.mark.parametrize(
     ("file_path", "content", "expected"),
     [
-        (
+        pytest.param(
             "src/app.js",
             "\n".join(
                 [
@@ -47,26 +48,29 @@ def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch
                 ("todo", 4, "info"),
                 ("secret", 6, "error"),
             ],
+            id="lint-mix",
         ),
         # `# nosec` は lint だけを抑制し、secret 検出は抑制しない（バイパス防止）。
-        (
+        pytest.param(
             "src/app.py",
             "debugger  # nosec\n" + "const " + "api" + "_key" + ' = "x";  # nosec',
             [("secret", 2, "error")],
+            id="nosec-hides-lint-not-secret",
         ),
-        ("src/app.py", "api" + "_key" + ' = "hunter2secret"  # nosec', [("secret", 1, "error")]),
-        ("src/app.py", 'console.log("debug")  # nosec', []),
+        pytest.param("src/app.py", "api" + "_key" + ' = "hunter2secret"  # nosec', [("secret", 1, "error")], id="nosec-does-not-hide-secret"),
+        pytest.param("src/app.py", 'console.log("debug")  # nosec', [], id="nosec-hides-console-log"),
         # ログ出力呼び出しとデバッガ文は JavaScript / TypeScript の構文。Python・Rust ではコメント・docstring・
         # 識別子の語にすぎず、拾うとデバッガ文（error）が正当な commit を止める。TODO は言語を問わず見る。
-        (
+        pytest.param(
             "src/app.py",
             '"""Attach the debugger first."""\n# useful under a debugger\nlog = "console.log"\n# TODO: tidy',  # nosec
             [("todo", 4, "info")],
+            id="python-words-are-not-js-statements",
         ),
-        ("src/main.rs", "let debugger = 1; /* console.log */", []),  # nosec
+        pytest.param("src/main.rs", "let debugger = 1; /* console.log */", [], id="rust-words-are-not-js-statements"),  # nosec
         # JS でもデバッガ文だけを拾う。ESLint のルール名・バンドラの除去指定（引用符の中の語）・Chrome 拡張の
         # API とオブジェクトのキー（プロパティ）・コメント行の語は文ではなく、拾うと設定ファイルの commit を止める。
-        (
+        pytest.param(
             "eslint.config.js",
             "\n".join(
                 [
@@ -81,47 +85,30 @@ def _issues(file_path: str, content: str | None, monkeypatch: pytest.MonkeyPatch
                 ]
             ),
             [("debugger", 8, "error")],  # nosec
+            id="js-non-statement-words",
         ),
         # `sk-ant-...`（`sk-` 直後にハイフン）は OpenAI 形のパターンに一致しないため専用パターンで検出する。
-        ("src/app.py", "sk-" + "ant-" + "abcdefghijklmnopqrstuvwxyz0123456789", [("secret", 1, "error")]),
+        pytest.param("src/app.py", "sk-" + "ant-" + "abcdefghijklmnopqrstuvwxyz0123456789", [("secret", 1, "error")], id="anthropic-key"),
         # lint 対象外の拡張子でも secret は検出し、lint だけを行わない。
-        (".env", "API_" + "KEY" + '="hunter2secret"', [("secret", 1, "error")]),
-        (".env", 'console.log("hi")', []),  # nosec
+        pytest.param(".env", "API_" + "KEY" + '="hunter2secret"', [("secret", 1, "error")], id="non-lint-extension-secret"),
+        pytest.param(".env", 'console.log("hi")', [], id="non-lint-extension-skips-lint"),  # nosec
         # ロックファイルは secret パターンに一致しても検出しない。
-        ("package-lock.json", _API_KEY_LINE, []),
+        pytest.param("package-lock.json", _API_KEY_LINE, [], id="lock-file"),
         # 圧縮生成物（*.min.js）は lint 対象（拡張子は .js）だが secret スキャンは対象外。
-        ("dist/app.min.js", 'console.log("hi")\n' + _API_KEY_LINE, [("console.log", 1, "warning")]),  # nosec
+        pytest.param("dist/app.min.js", 'console.log("hi")\n' + _API_KEY_LINE, [("console.log", 1, "warning")], id="minified-js"),  # nosec
         # 真のバイナリ（画像等）は secret パターンに当たらない（バイナリ commit を一律ブロックしない）。
-        ("logo.png", "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00\x08\x06", []),
+        pytest.param("logo.png", "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00\x08\x06", [], id="real-binary"),
         # サイズで打ち切らないので、1MiB の前後どちらの secret も検出し、lint も継続する。
-        (
+        pytest.param(
             "src/app.js",
             _OVER_1MIB + "\n" + 'console.log("hi")' + "\n" + _API_KEY_LINE,  # nosec
             [("console.log", 2, "warning"), ("secret", 3, "error")],  # nosec
+            id="secret-past-1mib",
         ),
-        ("src/app.js", _API_KEY_LINE + "\n" + _OVER_1MIB, [("secret", 1, "error")]),
-        ("src/app.js", "x" * (1024 * 1024 - 100) + "\n" + _API_KEY_LINE, [("secret", 2, "error")]),
+        pytest.param("src/app.js", _API_KEY_LINE + "\n" + _OVER_1MIB, [("secret", 1, "error")], id="secret-before-1mib-padding"),
+        pytest.param("src/app.js", "x" * (1024 * 1024 - 100) + "\n" + _API_KEY_LINE, [("secret", 2, "error")], id="secret-under-1mib"),
         # 内容を取得できない（git が無い等で None）ファイルは「問題なし」にせず、検査不能の scan_error（error）でブロック対象にする。
-        ("src/app.js", None, [("scan_error", 0, "error")]),
-    ],
-    ids=[
-        "lint-mix",
-        "nosec-hides-lint-not-secret",
-        "nosec-does-not-hide-secret",
-        "nosec-hides-console-log",
-        "python-words-are-not-js-statements",
-        "rust-words-are-not-js-statements",
-        "js-non-statement-words",
-        "anthropic-key",
-        "non-lint-extension-secret",
-        "non-lint-extension-skips-lint",
-        "lock-file",
-        "minified-js",
-        "real-binary",
-        "secret-past-1mib",
-        "secret-before-1mib-padding",
-        "secret-under-1mib",
-        "content-unavailable",
+        pytest.param("src/app.js", None, [("scan_error", 0, "error")], id="content-unavailable"),
     ],
 )
 def test_find_file_issues_by_path_and_content(
@@ -300,29 +287,18 @@ def worktree(tmp_path: Path) -> Path:
 @pytest.mark.parametrize(
     ("file_path", "expected"),
     [
-        ("missing.py", None),
-        ("app.py", "value = 1\n"),
+        pytest.param("missing.py", None, id="missing"),
+        pytest.param("app.py", "value = 1\n", id="regular-file"),
         # repo 外への脱出: 絶対パス（pathlib の仕様上 repo_root が無視される）・`..`・symlink の中間ディレクトリ。
-        ("{outside}", None),
-        ("../outside_secret.txt", None),
-        ("linked_subdir/app.py", None),
+        pytest.param("{outside}", None, id="absolute-path"),
+        pytest.param("../outside_secret.txt", None, id="dotdot-traversal"),
+        pytest.param("linked_subdir/app.py", None, id="symlinked-intermediate-dir"),
         # symlink は先を辿らず link 先文字列（git が blob に保存するもの）を返す。repo 外を指していても
         # repo 外の実体（秘密鍵等）を読まない。
-        ("link_file.py", "real.txt"),
-        ("link_dir.py", "sub"),
-        ("link_broken.py", "nowhere"),
-        ("link_outside.py", "{outside}"),
-    ],
-    ids=[
-        "missing",
-        "regular-file",
-        "absolute-path",
-        "dotdot-traversal",
-        "symlinked-intermediate-dir",
-        "symlink-to-file",
-        "symlink-to-dir",
-        "broken-symlink",
-        "symlink-outside-repo",
+        pytest.param("link_file.py", "real.txt", id="symlink-to-file"),
+        pytest.param("link_dir.py", "sub", id="symlink-to-dir"),
+        pytest.param("link_broken.py", "nowhere", id="broken-symlink"),
+        pytest.param("link_outside.py", "{outside}", id="symlink-outside-repo"),
     ],
 )
 def test_get_worktree_file_content(worktree: Path, file_path: str, expected: str | None) -> None:

@@ -116,7 +116,7 @@ docstring は開発者向けに別に書く。
 - 読み取り専用: `ToolAnnotations(readOnlyHint=True, openWorldHint=False)`。
   外部の開かれたコンテンツ（Web 検索など）を返すなら `openWorldHint=True`。
 - 書き込み: `readOnlyHint=False` と、`destructiveHint`（上書き・削除するか）・`idempotentHint`（同じ引数で繰り返しても結果が変わらないか）。
-  この 2 つは `readOnlyHint=False` のときにだけ意味を持つ。
+  `destructiveHint` と `idempotentHint` は `readOnlyHint=False` のときにだけ意味を持つ。
 - 注釈は信頼されないヒントである。
   読み取り専用は上流の資格情報のスコープで保証する。
 

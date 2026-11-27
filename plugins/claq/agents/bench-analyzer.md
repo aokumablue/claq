@@ -153,11 +153,10 @@ tools: Read, Grep, Glob
 - ベースライン名は fixture 全体で一方だけで、各 `(eval_id, run_number)` に `with_skill` とそのベースラインが各 1 件ずつある
 - `run_summary` が実行された 2 構成と一致する
 
-満たさないとき:
+fixture が満たさない・無いときは **FAIL** を返す。
 
-- 満たさない fixture は **FAIL** にし、不足キー・壊れた run・欠落設定・二重ベースライン・`run_summary` との不一致を列挙する
-- fixture が無い場合は、次の採取手順を示して **FAIL** を返す
-  - 採取手順: `with_skill` とベースラインを同一 eval/run 番号で実行し、上の最小検証を満たす `benchmark.json` を作る
+- 満たさない: 不足キー・壊れた run・欠落設定・二重ベースライン・`run_summary` との不一致を列挙する
+- 無い: 採取手順を示す（`with_skill` とベースラインを同一 eval/run 番号で実行し、上の最小検証を満たす `benchmark.json` を作る）
 
 ### 手順
 

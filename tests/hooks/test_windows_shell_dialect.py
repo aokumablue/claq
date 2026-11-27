@@ -153,8 +153,11 @@ def test_command_name_comparisons_are_case_insensitive() -> None:
 
 @pytest.mark.parametrize(
     ("command", "expected_args"),
-    [(r"C:\Git\bin\git.exe commit -m x", ["-m", "x"]), ("git commit -m x", ["-m", "x"]), ("ls -la", None)],
-    ids=["windows-absolute-git", "posix-git", "non-commit"],
+    [
+        pytest.param(r"C:\Git\bin\git.exe commit -m x", ["-m", "x"], id="windows-absolute-git"),
+        pytest.param("git commit -m x", ["-m", "x"], id="posix-git"),
+        pytest.param("ls -la", None, id="non-commit"),
+    ],
 )
 def test_commit_quality_detects_commit_in_both_dialects(command: str, expected_args: list[str] | None) -> None:
     """`pre_bash_commit_quality` も 2 方言で commit を探す。

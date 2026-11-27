@@ -12,6 +12,8 @@ import pytest
 
 from claq.lib import grok_plugin_root as mod
 
+from ._support import _failing
+
 
 @pytest.fixture
 def link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -39,19 +41,6 @@ def _make_installed_plugin(home: Path, name: str = "claq-abc123", mtime: float |
     if mtime is not None:
         os.utime(root, (mtime, mtime))
     return root
-
-
-def _failing(method: str, should_fail: Callable[[Path], bool], exc: OSError) -> object:
-    """``Path.<method>`` を ``should_fail`` に合う self でだけ ``exc`` にするパッチ（コンテキストマネージャ）。"""
-    original = getattr(Path, method)
-
-    def fake(self: Path, *args: object, **kwargs: object) -> object:
-        """対象の self なら ``exc`` を送出し、それ以外は元の実装へ委ねる。"""
-        if should_fail(self):
-            raise exc
-        return original(self, *args, **kwargs)
-
-    return patch.object(Path, method, fake)
 
 
 def _vanishes_after_listing(should_fail: Callable[[Path], bool], hits: list[Path]) -> contextlib.ExitStack:
@@ -191,7 +180,7 @@ def test_symlink_target_resolution_order(
     assert link.resolve() == result
 
 
-def test_returns_none_without_installed(tmp_path: Path, link: Path) -> None:
+def test_returns_none_without_installed(link: Path) -> None:
     """installed-plugins が無ければ None で、リンクも作らない（開発ツリーへは落ちない）。"""
     assert mod.ensure_grok_plugin_root_symlink() is None
     assert not link.exists()

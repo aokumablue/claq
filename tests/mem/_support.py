@@ -1,4 +1,4 @@
-"""tests/mem の複数のファイルが使う補助（CLI 実行・repos/knowledge の投入・失敗スタブ・空 DB の fixture）。"""
+"""tests/mem の複数のファイルが使う補助（CLI 実行・repos/knowledge の組み立てと投入・失敗スタブ・空 DB の fixture）。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import pytest
 from claq.mem import cli, cmd_context
 from claq.mem import settings as settings_mod
 from claq.mem.database import Database
-from claq.mem.models import Knowledge, utc_now_iso
+from claq.mem.models import Knowledge, Repo, utc_now_iso
 from claq.mem.repo_identity import resolve_repo
 
 
@@ -85,8 +85,16 @@ def _repo_id(tmp_path: Path) -> str:
         return resolve_repo(tmp_path, db).id
 
 
-def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
-    """knowledge 行を 1 件直接投入する。"""
+def _repo_row(repo_id: str, identity_key: str, root_path: str) -> Repo:
+    """remote 無しで今観測した repos 行を組み立てる。"""
+    now = utc_now_iso()
+    return Repo(
+        id=repo_id, identity_key=identity_key, root_path=root_path, remote_url=None, first_seen_at=now, last_seen_at=now
+    )
+
+
+def _make_knowledge(**overrides: object) -> Knowledge:
+    """既定値に overrides を重ねた Knowledge を組み立てる（DB へは入れない）。"""
     fields: dict = {
         "key": "seeded",
         "scope": "global",
@@ -105,7 +113,12 @@ def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
         "updated_at": utc_now_iso(),
     }
     fields.update(overrides)
-    knowledge = Knowledge(**fields)
+    return Knowledge(**fields)
+
+
+def _seed(tmp_path: Path, **overrides: object) -> Knowledge:
+    """knowledge 行を 1 件直接投入する。"""
+    knowledge = _make_knowledge(**overrides)
     with Database(tmp_path / "mem.db") as db:
         db.upsert_knowledge(knowledge)
         return db.get_knowledge_by_key(knowledge.key, knowledge.repo_id)

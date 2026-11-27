@@ -90,10 +90,12 @@ cp /abs/skill/mcp-gen/assets/facade-overlay/adapters.py /abs/path/to/dest/adapte
 cp -R /abs/skill/mcp-gen/assets/facade-overlay/facade /abs/path/to/dest/facade
 ```
 
-`pyproject.toml` は `pyproject.toml.template` の中身を読んで Write ツールで作る。重ね合わせたなら `only-include` に `"adapters.py"` と `"facade"` を足す。
+`pyproject.toml` は `pyproject.toml.template` の中身を読んで Write ツールで作る。
 
 - Bash で書かない理由: 生成先が作業中の git リポジトリ内なら、内容によらず保護フックに止められる
 - Write でも、lint・テスト・カバレッジの節やキー（`ignore` / `select` / `exclude` / `addopts` / `fail_under` 等）を含むと止められる
+
+重ね合わせたなら `only-include` に `"adapters.py"` と `"facade"` を足す。
 
 ### 3. ツールを設計する
 

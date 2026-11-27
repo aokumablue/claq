@@ -11,14 +11,8 @@ import pytest
 
 from claq.mem import cli, command_support
 from claq.mem.database import Database
-from claq.mem.models import Repo, utc_now_iso
 
-from ._support import _raising, _run_cli, _seed
-
-
-def _raise_recursion(_text: str) -> object:
-    """深い入れ子の JSON 解析と同じく RecursionError を送出する。"""
-    raise RecursionError("maximum recursion depth exceeded")
+from ._support import _raising, _repo_row, _run_cli, _seed
 
 
 class TestSessionStartContract:
@@ -138,7 +132,7 @@ class TestInit:
         """既存 DB と sidecar を破棄して空の DB を作り直す。"""
         db_path = tmp_path / "mem.db"
         with Database(db_path) as db:
-            db.upsert_repo(Repo(id="old", identity_key="key-old", root_path="/tmp/old", remote_url=None, first_seen_at=utc_now_iso(), last_seen_at=utc_now_iso()))
+            db.upsert_repo(_repo_row("old", "key-old", "/tmp/old"))
         for suffix in ("-wal", "-shm", "-journal"):
             (tmp_path / f"mem.db{suffix}").write_text("stale", encoding="utf-8")
 
@@ -224,7 +218,7 @@ class TestArgvAndStdin:
     def test_read_stdin_json_rejects_too_deep_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """深すぎる入れ子で JSON 解析が RecursionError を送出しても、不正 JSON と同じ CommandError にする。"""
         monkeypatch.setattr(cli, "read_raw_stdin", lambda: "[[[]]]")
-        monkeypatch.setattr(cli.json, "loads", _raise_recursion)
+        monkeypatch.setattr(cli.json, "loads", _raising(RecursionError("maximum recursion depth exceeded")))
         with pytest.raises(command_support.CommandError, match="JSON として読めません"):
             cli._read_stdin_json()
 

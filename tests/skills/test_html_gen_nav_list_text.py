@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ._support import CSS, HTML, JS, _copy_site, _edit, check_site
+from ._support import CSS, HTML, JS, _assert_reported, _copy_site, _edit, check_site
 
 # --- テンプレート本体 -------------------------------------------------------
 
@@ -80,8 +80,7 @@ def test_broken_template_is_reported(tmp_path: Path, replacement: tuple[str, str
 )
 def test_only_list_tables_need_data_list(html: str, needle: str | None) -> None:
     """値が 2 列以上ある表は一覧として data-list が要り、ヒートマップ表・図の直下の表・行見出し + 値 1 列の項目表（会社概要など）は要らない。"""
-    violations = check_site._validate_lists(html, [])
-    assert (needle in "\n".join(violations)) if needle else violations == [], violations
+    _assert_reported(check_site._validate_lists(html, []), needle)
 
 
 def test_table_without_body_rows_is_not_a_key_value_table() -> None:
@@ -106,5 +105,4 @@ def test_table_without_body_rows_is_not_a_key_value_table() -> None:
 )
 def test_chart_text_is_axis_text_under_a_chart_root(svg: str, needle: str | None) -> None:
     """図の文字は axis-text で font-size を個別に持たず、文字を持つ SVG はルートに class="chart" を持つ。"""
-    violations = check_site._validate_chart_text(svg)
-    assert (needle in "\n".join(violations)) if needle else violations == [], violations
+    _assert_reported(check_site._validate_chart_text(svg), needle)

@@ -17,6 +17,8 @@ import pytest
 
 from claq.hooks import commit_quality_scanner
 
+from ._support import _API_KEY_LINE
+
 # 改行の無い 1MB 級の 1 行。行数は 1 なので「行数」基準では走査開始前の 1 回しか予算確認が起きない。
 _HUGE_LINE = "a" * (1024 * 1024)
 
@@ -42,7 +44,7 @@ def test_scanner_raises_when_deadline_passed(monkeypatch: pytest.MonkeyPatch, sc
 
 @pytest.mark.parametrize(
     "content",
-    ["some text", _HUGE_LINE, "api" + "_key" + ' = "abc123"'],  # nosec
+    ["some text", _HUGE_LINE, _API_KEY_LINE],
     ids=["short", "huge-single-line", "secret-bearing"],
 )
 def test_lint_budget_exhaustion_is_scan_error_and_skips_secret_scan(

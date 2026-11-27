@@ -14,14 +14,14 @@ import pytest
 from claq.lib.core_utils import get_plugin_root
 from claq.mem import cmd_context, handoff
 from claq.mem.database import Database
-from claq.mem.models import Repo, Session, utc_now_iso
+from claq.mem.models import Session, utc_now_iso
 from claq.mem.settings import (
     CONTEXT_GLOBAL_CHAR_BUDGET,
     CONTEXT_HANDOFF_CHAR_BUDGET,
     CONTEXT_ITEM_CHAR_LIMIT,
 )
 
-from ._support import _repo_id, _run_cli, _seed
+from ._support import _repo_id, _repo_row, _run_cli, _seed
 
 _KEY = "sk-ant-" + "api03-" + "A" * 30
 _KEY_SPLIT_BY_FILLERS = (
@@ -395,7 +395,7 @@ class TestContext:
         """別リポジトリの引き継ぎは混ざらない。"""
         _repo_id(tmp_path)
         with Database(tmp_path / "mem.db") as db:
-            db.upsert_repo(Repo(id="other", identity_key="key-other", root_path="/tmp/other", remote_url=None, first_seen_at=utc_now_iso(), last_seen_at=utc_now_iso()))
+            db.upsert_repo(_repo_row("other", "key-other", "/tmp/other"))
         self._seed_session(tmp_path, "other", handoff="別リポジトリの続き")
 
         assert _inject(monkeypatch, tmp_path) == ""

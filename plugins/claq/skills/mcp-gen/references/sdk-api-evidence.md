@@ -61,8 +61,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 ```
 
 `FastMCP` は 2.x で `MCPServer` に改名された。
-`mcp/server/fastmcp.py` は**まだ存在する**ため、記憶で `FastMCP` と書いても import が通り起動もする。
-これが最も危険な失敗モード（壊れているのに動く）。
+`mcp/server/fastmcp.py` は**まだ存在する**ため、記憶で `FastMCP` と書いても import が通り起動もする（壊れているのに動く、最も危険な失敗モード）。
 
 ## `MCPServer.__init__` の主な引数（実測シグネチャ）
 
@@ -285,7 +284,7 @@ async def items_delete(
 ## エラー設計 — 素の例外はメッセージが伏せられる
 
 実測（`mcp` 2.1.1）。
-**ここを間違えると `isError` は立つのにモデルが何も学べない。**
+**ツール本体で投げるものを間違えると `isError` は立つのにモデルが何も学べない。**
 
 | ツール本体で投げるもの | ワイヤに出る `content` | モデルは直せるか |
 |---|---|---|
@@ -429,7 +428,7 @@ stdio で生 JSON-RPC を流すとき、**リクエストを書いた直後に s
 むしろ実績のあるサーバほど 1.x に固定されており、写経すると旧仕様が入る。
 2.x の実例として信頼できるのは SDK リポジトリの `examples/` のみ。
 
-そのうえで **`examples/` も上流のドキュメントより遅れている**。
+ただし **`examples/` も上流のドキュメントより遅れている**。
 次の 2 つは非推奨の API を今も使っている。
 
 - `examples/mcpserver/logging_and_progress.py`: `await ctx.info(...)`
